@@ -1,7 +1,7 @@
 import streamlit as st
 import plotly.express as px
 import statsmodels.api as sm
-from modules.data_validation import render_sidebar_filters
+
 
 if 'raw_data' not in st.session_state:
     st.warning("Please upload data on the main page.")
