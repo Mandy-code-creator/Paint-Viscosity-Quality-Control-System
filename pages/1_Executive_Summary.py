@@ -32,37 +32,42 @@ with col4:
 
 st.markdown("---")
 
-# --- 3. HEATMAP ANALYSIS ---
-st.subheader("🌡️ Process Sensitivity Heatmap (Temperature vs Humidity)")
+# --- 3. OPTIMIZED SENSITIVITY HEATMAP ---
+st.subheader("🌡️ Solvent Usage Efficiency Heatmap")
 
-# --- BẠN SỬA TÊN CỘT Ở ĐÂY ---
-temp_col = '溫度'  # Thay '溫度' bằng tên cột nhiệt độ thực tế trong dữ liệu của bạn
-hum_col = '濕度'   # Thay '濕度' bằng tên cột độ ẩm thực tế trong dữ liệu của bạn
+# 1. Định nghĩa các "thùng" (bins) để chia ma trận
+# Trục X: Tỷ lệ dung môi (Solvent Ratio %)
+# Trục Y: Độ nhớt ban đầu (Initial Viscosity - 黏度(秒))
+group_a['Solvent_Bin'] = pd.cut(group_a['Solvent_Ratio_Percent'], bins=10)
+group_a['Initial_V_Bin'] = pd.cut(group_a['黏度(秒)'], bins=10)
 
-col_f1, col_f2 = st.columns(2)
-with col_f1:
-    selected_resin = st.selectbox("Filter Heatmap by Resin", group_a['Resin'].unique())
-with col_f2:
-    selected_vendors = st.multiselect("Filter Heatmap by Vendor", group_a['Vendor'].unique(), default=group_a['Vendor'].unique())
+# 2. Tạo Pivot Table cho Heatmap (Giá trị là Sensitivity - Hiệu quả giảm nhớt)
+heatmap_data = group_a.groupby(['Initial_V_Bin', 'Solvent_Bin'])['Sensitivity'].mean().reset_index()
+pivot_table = heatmap_data.pivot(index='Initial_V_Bin', columns='Solvent_Bin', values='Sensitivity')
 
-filtered_data = group_a[(group_a['Resin'] == selected_resin) & (group_a['Vendor'].isin(selected_vendors))].copy()
-
-# Sử dụng biến temp_col và hum_col thay vì viết cứng 'Temperature'
-filtered_data['Temp_Bin'] = filtered_data[temp_col].round(0)
-filtered_data['Hum_Bin'] = filtered_data[hum_col].round(0)
-
-heatmap_data = filtered_data.groupby(['Hum_Bin', 'Temp_Bin'])['Sensitivity'].mean().reset_index()
-pivot_table = heatmap_data.pivot(index='Hum_Bin', columns='Temp_Bin', values='Sensitivity').sort_index(ascending=False)
-
+# 3. Vẽ Heatmap
 fig_heatmap = px.imshow(
     pivot_table,
     text_auto=".1f",
     aspect="auto",
-    color_continuous_scale='RdBu_r',
-    labels=dict(x="Temperature (°C)", y="Humidity (%)", color="Sensitivity"),
-    title=f"Avg Sensitivity: How environment affects solvent efficiency ({selected_resin})"
+    color_continuous_scale='RdYlGn', # Màu sắc phản ánh độ hiệu quả
+    labels=dict(x="Solvent Ratio (%)", y="Initial Viscosity (s)", color="Sensitivity"),
+    title="Optimal Solvent Usage: Efficiency based on Initial Viscosity"
 )
+
+fig_heatmap.update_layout(
+    xaxis_title="Solvent Ratio (%)",
+    yaxis_title="Initial Viscosity (s)"
+)
+
 st.plotly_chart(fig_heatmap, use_container_width=True)
+
+st.caption("""
+**Heatmap Insights:**
+* **X-Axis:** Percentage of solvent added relative to paint weight.
+* **Y-Axis:** Initial viscosity before adjustment.
+* **Cell Color:** Higher Sensitivity (Green) means the solvent is performing at its peak efficiency.
+""")
 
 st.markdown("---")
 
