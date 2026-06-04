@@ -1,135 +1,150 @@
 import streamlit as st
 import plotly.express as px
 import pandas as pd
-from data_processing import render_sidebar_filters
 
-# =====================
+# =========================
 # CHECK DATA
-# =====================
+# =========================
 if 'raw_data' not in st.session_state:
-    st.warning("Please upload data on the main page.")
+    st.warning("Please upload data on main page.")
     st.stop()
 
-df = render_sidebar_filters(st.session_state['raw_data'])
+df = st.session_state['raw_data']
 
-st.header("Executive Dashboard & Trend Analysis")
+st.header("Process Improvement Analysis (No Spec Required)")
 
 if df.empty:
-    st.info("No data available for the selected filters.")
+    st.info("No data available.")
     st.stop()
 
-# =====================
-# SUMMARY TABLE
-# =====================
-st.subheader("Paint Code Performance Summary")
+# =========================
+# PREP DATA
+# =========================
+df = df.copy()
+df['Mix_Date'] = pd.to_datetime(df['Mix_Date'])
+df = df.sort_values('Mix_Date')
 
-summary_df = df.groupby(
-    ['Color_Group', 'Resin_Type', 'Supplier', 'Paint_Code_Str']
-).agg(
-    Total_Mixes=('Mix_ID', 'nunique'),
-    Avg_Before=('Viscosity_Before', 'mean'),
-    Avg_After=('Viscosity_After', 'mean'),
-    Avg_Reduction=('Reduction', 'mean')
-).reset_index().round(1)
+# =========================
+# KPI - SHIFT OVERALL
+# =========================
+df_before = df.groupby('Mix_ID')['Viscosity_Before'].mean()
+df_after = df.groupby('Mix_ID')['Viscosity_After'].mean()
 
-st.dataframe(summary_df, use_container_width=True)
-st.divider()
+overall_before = df['Viscosity_Before'].mean()
+overall_after = df['Viscosity_After'].mean()
 
-# =====================
-# KPI
-# =====================
-df_adjusted = df[df['Adjustment_Status'] == 'Adjusted']
-df_pass = df[df['Adjustment_Status'] == 'Pass (No Thinner)']
+delta = overall_after - overall_before
 
-first_time_right_pct = (len(df_pass) / len(df)) * 100 if len(df) > 0 else 0
-
-c1, c2, c3, c4 = st.columns(4)
-
-# ✅ FIXED (NO len on nunique)
-c1.metric("Total Mixes", df['Mix_ID'].nunique())
-c2.metric("First Time Right (%)", f"{first_time_right_pct:.1f}%")
-c3.metric("Avg Viscosity Before", f"{df['Viscosity_Before'].mean():.1f}")
-c4.metric("Total Thinner", f"{df_adjusted['Thinner_Added'].sum():.1f}")
+c1, c2, c3 = st.columns(3)
+c1.metric("Avg Before", f"{overall_before:.1f} s")
+c2.metric("Avg After", f"{overall_after:.1f} s")
+c3.metric("Δ Change (After - Before)", f"{delta:.1f} s")
 
 st.divider()
 
-# =====================
-# TREND CHART (SEPARATE PLOTS)
-# =====================
-st.subheader("Viscosity Trend by Paint Code")
+# =========================
+# 1. SHIFT TREND OVER TIME
+# =========================
+st.subheader("1. Process Shift Over Time")
 
-if not df_adjusted.empty:
+trend_df = df.groupby('Mix_Date').agg(
+    Before=('Viscosity_Before', 'mean'),
+    After=('Viscosity_After', 'mean')
+).reset_index()
 
-    df_adjusted['Mix_Date'] = pd.to_datetime(df_adjusted['Mix_Date'])
-    df_adjusted = df_adjusted.sort_values('Mix_Date')
+fig1 = px.line(
+    trend_df,
+    x='Mix_Date',
+    y=['Before', 'After'],
+    markers=True,
+    title="Viscosity Shift (Before vs After)"
+)
 
-    resin_types = df_adjusted['Resin_Type'].dropna().unique()
+fig1.update_layout(
+    plot_bgcolor='white',
+    paper_bgcolor='white',
+    margin=dict(t=60, b=40, l=60, r=20),
+    title_x=0.5
+)
 
-    for resin in resin_types:
+fig1.update_xaxes(
+    tickformat="%Y-%m-%d",
+    showgrid=True,
+    gridcolor="lightgray"
+)
 
-        st.markdown(f"### Resin: {resin}")
+fig1.update_yaxes(
+    showgrid=True,
+    gridcolor="lightgray"
+)
 
-        df_resin = df_adjusted[df_adjusted['Resin_Type'] == resin]
+st.plotly_chart(fig1, use_container_width=True)
 
-        paint_codes = df_resin['Paint_Code_Str'].unique()
+# =========================
+# 2. IMPROVEMENT (Δ PER BATCH)
+# =========================
+st.subheader("2. Improvement per Batch (After - Before)")
 
-        for pc in paint_codes:
+improve_df = df.groupby('Mix_ID').agg(
+    Before=('Viscosity_Before', 'mean'),
+    After=('Viscosity_After', 'mean')
+).reset_index()
 
-            df_pc = df_resin[df_resin['Paint_Code_Str'] == pc]
+improve_df['Delta'] = improve_df['After'] - improve_df['Before']
 
-            df_melt = df_pc.melt(
-                id_vars=['Mix_Date', 'Supplier'],
-                value_vars=['Viscosity_Before', 'Viscosity_After'],
-                var_name='Stage',
-                value_name='Viscosity'
-            )
+fig2 = px.bar(
+    improve_df,
+    x='Mix_ID',
+    y='Delta',
+    title="Viscosity Change per Batch (Negative = Improvement)",
+    color='Delta',
+    color_continuous_scale='RdYlGn_r'
+)
 
-            df_melt['Stage'] = df_melt['Stage'].replace({
-                'Viscosity_Before': 'Before',
-                'Viscosity_After': 'After'
-            })
+fig2.update_layout(
+    plot_bgcolor='white',
+    paper_bgcolor='white',
+    margin=dict(t=60, b=40, l=60, r=20),
+    title_x=0.5
+)
 
-            fig = px.line(
-                df_melt,
-                x='Mix_Date',
-                y='Viscosity',
-                color='Stage',
-                symbol='Supplier',
-                markers=True,
-                color_discrete_map={
-                    'Before': '#FF4B4B',
-                    'After': '#00BFFF'
-                },
-                title=f"{pc}"
-            )
+fig2.update_xaxes(showgrid=True, gridcolor="lightgray")
+fig2.update_yaxes(showgrid=True, gridcolor="lightgray")
 
-            fig.update_layout(
-                plot_bgcolor='white',
-                paper_bgcolor='white',
-                margin=dict(t=50, b=40, l=60, r=20),
-                title_x=0.5
-            )
+st.plotly_chart(fig2, use_container_width=True)
 
-            fig.update_xaxes(
-                tickformat="%Y-%m-%d",
-                showgrid=True,
-                gridcolor="lightgray",
-                showline=True,
-                linecolor="black",
-                mirror=True
-            )
+# =========================
+# 3. DISTRIBUTION SHIFT
+# =========================
+st.subheader("3. Distribution Shift (Process Stability)")
 
-            fig.update_yaxes(
-                showgrid=True,
-                gridcolor="lightgray",
-                showline=True,
-                linecolor="black",
-                mirror=True
-            )
+dist_df = df.melt(
+    id_vars=['Mix_ID'],
+    value_vars=['Viscosity_Before', 'Viscosity_After'],
+    var_name='Stage',
+    value_name='Viscosity'
+)
 
-            fig.update_traces(line=dict(width=2), marker=dict(size=6))
+dist_df['Stage'] = dist_df['Stage'].replace({
+    'Viscosity_Before': 'Before',
+    'Viscosity_After': 'After'
+})
 
-            st.plotly_chart(fig, use_container_width=True)
+fig3 = px.box(
+    dist_df,
+    x='Stage',
+    y='Viscosity',
+    color='Stage',
+    title="Before vs After Distribution"
+)
 
-else:
-    st.info("No adjusted data available.")
+fig3.update_layout(
+    plot_bgcolor='white',
+    paper_bgcolor='white',
+    margin=dict(t=60, b=40, l=60, r=20),
+    title_x=0.5
+)
+
+fig3.update_yaxes(showgrid=True, gridcolor="lightgray")
+
+st.plotly_chart(fig3, use_container_width=True)
