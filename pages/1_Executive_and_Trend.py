@@ -66,19 +66,30 @@ st.dataframe(table_df, use_container_width=True)
 st.divider()
 
 # =========================
-st.subheader("2. Process Shift Over Time (By Resin Type)")
+st.subheader("2. Process Shift Over Time (Fully Separated)")
+
+df['Mix_Date'] = pd.to_datetime(df['Mix_Date'])
 
 resin_list = df['Resin_Type'].dropna().unique()
 
-tabs = st.tabs([f"Resin: {r}" for r in resin_list])
+for resin in resin_list:
 
-for i, resin in enumerate(resin_list):
-    with tabs[i]:
+    st.markdown(f"## 🔹 Resin: {resin}")
 
-        df_r = df[df['Resin_Type'] == resin].copy()
-        df_r['Mix_Date'] = pd.to_datetime(df_r['Mix_Date'])
+    df_r = df[df['Resin_Type'] == resin]
 
-        trend_df = df_r.groupby('Mix_Date').agg(
+    color_list = df_r['Color_Group'].dropna().unique()
+
+    for color in color_list:
+
+        st.markdown(f"### 🎨 Color Group: {color}")
+
+        df_rc = df_r[df_r['Color_Group'] == color].copy()
+
+        if df_rc.empty:
+            continue
+
+        trend_df = df_rc.groupby('Mix_Date').agg(
             Before=('Viscosity_Before', 'mean'),
             After=('Viscosity_After', 'mean')
         ).reset_index()
@@ -88,7 +99,7 @@ for i, resin in enumerate(resin_list):
             x='Mix_Date',
             y=['Before', 'After'],
             markers=True,
-            title=f"Viscosity Shift - Resin {resin}"
+            title=f"{resin} - {color} (Before vs After)"
         )
 
         fig.update_layout(
