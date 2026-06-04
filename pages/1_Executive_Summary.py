@@ -82,44 +82,37 @@ for col in date_candidates:
         date_column = col
         break
 
-# --- 6. PRODUCTION ACTIVITY CHARTS (SEPARATED BY RESIN) ---
-st.subheader("📈 Production Activity Over Time by Resin")
+# --- 6. VISCOSITY TREND CHARTS (SEPARATED BY RESIN) ---
+st.subheader("📈 Viscosity Trend Over Time by Resin")
 
 if date_column is None:
-    st.error("❌ System could not detect a valid Date column. Please verify your Excel file structure.")
+    st.error("❌ System could not detect a valid Date column.")
 else:
-    # Group data by Date and Resin
-    daily_resin_activity = group_a.groupby([date_column, 'Resin']).size().reset_index(name='Number of Events')
+    # Group data by Date and Resin, calculate the MEAN of Viscosity
+    # Chúng ta sử dụng '黏度(秒)' để xem độ nhớt gốc (Initial Viscosity)
+    daily_viscosity_trend = group_a.groupby([date_column, 'Resin'])['黏度(秒)'].mean().reset_index()
     
-    # Get a sorted list of unique resins
-    unique_resins = sorted([r for r in daily_resin_activity['Resin'].unique() if pd.notna(r)])
-
-    # Create a grid layout (2 columns) for better space utilization
+    unique_resins = sorted([r for r in daily_viscosity_trend['Resin'].unique() if pd.notna(r)])
     cols = st.columns(2)
 
-    # Loop through each resin and create a separate chart
     for i, resin in enumerate(unique_resins):
-        # Filter data for the specific resin
-        resin_data = daily_resin_activity[daily_resin_activity['Resin'] == resin]
+        resin_data = daily_viscosity_trend[daily_viscosity_trend['Resin'] == resin]
 
-        # Generate individual chart
-        fig_activity = px.line(
+        fig_viscosity = px.line(
             resin_data,
             x=date_column,
-            y='Number of Events',
+            y='黏度(秒)',
             markers=True,
-            title=f"Resin Type: {resin}",
+            title=f"Average Initial Viscosity: {resin}",
             color_discrete_sequence=['deepskyblue'] 
         )
 
-        # Optimize chart layout
-        fig_activity.update_layout(
+        fig_viscosity.update_layout(
             xaxis_title="Date",
-            yaxis_title="Number of Events",
+            yaxis_title="Viscosity (s)",
             plot_bgcolor='rgba(0,0,0,0)',   
             hovermode="x unified",          
             margin=dict(l=20, r=20, t=40, b=20)
         )
 
-        # Assign to alternating columns (Left/Right)
-        cols[i % 2].plotly_chart(fig_activity, use_container_width=True)
+        cols[i % 2].plotly_chart(fig_viscosity, use_container_width=True)
