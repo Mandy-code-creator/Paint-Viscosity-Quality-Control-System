@@ -14,30 +14,12 @@ rejected_data = st.session_state['rejected_data'].copy()
 st.title("📊 Executive Summary")
 st.markdown("---")
 
-# --- 3. PHÂN TÍCH HIỆU QUẢ THEO NHỰA, NHÀ CUNG CẤP & ĐỊNH MỨC DUNG MÔI ---
+# --- 3. UPDATED RESIN & VENDOR PERFORMANCE ANALYSIS ---
 st.subheader("💡 Resin & Vendor Performance Analysis")
 
-# Tính toán tỷ lệ dung môi cho từng mẻ
-group_a['Solvent_Ratio_Percent'] = (group_a['添加重量'] / group_a['塗料重量']) * 100
+# ... (đoạn code tính toán dataframe của bạn ở đây) ...
 
-# Nhóm dữ liệu theo Resin VÀ Vendor
-detailed_summary = group_a.groupby(['Resin', 'Vendor']).agg({
-    '塗料批號': 'nunique',                # Tổng số mẻ
-    '塗料重量': 'sum',                    # Tổng trọng lượng sơn
-    '添加重量': 'sum',                    # Tổng trọng lượng dung môi
-    '黏度(秒)': 'mean',                   # Độ nhớt gốc
-    '黏度(秒)_1': 'mean',                 # Độ nhớt sau pha
-    'Solvent_Ratio_Percent': 'mean'       # Tỷ lệ dung môi (%)
-}).rename(columns={
-    '塗料批號': 'Batches',
-    '塗料重量': 'Total Paint (kg)',
-    '添加重量': 'Total Solvent (kg)',
-    '黏度(秒)': 'Initial V (s)',
-    '黏度(秒)_1': 'Final V (s)',
-    'Solvent_Ratio_Percent': 'Avg Solvent %'
-})
-
-# Hiển thị bảng phân tích chi tiết
+# Display the dataframe
 st.dataframe(detailed_summary.style.format({
     'Total Paint (kg)': '{:,.0f}',
     'Total Solvent (kg)': '{:,.0f}',
@@ -46,10 +28,12 @@ st.dataframe(detailed_summary.style.format({
     'Avg Solvent %': '{:.2f} %'
 }), use_container_width=True)
 
-st.markdown("""
-* **Total Batches:** Số lượng mẻ sơn hợp lệ.
-* **Total Paint / Solvent (kg):** Tổng khối lượng sơn và dung môi đã tiêu thụ.
-* **Avg Solvent %:** Tỷ lệ trung bình của dung môi so với sơn (Cảnh báo: Nếu tỷ lệ này vượt ngưỡng chuẩn cho từng loại nhựa, cần kiểm tra lại quy trình).
+# --- CHỖ SỬA: Đưa chú thích vào đây và dùng tiếng Anh ---
+st.caption("""
+**Metrics Definition:**
+* **Batches:** Number of valid mix events.
+* **Total Paint / Solvent (kg):** Aggregate consumption of raw paint and solvent.
+* **Avg Solvent %:** Average solvent-to-paint ratio. *Note: If this value exceeds the defined threshold for a specific resin, please review the adjustment process.*
 """)
 st.markdown("---")
 
