@@ -4,7 +4,7 @@ import pandas as pd
 from data_processing import render_sidebar_filters
 
 # =========================
-# CHECK INPUT DATA
+# CHECK DATA
 # =========================
 if 'raw_data' not in st.session_state:
     st.warning("Please upload data on the main page.")
@@ -36,7 +36,7 @@ st.dataframe(summary_df, use_container_width=True)
 st.divider()
 
 # =========================
-# KPI SECTION
+# KPI
 # =========================
 df_adjusted = df[df['Adjustment_Status'] == 'Adjusted']
 df_pass = df[df['Adjustment_Status'] == 'Pass (No Thinner)']
@@ -67,14 +67,9 @@ if not df_adjusted.empty:
 
                 df_resin = df_adjusted[df_adjusted['Resin_Type'] == resin].copy()
 
-                # =========================
-                # FIX DATE (REMOVE TIME)
-                # =========================
+                # datetime chuẩn
                 df_resin['Mix_Date'] = pd.to_datetime(df_resin['Mix_Date'])
                 df_resin = df_resin.sort_values('Mix_Date')
-
-                # CHỈ HIỂN THỊ NGÀY
-                df_resin['Mix_Date'] = df_resin['Mix_Date'].dt.date
 
                 df_melt = df_resin.melt(
                     id_vars=['Mix_Date', 'Paint_Code_Str', 'Supplier'],
@@ -88,9 +83,6 @@ if not df_adjusted.empty:
                     'Viscosity_After': 'After'
                 })
 
-                # =========================
-                # PLOT
-                # =========================
                 fig = px.line(
                     df_melt,
                     x='Mix_Date',
@@ -98,20 +90,36 @@ if not df_adjusted.empty:
                     color='Stage',
                     symbol='Supplier',
                     facet_col='Paint_Code_Str',
-                    facet_col_wrap=1,   # 1 chart per row
+                    facet_col_wrap=1,   # mỗi hàng 1 chart
                     markers=True,
-                    color_discrete_map={
-                        'Before': '#FF4B4B',
-                        'After': '#00BFFF'
-                    }
+                    color_discrete_map={'Before': '#FF4B4B', 'After': '#00BFFF'}
                 )
 
                 num_rows = len(df_resin['Paint_Code_Str'].unique())
 
                 fig.update_layout(
                     plot_bgcolor='white',
+                    paper_bgcolor='white',
+
+                    # 👉 KHUNG BAO NGOÀI CHART
+                    margin=dict(t=120, b=60, l=70, r=30),
+
                     height=450 * num_rows,
-                    margin=dict(t=120, b=50, l=60, r=20),
+
+                    # BORDER rõ ràng
+                    shapes=[
+                        dict(
+                            type="rect",
+                            xref="paper",
+                            yref="paper",
+                            x0=0,
+                            y0=0,
+                            x1=1,
+                            y1=1,
+                            line=dict(color="black", width=1)
+                        )
+                    ],
+
                     title={
                         'text': f"Viscosity Trend by Paint Code (Resin: {resin})",
                         'x': 0.5,
@@ -120,7 +128,7 @@ if not df_adjusted.empty:
                 )
 
                 # =========================
-                # CLEAN FACET LABELS
+                # CLEAN LABEL
                 # =========================
                 fig.for_each_annotation(lambda a: a.update(
                     text=a.text.split("=")[-1],
@@ -128,17 +136,30 @@ if not df_adjusted.empty:
                 ))
 
                 # =========================
-                # X AXIS FORMAT (DATE ONLY)
+                # TRỤC X CHỈ HIỂN THỊ NGÀY
                 # =========================
                 fig.update_xaxes(
                     tickformat="%Y-%m-%d",
                     showgrid=True,
-                    matches=None
+                    gridcolor="lightgray",
+                    gridwidth=1,
+                    showline=True,
+                    linecolor="black",
+                    linewidth=1,
+                    mirror=True
                 )
 
+                # =========================
+                # TRỤC Y + GRID RÕ RÀNG
+                # =========================
                 fig.update_yaxes(
                     showgrid=True,
-                    gridcolor='lightgray'
+                    gridcolor="lightgray",
+                    gridwidth=1,
+                    showline=True,
+                    linecolor="black",
+                    linewidth=1,
+                    mirror=True
                 )
 
                 fig.update_traces(
