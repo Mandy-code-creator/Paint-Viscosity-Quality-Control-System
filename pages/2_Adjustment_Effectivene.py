@@ -1,69 +1,84 @@
 import streamlit as st
+import pandas as pd
 import plotly.express as px
-import statsmodels.api as sm
 
+# --- 1. CHỐT CHẶN BẢO VỆ (GUARDRAIL) ---
+# Kiểm tra xem dữ liệu đã được nạp ở trang chủ chưa
+if 'raw_data_loaded' not in st.session_state or not st.session_state['raw_data_loaded']:
+    st.warning("⚠️ Please upload data on the main page (app) first.")
+    st.stop() # Dừng chạy các dòng lệnh bên dưới nếu chưa có file
 
-if 'raw_data' not in st.session_state:
-    st.warning("Please upload data on the main page.")
+# --- 2. RÚT DỮ LIỆU TỪ BỘ NHỚ ---
+group_a = st.session_state['group_a_data']
+
+# --- 3. TẠO BỘ LỌC SIDEBAR ---
+st.sidebar.header("🔍 Bộ Lọc Dữ Liệu")
+
+# Lọc bỏ 'Unknown' và 'General' khỏi danh sách chọn để UI sạch đẹp
+vendors = sorted([v for v in group_a['Vendor'].unique() if v != 'Unknown'])
+resins = sorted([r for r in group_a['Resin'].unique() if r != 'Unknown'])
+features = sorted([f for f in group_a['Feature'].unique() if f not in ['Unknown', 'General']])
+
+selected_vendor = st.sidebar.selectbox("Nhà cung cấp (Vendor)", ["Tất cả"] + vendors)
+selected_resin = st.sidebar.selectbox("Loại nhựa (Resin)", ["Tất cả"] + resins)
+selected_feature = st.sidebar.selectbox("Mục đích sử dụng", ["Tất cả"] + features)
+
+# --- 4. ÁP DỤNG BỘ LỌC DỮ LIỆU ---
+filtered_df = group_a.copy()
+
+if selected_vendor != "Tất cả":
+    filtered_df = filtered_df[filtered_df['Vendor'] == selected_vendor]
+if selected_resin != "Tất cả":
+    filtered_df = filtered_df[filtered_df['Resin'] == selected_resin]
+if selected_feature != "Tất cả":
+    filtered_df = filtered_df[filtered_df['Feature'] == selected_feature]
+
+# --- 5. GIAO DIỆN CHÍNH (MAIN UI) ---
+st.title("Hiệu quả Điều chỉnh Dung môi")
+
+# Hiển thị thông báo nếu lọc quá sâu không còn dữ liệu
+if filtered_df.empty:
+    st.info("Không có dữ liệu phù hợp với bộ lọc hiện tại. Vui lòng điều chỉnh lại Sidebar.")
     st.stop()
 
-# Apply Global Sidebar Filters
-df = render_sidebar_filters(st.session_state['raw_data'])
-
-st.header("Adjustment Effectiveness")
-
-if df.empty:
-    st.info("No data available for the selected filters.")
-    st.stop()
-
+# Hiển thị KPI cơ bản
 col1, col2 = st.columns(2)
 with col1:
-    st.subheader("Reduction Distribution")
-    fig_hist = px.histogram(df, x='Reduction', nbins=30, marginal="box",
-                            labels={'Reduction': 'Viscosity Reduction (sec)'})
-    st.plotly_chart(fig_hist, use_container_width=True)
-
+    avg_solvent = (filtered_df['Solvent_Ratio'].mean() * 100)
+    st.metric("Trung bình Tỷ lệ Dung môi", f"{avg_solvent:.2f} %")
 with col2:
-    st.subheader("Reduction by Resin Type")
-    fig_box = px.box(df, x='Resin_Type', y='Reduction', color='Resin_Type')
-    st.plotly_chart(fig_box, use_container_width=True)
+    avg_delta_v = filtered_df['Delta_V'].mean()
+    st.metric("Trung bình Độ giảm Nhớt (\u0394V)", f"{avg_delta_v:.2f} s")
 
-st.divider()
+st.markdown("---")
 
-# Thinner Impact
-st.subheader("Thinner Impact & Theoretical Value")
+# --- 6. BIỂU ĐỒ TRỰC QUAN HÓA ---
+st.subheader("Top 5 Resins by Solvent Consumption")
 
-# Khắc phục lỗi NaN: Loại bỏ các dòng thiếu dữ liệu Paint_Weight trước khi vẽ biểu đồ bong bóng
-df_scatter = df.dropna(subset=['Thinner_Added', 'Reduction', 'Paint_Weight']).copy()
+# Tính toán dữ liệu cho biểu đồ
+resin_consumption = filtered_df.groupby('Resin')['Solvent_Ratio'].mean().reset_index()
+resin_consumption['Solvent_Ratio'] = resin_consumption['Solvent_Ratio'] * 100 # Đổi ra %
+# Lấy Top 5 cao nhất
+resin_consumption = resin_consumption.sort_values(by='Solvent_Ratio', ascending=False).head(5)
 
-if not df_scatter.empty:
-    fig_scatter = px.scatter(df_scatter, x='Thinner_Added', y='Reduction', color='Resin_Type', size='Paint_Weight',
-                             hover_data=['Batch_Lot', 'Drum_No', 'Supplier'],
-                             labels={'Thinner_Added': 'Thinner Added (kg)', 'Reduction': 'Viscosity Reduction (sec)', 'Paint_Weight': 'Paint Weight (kg)'},
-                             title="Correlation: Thinner vs Viscosity Drop")
-    st.plotly_chart(fig_scatter, use_container_width=True)
-else:
-    st.info("Not enough complete data (missing Paint Weight) to draw the scatter plot.")
+# Vẽ biểu đồ Bar Chart bằng Plotly
+fig = px.bar(
+    resin_consumption, 
+    x='Resin', 
+    y='Solvent_Ratio',
+    labels={'Solvent_Ratio': 'Avg Solvent Ratio (%)', 'Resin': 'Resin'},
+    text_auto='.2f',
+    # Sử dụng tông màu Deep Sky Blue theo chuẩn hệ thống
+    color_discrete_sequence=['deepskyblue'] 
+)
 
-# Regression Model
-st.write("#### Regression Model (Theoretical Value)")
-try:
-    # Mô hình OLS chỉ cần Thinner_Added và Reduction
-    df_model = df.dropna(subset=['Thinner_Added', 'Reduction'])
-    
-    if df_model['Thinner_Added'].nunique() > 1:
-        X = df_model['Thinner_Added']
-        y = df_model['Reduction']
-        X = sm.add_constant(X)
-        model = sm.OLS(y, X).fit()
-        
-        theoretical_val = model.params['Thinner_Added']
-        r_squared = model.rsquared
-        
-        c1, c2 = st.columns(2)
-        c1.metric("Theoretical Value (sec/kg)", f"{theoretical_val:.2f}")
-        c2.metric("R-Squared (Correlation Strength)", f"{r_squared:.2f}")
-    else:
-        st.write("Not enough variance in Thinner to compute the theoretical model.")
-except Exception as e:
-    st.error("Could not compute regression model.")
+# Tối ưu giao diện biểu đồ
+fig.update_layout(
+    xaxis_title="Resin",
+    yaxis_title="Avg Solvent Ratio (%)",
+    plot_bgcolor='rgba(0,0,0,0)', # Nền trong suốt
+    margin=dict(l=20, r=20, t=30, b=20)
+)
+
+# Hiển thị biểu đồ lên Streamlit
+st.plotly_chart(fig, use_container_width=True)
