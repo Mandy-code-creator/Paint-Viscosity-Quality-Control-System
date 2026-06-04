@@ -43,9 +43,9 @@ c3.metric("Δ Change", f"{delta:.1f} s")
 st.divider()
 
 # =========================
-# 📊 TABLE
+# TABLE
 # =========================
-st.subheader("1. Group Performance Table (Color / Resin / Supplier / Paint Code)")
+st.subheader("1. Group Performance Table")
 
 table_df = df.groupby(
     ['Color_Group', 'Resin_Type', 'Supplier', 'Paint_Code_Str']
@@ -62,7 +62,7 @@ st.dataframe(table_df.round(2), use_container_width=True)
 st.divider()
 
 # =========================
-# 2. PROCESS SHIFT (3 GROUPS)
+# 2. PROCESS SHIFT (CLEAN 3-GROUP SPLIT)
 # =========================
 st.subheader("2. Process Shift Over Time (Resin → Paint Code)")
 
@@ -79,7 +79,7 @@ for resin in resin_list:
     paint_list = df_r['Paint_Code_Str'].dropna().unique()
 
     # =========================
-    # GROUP 1: NORMAL CHANGE
+    # 🟢 GROUP 1: NORMAL CHANGE
     # =========================
     st.markdown("### 🟢 Normal Change (Before ≠ After)")
 
@@ -120,7 +120,7 @@ for resin in resin_list:
         st.plotly_chart(fig, use_container_width=True)
 
     # =========================
-    # GROUP 2: NO CHANGE
+    # ⚪ GROUP 2: NO CHANGE (PROCESS ISSUE)
     # =========================
     st.markdown("### ⚪ No Change (Before = After)")
 
@@ -134,10 +134,10 @@ for resin in resin_list:
 
         st.dataframe(no_change_summary, use_container_width=True)
 
-        st.info("No change = likely no thinner added or process not executed.")
+        st.info("No Change = process executed but no viscosity impact (possible no thinner added).")
 
     # =========================
-    # GROUP 3: MISSING DATA
+    # 🔴 GROUP 3: MISSING DATA (DATA ISSUE)
     # =========================
     st.markdown("### 🔴 Missing Data (黏度(秒)_1 = NaN)")
 
@@ -153,4 +153,4 @@ for resin in resin_list:
 
             st.dataframe(miss_summary, use_container_width=True)
 
-            st.warning("Missing viscosity data → possible measurement or input issue.")
+            st.warning("Missing data = measurement/system issue, not process behavior.")
