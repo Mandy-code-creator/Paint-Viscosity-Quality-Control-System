@@ -41,33 +41,36 @@ c4.metric("Total Thinner Added", f"{df_adjusted['Thinner_Added'].sum():.1f} kg")
 
 st.divider()
 
-# --- Biểu đồ xu hướng NÂNG CẤP ---
+# --- Biểu đồ xu hướng ---
 st.subheader("Viscosity Trend by Paint Code")
 
 if not df_adjusted.empty:
     resin_types = sorted(df_adjusted['Resin_Type'].dropna().unique())
-    
+
     if len(resin_types) > 0:
         tabs = st.tabs([f"Resin: {r}" for r in resin_types])
-        
+
         for i, resin in enumerate(resin_types):
             with tabs[i]:
                 df_resin = df_adjusted[df_adjusted['Resin_Type'] == resin].copy()
+
+                # FIX TIME
                 df_resin['Mix_Date'] = pd.to_datetime(df_resin['Mix_Date'])
-                
+                df_resin = df_resin.sort_values('Mix_Date')
+
                 df_melt = df_resin.melt(
                     id_vars=['Mix_Date', 'Paint_Code_Str', 'Supplier'],
                     value_vars=['Viscosity_Before', 'Viscosity_After'],
                     var_name='Stage',
                     value_name='Viscosity'
                 )
-                
+
                 df_melt['Stage'] = df_melt['Stage'].replace({
                     'Viscosity_Before': 'Before',
                     'Viscosity_After': 'After'
                 })
-                
-                # Vẽ biểu đồ lưới (Facet Grid)
+
+                # VẼ CHART
                 fig = px.line(
                     df_melt,
                     x='Mix_Date',
@@ -75,14 +78,13 @@ if not df_adjusted.empty:
                     color='Stage',
                     symbol='Supplier',
                     facet_col='Paint_Code_Str',
-                    facet_col_wrap=3,
+                    facet_col_wrap=1,   # ✅ FIX QUAN TRỌNG: mỗi hàng 1 chart
                     markers=True,
                     color_discrete_map={'Before': '#FF4B4B', 'After': '#00BFFF'}
                 )
-                
-                # --- FIX: bỏ vertical_spacing (Plotly Express không hỗ trợ) ---
-                num_rows = (len(df_resin['Paint_Code_Str'].unique()) // 3 + 1)
-                
+
+                num_rows = len(df_resin['Paint_Code_Str'].unique())
+
                 fig.update_layout(
                     plot_bgcolor='white',
                     height=450 * num_rows,
@@ -96,17 +98,16 @@ if not df_adjusted.empty:
                     }
                 )
 
-                # annotation fix nhẹ (bỏ weight vì Plotly không support)
+                # format facet title
                 fig.for_each_annotation(lambda a: a.update(
                     text=a.text.split("=")[-1],
                     yshift=40,
                     font=dict(size=14, color="black")
                 ))
-                
+
                 fig.update_xaxes(matches=None, showticklabels=True)
                 fig.update_traces(line=dict(width=2), marker=dict(size=7))
-                
-                # khung lưới
+
                 fig.update_xaxes(
                     showline=True,
                     linecolor='black',
@@ -115,7 +116,7 @@ if not df_adjusted.empty:
                     showgrid=True,
                     gridcolor='lightgray'
                 )
-                
+
                 fig.update_yaxes(
                     showline=True,
                     linecolor='black',
@@ -124,9 +125,11 @@ if not df_adjusted.empty:
                     showgrid=True,
                     gridcolor='lightgray'
                 )
-                
+
                 st.plotly_chart(fig, use_container_width=True)
+
     else:
         st.info("No data for current resin.")
+
 else:
     st.info("No adjusted data available.")
