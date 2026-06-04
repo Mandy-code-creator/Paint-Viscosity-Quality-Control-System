@@ -3,6 +3,7 @@ import plotly.express as px
 import pandas as pd
 from data_processing import render_sidebar_filters
 
+# Kiểm tra dữ liệu đầu vào
 if 'raw_data' not in st.session_state:
     st.warning("Please upload data on the main page.")
     st.stop()
@@ -15,7 +16,7 @@ if df.empty:
     st.info("No data available for the selected filters.")
     st.stop()
 
-# Bảng phân tích chi tiết Trước/Sau theo Mã Sơn
+# --- Bảng phân tích chi tiết Trước/Sau theo Mã Sơn ---
 st.subheader("Paint Code Performance Summary")
 summary_df = df.groupby(['Color_Group', 'Resin_Type', 'Supplier', 'Paint_Code_Str']).agg(
     Total_Mixes=('Mix_ID', 'nunique'),
@@ -25,14 +26,13 @@ summary_df = df.groupby(['Color_Group', 'Resin_Type', 'Supplier', 'Paint_Code_St
 ).reset_index().round(1)
 
 st.dataframe(summary_df, use_container_width=True)
-
 st.divider()
 
+# --- KPIs ---
 df_adjusted = df[df['Adjustment_Status'] == 'Adjusted']
 df_pass = df[df['Adjustment_Status'] == 'Pass (No Thinner)']
 first_time_right_pct = (len(df_pass) / len(df)) * 100 if len(df) > 0 else 0
 
-# KPIs
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Total Paint Mixes", len(df['Mix_ID'].unique()))
 c2.metric("First-Time Right (%)", f"{first_time_right_pct:.1f}%")
@@ -41,9 +41,8 @@ c4.metric("Total Thinner Added", f"{df_adjusted['Thinner_Added'].sum():.1f} kg")
 
 st.divider()
 
-# --- BIỂU ĐỒ NÂNG CẤP: FACET GRID (Tách riêng mỗi Paint Code 1 biểu đồ) ---
+# --- Biểu đồ xu hướng NÂNG CẤP ---
 st.subheader("Viscosity Trend by Paint Code")
-st.markdown("Each Paint Code is plotted individually to eliminate overlapping lines.")
 
 if not df_adjusted.empty:
     resin_types = sorted(df_adjusted['Resin_Type'].dropna().unique())
@@ -56,7 +55,6 @@ if not df_adjusted.empty:
                 df_resin = df_adjusted[df_adjusted['Resin_Type'] == resin].copy()
                 df_resin['Mix_Date'] = pd.to_datetime(df_resin['Mix_Date'])
                 
-                # Melt để có 2 cột Viscosity và Measurement_Stage
                 df_melt = df_resin.melt(
                     id_vars=['Mix_Date', 'Paint_Code_Str', 'Supplier'],
                     value_vars=['Viscosity_Before', 'Viscosity_After'],
@@ -64,7 +62,7 @@ if not df_adjusted.empty:
                 )
                 df_melt['Stage'] = df_melt['Stage'].replace({'Viscosity_Before': 'Before', 'Viscosity_After': 'After'})
                 
-                # Vẽ biểu đồ lưới (Facet Grid)
+                # Tạo biểu đồ lưới
                 fig = px.line(
                     df_melt, x='Mix_Date', y='Viscosity',
                     color='Stage',
@@ -75,42 +73,32 @@ if not df_adjusted.empty:
                     color_discrete_map={'Before': '#FF4B4B', 'After': '#00BFFF'}
                 )
                 
-                # --- NÂNG CẤP: DỊCH CHUYỂN NHÃN MÃ SƠN LÊN CAO ---
+                # Tinh chỉnh tiêu đề mã sơn
                 fig.for_each_annotation(lambda a: a.update(
                     text=a.text.split("=")[-1],
-                    yshift=40,  # Đẩy nhãn cao hơn để không đè lên khung
+                    yshift=40,
                     font=dict(size=14, color="black", weight="bold")
                 ))
                 
-                # Cho phép mỗi biểu đồ tự quản lý trục X để tránh chồng chéo ngày tháng
+                # Ép kiểu trục X riêng biệt và khung bao
                 fig.update_xaxes(matches=None, showticklabels=True)
                 fig.update_traces(line=dict(width=2), marker=dict(size=7))
                 
-                # --- NÂNG CẤP: TĂNG KHOẢNG CÁCH VÀ KHUNG BAO ---
-               
+                # Thiết lập layout với vertical_spacing để tránh lỗi render
                 fig.update_layout(
                     plot_bgcolor='white',
                     height=500 * (len(df_resin['Paint_Code_Str'].unique()) // 3 + 1),
-                    # Tăng lề trên (t) lên 150 để tạo khoảng trống lớn cho tiêu đề
-                    margin=dict(t=150, b=50, l=60, r=20), 
+                    margin=dict(t=150, b=50, l=60, r=20),
+                    vertical_spacing=0.15, # Khoảng cách dọc cố định để tránh lỗi
                     title={
                         'text': f"Viscosity Trend by Paint Code (Resin: {resin})",
-                        'y': 0.98,  # Đẩy tiêu đề chính lên sát mép trên cùng
-                        'x': 0.5,
-                        'xanchor': 'center',
-                        'yanchor': 'top'
+                        'y': 0.98, 'x': 0.5, 'xanchor': 'center', 'yanchor': 'top'
                     }
                 )
                 
-                # Vẽ khung bao (Mirror) cho từng biểu đồ con
-                fig.update_xaxes(
-                    showline=True, linecolor='black', linewidth=1, mirror=True,
-                    showgrid=True, gridcolor='lightgray'
-                )
-                fig.update_yaxes(
-                    showline=True, linecolor='black', linewidth=1, mirror=True,
-                    showgrid=True, gridcolor='lightgray'
-                )
+                # Khung bao cho từng biểu đồ
+                fig.update_xaxes(showline=True, linecolor='black', linewidth=1, mirror=True, showgrid=True, gridcolor='lightgray')
+                fig.update_yaxes(showline=True, linecolor='black', linewidth=1, mirror=True, showgrid=True, gridcolor='lightgray')
                 
                 st.plotly_chart(fig, use_container_width=True)
     else:
