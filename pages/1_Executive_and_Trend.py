@@ -90,7 +90,7 @@ if not df_adjusted.empty:
                     color='Stage',
                     symbol='Supplier',
                     facet_col='Paint_Code_Str',
-                    facet_col_wrap=1,   # mỗi hàng 1 chart
+                    facet_col_wrap=1,
                     markers=True,
                     color_discrete_map={'Before': '#FF4B4B', 'After': '#00BFFF'}
                 )
@@ -100,49 +100,27 @@ if not df_adjusted.empty:
                 fig.update_layout(
                     plot_bgcolor='white',
                     paper_bgcolor='white',
-
-                    # 👉 KHUNG BAO NGOÀI CHART
                     margin=dict(t=120, b=60, l=70, r=30),
-
                     height=450 * num_rows,
-
-                    # BORDER rõ ràng
-                    shapes=[
-                        dict(
-                            type="rect",
-                            xref="paper",
-                            yref="paper",
-                            x0=0,
-                            y0=0,
-                            x1=1,
-                            y1=1,
-                            line=dict(color="black", width=1)
-                        )
-                    ],
-
                     title={
                         'text': f"Viscosity Trend by Paint Code (Resin: {resin})",
-                        'x': 0.5,
-                        'xanchor': 'center'
+                        'x': 0.5
                     }
                 )
 
-                # =========================
-                # CLEAN LABEL
-                # =========================
+                # clean facet label
                 fig.for_each_annotation(lambda a: a.update(
                     text=a.text.split("=")[-1],
                     font=dict(size=14, color="black")
                 ))
 
                 # =========================
-                # TRỤC X CHỈ HIỂN THỊ NGÀY
+                # CHỈ BỎ GIỜ TRÊN TRỤC X
                 # =========================
                 fig.update_xaxes(
                     tickformat="%Y-%m-%d",
                     showgrid=True,
                     gridcolor="lightgray",
-                    gridwidth=1,
                     showline=True,
                     linecolor="black",
                     linewidth=1,
@@ -150,12 +128,11 @@ if not df_adjusted.empty:
                 )
 
                 # =========================
-                # TRỤC Y + GRID RÕ RÀNG
+                # GRID RÕ RÀNG TRỤC Y
                 # =========================
                 fig.update_yaxes(
                     showgrid=True,
                     gridcolor="lightgray",
-                    gridwidth=1,
                     showline=True,
                     linecolor="black",
                     linewidth=1,
