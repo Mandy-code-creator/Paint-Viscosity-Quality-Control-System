@@ -14,26 +14,39 @@ rejected_data = st.session_state['rejected_data'].copy()
 st.title("📊 Executive Summary")
 st.markdown("---")
 
-# --- 3. KEY PERFORMANCE INDICATORS BY RESIN (PHÂN TÍCH THEO NHỰA) ---
-st.subheader("💡 Performance by Resin Type")
+# --- 3. PHÂN TÍCH HIỆU QUẢ THEO NHỰA & TỶ LỆ DUNG MÔI ---
+st.subheader("💡 Resin Performance & Solvent Consumption")
 
-# Tính toán số lượng mẻ duy nhất (nunique) và độ giảm nhớt trung bình
+# Tính toán tỷ lệ dung môi theo từng mẻ (trước khi group by)
+group_a['Solvent_Ratio_Percent'] = (group_a['添加重量'] / group_a['塗料重量']) * 100
+
+# Tính toán các chỉ số trung bình
 resin_summary = group_a.groupby('Resin').agg({
-    '塗料批號': 'nunique',        # Đếm số lượng Batch duy nhất
-    'Delta_V': 'mean',           # Độ giảm nhớt trung bình (hiệu quả điều chỉnh)
-    '塗料重量': 'sum'            # Tổng khối lượng sơn
+    '塗料批號': 'nunique',            # Số mẻ (Batch count)
+    '黏度(秒)': 'mean',               # Độ nhớt gốc
+    '黏度(秒)_1': 'mean',             # Độ nhớt sau pha
+    'Delta_V': 'mean',                # Độ giảm nhớt
+    'Solvent_Ratio_Percent': 'mean'   # Tỷ lệ dung môi trung bình (%)
 }).rename(columns={
     '塗料批號': 'Total Batches',
+    '黏度(秒)': 'Initial V (s)',
+    '黏度(秒)_1': 'Final V (s)',
     'Delta_V': 'Avg Delta V (s)',
-    '塗料重量': 'Total Paint (kg)'
+    'Solvent_Ratio_Percent': 'Avg Solvent Ratio (%)'
 })
 
 # Hiển thị bảng phân tích
 st.dataframe(resin_summary.style.format({
+    'Initial V (s)': '{:.2f}',
+    'Final V (s)': '{:.2f}',
     'Avg Delta V (s)': '{:.2f}',
-    'Total Paint (kg)': '{:,.0f}'
+    'Avg Solvent Ratio (%)': '{:.2f} %'
 }), use_container_width=True)
 
+st.markdown("""
+* **Avg Solvent Ratio (%):** Tỷ lệ dung môi trung bình so với trọng lượng sơn ban đầu.
+* *Công thức:* (Trọng lượng dung môi / Trọng lượng sơn) x 100
+""")
 st.markdown("---")
 
 # --- 4. PAINT CODE DICTIONARY VERIFICATION ---
