@@ -14,38 +14,25 @@ rejected_data = st.session_state['rejected_data'].copy()
 st.title("📊 Executive Summary")
 st.markdown("---")
 
-# --- 3. KEY PERFORMANCE INDICATORS (KPIs) ---
-st.subheader("💡 Key Performance Indicators")
+# --- 3. KEY PERFORMANCE INDICATORS BY RESIN (PHÂN TÍCH THEO NHỰA) ---
+st.subheader("💡 Performance by Resin Type")
 
-col1, col2, col3, col4 = st.columns(4)
+# Tính toán số lượng mẻ duy nhất (nunique) và độ giảm nhớt trung bình
+resin_summary = group_a.groupby('Resin').agg({
+    '塗料批號': 'nunique',        # Đếm số lượng Batch duy nhất
+    'Delta_V': 'mean',           # Độ giảm nhớt trung bình (hiệu quả điều chỉnh)
+    '塗料重量': 'sum'            # Tổng khối lượng sơn
+}).rename(columns={
+    '塗料批號': 'Total Batches',
+    'Delta_V': 'Avg Delta V (s)',
+    '塗料重量': 'Total Paint (kg)'
+})
 
-with col1:
-    st.metric(
-        label="Total Valid Mixes", 
-        value=f"{len(group_a):,} coils",
-        help="Total valid batches (Group A) for SPC analysis."
-    )
-
-with col2:
-    total_paint = group_a['塗料重量'].sum() if '塗料重量' in group_a.columns else 0
-    st.metric(
-        label="Total Paint Used", 
-        value=f"{total_paint:,.1f} kg"
-    )
-
-with col3:
-    avg_solvent = (group_a['Solvent_Ratio'].mean() * 100) if not group_a.empty else 0
-    st.metric(
-        label="Avg Solvent Ratio", 
-        value=f"{avg_solvent:.2f} %"
-    )
-
-with col4:
-    st.metric(
-        label="Data Errors (Rejected)", 
-        value=f"{len(rejected_data)} rows",
-        help="Rows rejected due to missing solvent or viscosity data."
-    )
+# Hiển thị bảng phân tích
+st.dataframe(resin_summary.style.format({
+    'Avg Delta V (s)': '{:.2f}',
+    'Total Paint (kg)': '{:,.0f}'
+}), use_container_width=True)
 
 st.markdown("---")
 
