@@ -75,24 +75,27 @@ if not df_adjusted.empty:
                     color_discrete_map={'Before': '#FF4B4B', 'After': '#00BFFF'}
                 )
                 
-                # --- NÂNG CẤP: TÁCH TRỤC VÀ TẠO KHUNG BAO ---
-                fig.update_xaxes(matches=None, showticklabels=True) # Mỗi biểu đồ có trục X riêng
+                # --- NÂNG CẤP: DỊCH CHUYỂN NHÃN MÃ SƠN LÊN CAO ---
+                # Đẩy nhãn lên cao (yshift=30) để không bị đè vào khung kẻ
+                fig.for_each_annotation(lambda a: a.update(
+                    text=a.text.split("=")[-1],
+                    yshift=30,  # Khoảng cách dịch lên phía trên
+                    font=dict(size=14, color="black")
+                ))
                 
-                # Làm sạch tiêu đề
-                fig.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
-                
+                fig.update_xaxes(matches=None, showticklabels=True)
                 fig.update_traces(line=dict(width=2), marker=dict(size=7))
                 
-                # Cấu hình khung bao và đường kẻ
+                # Cấu hình thẩm mỹ và TĂNG LỀ TRÊN (Top Margin)
                 fig.update_layout(
                     plot_bgcolor='white',
                     height=400 * (len(df_resin['Paint_Code_Str'].unique()) // 3 + 1),
-                    margin=dict(t=80, b=50, l=50, r=20), # Tăng margin để không bị đè chữ
+                    margin=dict(t=100, b=50, l=50, r=20), # t=100 tạo không gian rộng cho nhãn
                     title_text=f"Viscosity Trend by Paint Code (Resin: {resin})",
                     title_x=0.5
                 )
                 
-                # Vẽ khung bao (Mirror) và lưới rõ nét cho từng khung
+                # Vẽ khung bao
                 fig.update_xaxes(
                     showline=True, linecolor='black', linewidth=1, mirror=True,
                     showgrid=True, gridcolor='lightgray'
