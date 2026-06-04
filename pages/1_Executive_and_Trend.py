@@ -4,7 +4,7 @@ import pandas as pd
 from data_processing import render_sidebar_filters
 
 # =====================
-# DATA CHECK
+# CHECK DATA
 # =====================
 if 'raw_data' not in st.session_state:
     st.warning("Please upload data on the main page.")
@@ -19,7 +19,7 @@ if df.empty:
     st.stop()
 
 # =====================
-# SUMMARY
+# SUMMARY TABLE
 # =====================
 st.subheader("Paint Code Performance Summary")
 
@@ -44,7 +44,9 @@ df_pass = df[df['Adjustment_Status'] == 'Pass (No Thinner)']
 first_time_right_pct = (len(df_pass) / len(df)) * 100 if len(df) > 0 else 0
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Total Mixes", len(df['Mix_ID'].nunique()))
+
+# ✅ FIXED (NO len on nunique)
+c1.metric("Total Mixes", df['Mix_ID'].nunique())
 c2.metric("First Time Right (%)", f"{first_time_right_pct:.1f}%")
 c3.metric("Avg Viscosity Before", f"{df['Viscosity_Before'].mean():.1f}")
 c4.metric("Total Thinner", f"{df_adjusted['Thinner_Added'].sum():.1f}")
