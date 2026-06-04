@@ -87,14 +87,19 @@ if not df_adjusted.empty:
                 fig.update_traces(line=dict(width=2), marker=dict(size=7))
                 
                 # --- NÂNG CẤP: TĂNG KHOẢNG CÁCH VÀ KHUNG BAO ---
+               
                 fig.update_layout(
                     plot_bgcolor='white',
-                    # Tăng chiều cao mỗi hàng biểu đồ lên 450 để thoáng hơn
-                    height=450 * (len(df_resin['Paint_Code_Str'].unique()) // 3 + 1),
-                    # Tăng lề trên (t=120) để nhãn không bị che khuất
-                    margin=dict(t=120, b=50, l=60, r=20), 
-                    title_text=f"Viscosity Trend by Paint Code (Resin: {resin})",
-                    title_x=0.5
+                    height=500 * (len(df_resin['Paint_Code_Str'].unique()) // 3 + 1),
+                    # Tăng lề trên (t) lên 150 để tạo khoảng trống lớn cho tiêu đề
+                    margin=dict(t=150, b=50, l=60, r=20), 
+                    title={
+                        'text': f"Viscosity Trend by Paint Code (Resin: {resin})",
+                        'y': 0.98,  # Đẩy tiêu đề chính lên sát mép trên cùng
+                        'x': 0.5,
+                        'xanchor': 'center',
+                        'yanchor': 'top'
+                    }
                 )
                 
                 # Vẽ khung bao (Mirror) cho từng biểu đồ con
