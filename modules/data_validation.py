@@ -28,7 +28,7 @@ def process_and_validate(raw_df):
     decoded_df = df['Paint_Code'].apply(decode_paint_code)
     
     # Đặt tên 4 cột mới khớp 100% với giá trị trả về từ paint_decoder.py
-    decoded_df.columns = ['Vendor', 'Resin', 'Feature', 'Char_1']
+    decoded_df.columns = ['Vendor', 'Resin', 'Feature', 'Color', 'Char_1']
     
     # Gộp 4 cột mới này vào bảng dữ liệu gốc
     df = pd.concat([df, decoded_df], axis=1)
