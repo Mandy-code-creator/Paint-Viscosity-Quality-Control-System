@@ -36,8 +36,8 @@ with st.expander("📖 Paint Code Dictionary Verification"):
         st.dataframe(sample_decode, use_container_width=True)
 
 # --- 4. SMART DATE COLUMN DETECTION ---
-# Hệ thống tự động quét và tìm tên cột ngày tháng trong file Excel
-date_candidates = ['調漆日期', '日期', 'Date', '生產日期', '調漆時間']
+# Added '攪拌日期' as the top priority candidate for automatic detection
+date_candidates = ['攪拌日期', '調漆日期', '日期', 'Date', '生產日期', '調漆時間']
 date_column = None
 
 for col in date_candidates:
@@ -49,23 +49,22 @@ for col in date_candidates:
 st.subheader("📈 Production Activity Over Time")
 
 if date_column is None:
-    # Cảnh báo nếu file Excel hoàn toàn không có cột nào chứa ngày tháng
-    st.error("❌ System could not detect a valid Date column (e.g., '調漆日期', 'Date'). Please verify your Excel file structure.")
+    st.error("❌ System could not detect a valid Date column. Please verify your Excel file structure.")
 else:
-    # Nhóm dữ liệu theo Ngày và Loại Nhựa (Resin)
+    # Group data by the detected Date column and Resin type
     daily_resin_activity = group_a.groupby([date_column, 'Resin']).size().reset_index(name='Number of Events')
 
-    # Vẽ biểu đồ nhiều đường (Multi-line chart)
+    # Generate the multi-line chart using Plotly Express
     fig_activity = px.line(
         daily_resin_activity,
         x=date_column,
         y='Number of Events',
-        color='Resin',        # Tự động gán mỗi loại Resin một màu riêng biệt
+        color='Resin',        # Automatically separates each resin into its own line
         markers=True,
         title="Daily Valid Mix Events by Resin Type"
     )
 
-    # Tối ưu giao diện biểu đồ
+    # Optimize chart layout parameters (Enforcing English interface standard)
     fig_activity.update_layout(
         xaxis_title="Date",
         yaxis_title="Number of Events",
