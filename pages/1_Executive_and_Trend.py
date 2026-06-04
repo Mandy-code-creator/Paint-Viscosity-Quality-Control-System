@@ -43,7 +43,7 @@ c3.metric("Δ Change", f"{delta:.1f} s")
 st.divider()
 
 # =========================
-# 📊 TABLE (GROUP ANALYSIS)
+# 📊 TABLE
 # =========================
 st.subheader("1. Group Performance Table (Color / Resin / Supplier / Paint Code)")
 
@@ -52,19 +52,17 @@ table_df = df.groupby(
 ).agg(
     Total_Mixes=('Mix_ID', 'nunique'),
     Avg_Before=('Viscosity_Before', 'mean'),
-    Avg_After=('Viscosity_After', 'mean'),
-    Avg_Delta=('Viscosity_After', lambda x: None)  # placeholder fixed below
+    Avg_After=('Viscosity_After', 'mean')
 ).reset_index()
 
-# FIX delta properly
 table_df['Avg_Delta'] = table_df['Avg_After'] - table_df['Avg_Before']
 
-table_df = table_df.round(2)
-
-st.dataframe(table_df, use_container_width=True)
+st.dataframe(table_df.round(2), use_container_width=True)
 
 st.divider()
 
+# =========================
+# 2. PROCESS SHIFT (3 GROUPS)
 # =========================
 st.subheader("2. Process Shift Over Time (Resin → Paint Code)")
 
@@ -81,26 +79,25 @@ for resin in resin_list:
     paint_list = df_r['Paint_Code_Str'].dropna().unique()
 
     # =========================
-    # GROUP 1: NORMAL DATA
+    # GROUP 1: NORMAL CHANGE
     # =========================
-    st.markdown("### ✅ Normal Data (Complete Viscosity)")
+    st.markdown("### 🟢 Normal Change (Before ≠ After)")
 
     for paint in paint_list:
 
         df_p = df_r[df_r['Paint_Code_Str'] == paint]
 
-        # kiểm tra missing
-        missing_flag = df_p['黏度(秒)_1'].isna().all()
-
-        if missing_flag:
-            continue  # bỏ qua, xử lý riêng ở nhóm dưới
-
         if df_p.empty:
+            continue
+
+        df_change = df_p[df_p['Viscosity_Before'] != df_p['Viscosity_After']]
+
+        if df_change.empty:
             continue
 
         st.markdown(f"#### 🧪 Paint Code: {paint}")
 
-        trend_df = df_p.groupby('Mix_Date').agg(
+        trend_df = df_change.groupby('Mix_Date').agg(
             Before=('Viscosity_Before', 'mean'),
             After=('Viscosity_After', 'mean')
         ).reset_index()
@@ -110,7 +107,7 @@ for resin in resin_list:
             x='Mix_Date',
             y=['Before', 'After'],
             markers=True,
-            title=f"{resin} / {paint} (Normal Data)"
+            title=f"{resin} / {paint} (Change)"
         )
 
         fig.update_layout(
@@ -120,93 +117,40 @@ for resin in resin_list:
             title_x=0.5
         )
 
-        fig.update_xaxes(showgrid=True, gridcolor="lightgray")
-        fig.update_yaxes(showgrid=True, gridcolor="lightgray")
-
         st.plotly_chart(fig, use_container_width=True)
 
     # =========================
-    # GROUP 2: MISSING DATA ANALYSIS
+    # GROUP 2: NO CHANGE
     # =========================
-    st.markdown("### ⚠️ Missing Viscosity Data (黏度(秒)_1 = NaN)")
+    st.markdown("### ⚪ No Change (Before = After)")
 
-    missing_df = df_r[df_r['黏度(秒)_1'].isna()]
+    no_change_df = df_r[df_r['Viscosity_Before'] == df_r['Viscosity_After']]
 
-    if not missing_df.empty:
+    if not no_change_df.empty:
 
-        miss_summary = missing_df.groupby('Paint_Code_Str').agg(
-            Missing_Count=('Mix_ID', 'nunique')
+        no_change_summary = no_change_df.groupby('Paint_Code_Str').agg(
+            Count=('Mix_ID', 'nunique')
         ).reset_index()
 
-        st.dataframe(miss_summary, use_container_width=True)
+        st.dataframe(no_change_summary, use_container_width=True)
 
-        st.warning("These Paint Codes have missing viscosity data and may indicate process or data collection issues.")
+        st.info("No change = likely no thinner added or process not executed.")
 
-# =========================
-# 3. IMPROVEMENT PER BATCH
-# =========================
-st.subheader("3. Improvement per Batch")
+    # =========================
+    # GROUP 3: MISSING DATA
+    # =========================
+    st.markdown("### 🔴 Missing Data (黏度(秒)_1 = NaN)")
 
-improve_df = df.groupby('Mix_ID').agg(
-    Before=('Viscosity_Before', 'mean'),
-    After=('Viscosity_After', 'mean')
-).reset_index()
+    if '黏度(秒)_1' in df_r.columns:
 
-improve_df['Delta'] = improve_df['After'] - improve_df['Before']
+        missing_df = df_r[df_r['黏度(秒)_1'].isna()]
 
-fig2 = px.bar(
-    improve_df,
-    x='Mix_ID',
-    y='Delta',
-    color='Delta',
-    color_continuous_scale='RdYlGn_r',
-    title="Batch Improvement (After - Before)"
-)
+        if not missing_df.empty:
 
-fig2.update_layout(
-    plot_bgcolor='white',
-    paper_bgcolor='white',
-    margin=dict(t=60, b=40, l=60, r=20),
-    title_x=0.5
-)
+            miss_summary = missing_df.groupby('Paint_Code_Str').agg(
+                Missing_Count=('Mix_ID', 'nunique')
+            ).reset_index()
 
-fig2.update_xaxes(showgrid=True, gridcolor="lightgray")
-fig2.update_yaxes(showgrid=True, gridcolor="lightgray")
+            st.dataframe(miss_summary, use_container_width=True)
 
-st.plotly_chart(fig2, use_container_width=True)
-
-# =========================
-# 4. DISTRIBUTION SHIFT
-# =========================
-st.subheader("4. Distribution Shift (Stability)")
-
-dist_df = df.melt(
-    id_vars=['Mix_ID'],
-    value_vars=['Viscosity_Before', 'Viscosity_After'],
-    var_name='Stage',
-    value_name='Viscosity'
-)
-
-dist_df['Stage'] = dist_df['Stage'].replace({
-    'Viscosity_Before': 'Before',
-    'Viscosity_After': 'After'
-})
-
-fig3 = px.box(
-    dist_df,
-    x='Stage',
-    y='Viscosity',
-    color='Stage',
-    title="Before vs After Distribution"
-)
-
-fig3.update_layout(
-    plot_bgcolor='white',
-    paper_bgcolor='white',
-    margin=dict(t=60, b=40, l=60, r=20),
-    title_x=0.5
-)
-
-fig3.update_yaxes(showgrid=True, gridcolor="lightgray")
-
-st.plotly_chart(fig3, use_container_width=True)
+            st.warning("Missing viscosity data → possible measurement or input issue.")
