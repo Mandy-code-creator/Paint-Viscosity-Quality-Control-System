@@ -75,21 +75,32 @@ if not df_adjusted.empty:
                     color_discrete_map={'Before': '#FF4B4B', 'After': '#00BFFF'}
                 )
                 
-                # --- NÂNG CẤP: LÀM SẠCH TIÊU ĐỀ FACET ---
-                # Loại bỏ tiền tố "Paint_Code_Str=" khỏi tiêu đề mỗi ô
+                # --- NÂNG CẤP: TÁCH TRỤC VÀ TẠO KHUNG BAO ---
+                fig.update_xaxes(matches=None, showticklabels=True) # Mỗi biểu đồ có trục X riêng
+                
+                # Làm sạch tiêu đề
                 fig.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
                 
-                # Cấu hình thẩm mỹ
                 fig.update_traces(line=dict(width=2), marker=dict(size=7))
+                
+                # Cấu hình khung bao và đường kẻ
                 fig.update_layout(
                     plot_bgcolor='white',
                     height=400 * (len(df_resin['Paint_Code_Str'].unique()) // 3 + 1),
-                    margin=dict(t=60, b=20, l=20, r=20),
+                    margin=dict(t=80, b=50, l=50, r=20), # Tăng margin để không bị đè chữ
                     title_text=f"Viscosity Trend by Paint Code (Resin: {resin})",
                     title_x=0.5
                 )
-                fig.update_xaxes(showline=True, linecolor='black', gridcolor='lightgray')
-                fig.update_yaxes(showline=True, linecolor='black', gridcolor='lightgray')
+                
+                # Vẽ khung bao (Mirror) và lưới rõ nét cho từng khung
+                fig.update_xaxes(
+                    showline=True, linecolor='black', linewidth=1, mirror=True,
+                    showgrid=True, gridcolor='lightgray'
+                )
+                fig.update_yaxes(
+                    showline=True, linecolor='black', linewidth=1, mirror=True,
+                    showgrid=True, gridcolor='lightgray'
+                )
                 
                 st.plotly_chart(fig, use_container_width=True)
     else:
