@@ -32,44 +32,34 @@ with col4:
 
 st.markdown("---")
 
-# --- 3. OPTIMIZED SENSITIVITY HEATMAP ---
-st.subheader("🌡️ Solvent Usage Efficiency Heatmap")
+# --- 3. HEATMAP ANALYSIS ---
+st.subheader("🌡️ Process Sensitivity Heatmap (Solvent Efficiency)")
 
-# 1. Định nghĩa các "thùng" (bins) để chia ma trận
-# Trục X: Tỷ lệ dung môi (Solvent Ratio %)
-# Trục Y: Độ nhớt ban đầu (Initial Viscosity - 黏度(秒))
-group_a['Solvent_Bin'] = pd.cut(group_a['Solvent_Ratio_Percent'], bins=10)
-group_a['Initial_V_Bin'] = pd.cut(group_a['黏度(秒)'], bins=10)
+# Filter data
+filtered_data = group_a[(group_a['Resin'] == selected_resin) & (group_a['Vendor'].isin(selected_vendors))].copy()
 
-# 2. Tạo Pivot Table cho Heatmap (Giá trị là Sensitivity - Hiệu quả giảm nhớt)
-heatmap_data = group_a.groupby(['Initial_V_Bin', 'Solvent_Bin'])['Sensitivity'].mean().reset_index()
+# Create bins using pd.cut
+filtered_data['Solvent_Bin'] = pd.cut(filtered_data['Solvent_Ratio_Percent'], bins=10)
+filtered_data['Initial_V_Bin'] = pd.cut(filtered_data['黏度(秒)'], bins=10)
+
+# Group and pivot
+heatmap_data = filtered_data.groupby(['Initial_V_Bin', 'Solvent_Bin'])['Sensitivity'].mean().reset_index()
 pivot_table = heatmap_data.pivot(index='Initial_V_Bin', columns='Solvent_Bin', values='Sensitivity')
 
-# 3. Vẽ Heatmap
+# --- FIX: Convert Interval indices/columns to strings ---
+pivot_table.index = pivot_table.index.astype(str)
+pivot_table.columns = pivot_table.columns.astype(str)
+
 fig_heatmap = px.imshow(
     pivot_table,
     text_auto=".1f",
     aspect="auto",
-    color_continuous_scale='RdYlGn', # Màu sắc phản ánh độ hiệu quả
+    color_continuous_scale='RdYlGn',
     labels=dict(x="Solvent Ratio (%)", y="Initial Viscosity (s)", color="Sensitivity"),
-    title="Optimal Solvent Usage: Efficiency based on Initial Viscosity"
-)
-
-fig_heatmap.update_layout(
-    xaxis_title="Solvent Ratio (%)",
-    yaxis_title="Initial Viscosity (s)"
+    title=f"Efficiency based on Initial Viscosity ({selected_resin})"
 )
 
 st.plotly_chart(fig_heatmap, use_container_width=True)
-
-st.caption("""
-**Heatmap Insights:**
-* **X-Axis:** Percentage of solvent added relative to paint weight.
-* **Y-Axis:** Initial viscosity before adjustment.
-* **Cell Color:** Higher Sensitivity (Green) means the solvent is performing at its peak efficiency.
-""")
-
-st.markdown("---")
 
 # --- 4. DATA TABLE (RESIN & VENDOR PERFORMANCE) ---
 st.subheader("📋 Resin & Vendor Performance Analysis")
