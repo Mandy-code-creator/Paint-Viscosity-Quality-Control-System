@@ -80,14 +80,25 @@ for resin in resin_list:
 
     paint_list = df_r['Paint_Code_Str'].dropna().unique()
 
-    for paint in paint_list:
+    # =========================
+    # GROUP 1: NORMAL DATA
+    # =========================
+    st.markdown("### ✅ Normal Data (Complete Viscosity)")
 
-        st.markdown(f"### 🧪 Paint Code: {paint}")
+    for paint in paint_list:
 
         df_p = df_r[df_r['Paint_Code_Str'] == paint]
 
+        # kiểm tra missing
+        missing_flag = df_p['黏度(秒)_1'].isna().all()
+
+        if missing_flag:
+            continue  # bỏ qua, xử lý riêng ở nhóm dưới
+
         if df_p.empty:
             continue
+
+        st.markdown(f"#### 🧪 Paint Code: {paint}")
 
         trend_df = df_p.groupby('Mix_Date').agg(
             Before=('Viscosity_Before', 'mean'),
@@ -99,7 +110,7 @@ for resin in resin_list:
             x='Mix_Date',
             y=['Before', 'After'],
             markers=True,
-            title=f"{resin} / {paint} (Before vs After)"
+            title=f"{resin} / {paint} (Normal Data)"
         )
 
         fig.update_layout(
@@ -109,18 +120,27 @@ for resin in resin_list:
             title_x=0.5
         )
 
-        fig.update_xaxes(
-            tickformat="%Y-%m-%d",
-            showgrid=True,
-            gridcolor="lightgray"
-        )
-
-        fig.update_yaxes(
-            showgrid=True,
-            gridcolor="lightgray"
-        )
+        fig.update_xaxes(showgrid=True, gridcolor="lightgray")
+        fig.update_yaxes(showgrid=True, gridcolor="lightgray")
 
         st.plotly_chart(fig, use_container_width=True)
+
+    # =========================
+    # GROUP 2: MISSING DATA ANALYSIS
+    # =========================
+    st.markdown("### ⚠️ Missing Viscosity Data (黏度(秒)_1 = NaN)")
+
+    missing_df = df_r[df_r['黏度(秒)_1'].isna()]
+
+    if not missing_df.empty:
+
+        miss_summary = missing_df.groupby('Paint_Code_Str').agg(
+            Missing_Count=('Mix_ID', 'nunique')
+        ).reset_index()
+
+        st.dataframe(miss_summary, use_container_width=True)
+
+        st.warning("These Paint Codes have missing viscosity data and may indicate process or data collection issues.")
 
 # =========================
 # 3. IMPROVEMENT PER BATCH
