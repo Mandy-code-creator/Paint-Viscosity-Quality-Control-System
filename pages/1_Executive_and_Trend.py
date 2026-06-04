@@ -66,30 +66,30 @@ st.dataframe(table_df, use_container_width=True)
 st.divider()
 
 # =========================
-st.subheader("2. Process Shift Over Time (Fully Separated)")
+st.subheader("2. Process Shift Over Time (Resin → Paint Code)")
 
 df['Mix_Date'] = pd.to_datetime(df['Mix_Date'])
+df = df.sort_values('Mix_Date')
 
 resin_list = df['Resin_Type'].dropna().unique()
 
 for resin in resin_list:
 
     st.markdown(f"## 🔹 Resin: {resin}")
-
     df_r = df[df['Resin_Type'] == resin]
 
-    color_list = df_r['Color_Group'].dropna().unique()
+    paint_list = df_r['Paint_Code_Str'].dropna().unique()
 
-    for color in color_list:
+    for paint in paint_list:
 
-        st.markdown(f"### 🎨 Color Group: {color}")
+        st.markdown(f"### 🧪 Paint Code: {paint}")
 
-        df_rc = df_r[df_r['Color_Group'] == color].copy()
+        df_p = df_r[df_r['Paint_Code_Str'] == paint]
 
-        if df_rc.empty:
+        if df_p.empty:
             continue
 
-        trend_df = df_rc.groupby('Mix_Date').agg(
+        trend_df = df_p.groupby('Mix_Date').agg(
             Before=('Viscosity_Before', 'mean'),
             After=('Viscosity_After', 'mean')
         ).reset_index()
@@ -99,13 +99,13 @@ for resin in resin_list:
             x='Mix_Date',
             y=['Before', 'After'],
             markers=True,
-            title=f"{resin} - {color} (Before vs After)"
+            title=f"{resin} / {paint} (Before vs After)"
         )
 
         fig.update_layout(
             plot_bgcolor='white',
             paper_bgcolor='white',
-            margin=dict(t=50, b=40, l=50, r=20),
+            margin=dict(t=40, b=40, l=50, r=20),
             title_x=0.5
         )
 
