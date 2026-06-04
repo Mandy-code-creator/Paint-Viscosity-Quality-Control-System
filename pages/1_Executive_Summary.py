@@ -35,15 +35,22 @@ st.markdown("---")
 # --- 3. HEATMAP ANALYSIS ---
 st.subheader("🌡️ Process Sensitivity Heatmap (Temperature vs Humidity)")
 
+# --- BẠN SỬA TÊN CỘT Ở ĐÂY ---
+temp_col = '溫度'  # Thay '溫度' bằng tên cột nhiệt độ thực tế trong dữ liệu của bạn
+hum_col = '濕度'   # Thay '濕度' bằng tên cột độ ẩm thực tế trong dữ liệu của bạn
+
 col_f1, col_f2 = st.columns(2)
 with col_f1:
     selected_resin = st.selectbox("Filter Heatmap by Resin", group_a['Resin'].unique())
 with col_f2:
     selected_vendors = st.multiselect("Filter Heatmap by Vendor", group_a['Vendor'].unique(), default=group_a['Vendor'].unique())
 
-filtered_data = group_a[(group_a['Resin'] == selected_resin) & (group_a['Vendor'].isin(selected_vendors))]
-filtered_data['Temp_Bin'] = filtered_data['Temperature'].round(0)
-filtered_data['Hum_Bin'] = filtered_data['Humidity'].round(0)
+filtered_data = group_a[(group_a['Resin'] == selected_resin) & (group_a['Vendor'].isin(selected_vendors))].copy()
+
+# Sử dụng biến temp_col và hum_col thay vì viết cứng 'Temperature'
+filtered_data['Temp_Bin'] = filtered_data[temp_col].round(0)
+filtered_data['Hum_Bin'] = filtered_data[hum_col].round(0)
+
 heatmap_data = filtered_data.groupby(['Hum_Bin', 'Temp_Bin'])['Sensitivity'].mean().reset_index()
 pivot_table = heatmap_data.pivot(index='Hum_Bin', columns='Temp_Bin', values='Sensitivity').sort_index(ascending=False)
 
@@ -56,7 +63,6 @@ fig_heatmap = px.imshow(
     title=f"Avg Sensitivity: How environment affects solvent efficiency ({selected_resin})"
 )
 st.plotly_chart(fig_heatmap, use_container_width=True)
-st.caption("**Sensitivity:** Viscosity reduction (s) achieved per 1% of solvent added. Darker blue indicates higher efficiency.")
 
 st.markdown("---")
 
