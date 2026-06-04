@@ -66,34 +66,50 @@ st.dataframe(table_df, use_container_width=True)
 st.divider()
 
 # =========================
-# 2. SHIFT TREND
-# =========================
-st.subheader("2. Process Shift Over Time")
+st.subheader("2. Process Shift Over Time (By Resin Type)")
 
-trend_df = df.groupby('Mix_Date').agg(
-    Before=('Viscosity_Before', 'mean'),
-    After=('Viscosity_After', 'mean')
-).reset_index()
+resin_list = df['Resin_Type'].dropna().unique()
 
-fig1 = px.line(
-    trend_df,
-    x='Mix_Date',
-    y=['Before', 'After'],
-    markers=True,
-    title="Viscosity Shift (Before vs After)"
-)
+tabs = st.tabs([f"Resin: {r}" for r in resin_list])
 
-fig1.update_layout(
-    plot_bgcolor='white',
-    paper_bgcolor='white',
-    margin=dict(t=60, b=40, l=60, r=20),
-    title_x=0.5
-)
+for i, resin in enumerate(resin_list):
+    with tabs[i]:
 
-fig1.update_xaxes(tickformat="%Y-%m-%d", showgrid=True, gridcolor="lightgray")
-fig1.update_yaxes(showgrid=True, gridcolor="lightgray")
+        df_r = df[df['Resin_Type'] == resin].copy()
+        df_r['Mix_Date'] = pd.to_datetime(df_r['Mix_Date'])
 
-st.plotly_chart(fig1, use_container_width=True)
+        trend_df = df_r.groupby('Mix_Date').agg(
+            Before=('Viscosity_Before', 'mean'),
+            After=('Viscosity_After', 'mean')
+        ).reset_index()
+
+        fig = px.line(
+            trend_df,
+            x='Mix_Date',
+            y=['Before', 'After'],
+            markers=True,
+            title=f"Viscosity Shift - Resin {resin}"
+        )
+
+        fig.update_layout(
+            plot_bgcolor='white',
+            paper_bgcolor='white',
+            margin=dict(t=50, b=40, l=50, r=20),
+            title_x=0.5
+        )
+
+        fig.update_xaxes(
+            tickformat="%Y-%m-%d",
+            showgrid=True,
+            gridcolor="lightgray"
+        )
+
+        fig.update_yaxes(
+            showgrid=True,
+            gridcolor="lightgray"
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
 
 # =========================
 # 3. IMPROVEMENT PER BATCH
