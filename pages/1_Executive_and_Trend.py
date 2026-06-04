@@ -58,13 +58,20 @@ if not df_adjusted.empty:
                 df_melt = df_resin.melt(
                     id_vars=['Mix_Date', 'Paint_Code_Str', 'Supplier'],
                     value_vars=['Viscosity_Before', 'Viscosity_After'],
-                    var_name='Stage', value_name='Viscosity'
+                    var_name='Stage',
+                    value_name='Viscosity'
                 )
-                df_melt['Stage'] = df_melt['Stage'].replace({'Viscosity_Before': 'Before', 'Viscosity_After': 'After'})
+                
+                df_melt['Stage'] = df_melt['Stage'].replace({
+                    'Viscosity_Before': 'Before',
+                    'Viscosity_After': 'After'
+                })
                 
                 # Vẽ biểu đồ lưới (Facet Grid)
                 fig = px.line(
-                    df_melt, x='Mix_Date', y='Viscosity',
+                    df_melt,
+                    x='Mix_Date',
+                    y='Viscosity',
                     color='Stage',
                     symbol='Supplier',
                     facet_col='Paint_Code_Str',
@@ -73,37 +80,50 @@ if not df_adjusted.empty:
                     color_discrete_map={'Before': '#FF4B4B', 'After': '#00BFFF'}
                 )
                 
-                # --- FIX LỖI SPACING: THÊM vertical_spacing ---
-                # Đảm bảo vertical_spacing nằm trong khoảng hợp lệ (ví dụ: 0.1 đến 0.2)
-                # Đảm bảo chiều cao (height) đủ lớn cho số lượng hàng
+                # --- FIX: bỏ vertical_spacing (Plotly Express không hỗ trợ) ---
                 num_rows = (len(df_resin['Paint_Code_Str'].unique()) // 3 + 1)
                 
                 fig.update_layout(
                     plot_bgcolor='white',
                     height=450 * num_rows,
                     margin=dict(t=150, b=50, l=60, r=20),
-                    # Dòng này quyết định khoảng cách giữa các hàng
-                    # Nếu có 1 hàng thì spacing không quan trọng, nhiều hàng thì cần 0.15
-                    vertical_spacing=0.15 if num_rows > 1 else 0,
                     title={
                         'text': f"Viscosity Trend by Paint Code (Resin: {resin})",
-                        'y': 0.98, 'x': 0.5, 'xanchor': 'center', 'yanchor': 'top'
+                        'y': 0.98,
+                        'x': 0.5,
+                        'xanchor': 'center',
+                        'yanchor': 'top'
                     }
                 )
 
-                # Tinh chỉnh annotation và khung
+                # annotation fix nhẹ (bỏ weight vì Plotly không support)
                 fig.for_each_annotation(lambda a: a.update(
                     text=a.text.split("=")[-1],
                     yshift=40,
-                    font=dict(size=14, color="black", weight="bold")
+                    font=dict(size=14, color="black")
                 ))
                 
                 fig.update_xaxes(matches=None, showticklabels=True)
                 fig.update_traces(line=dict(width=2), marker=dict(size=7))
                 
-                # Khung bao
-                fig.update_xaxes(showline=True, linecolor='black', linewidth=1, mirror=True, showgrid=True, gridcolor='lightgray')
-                fig.update_yaxes(showline=True, linecolor='black', linewidth=1, mirror=True, showgrid=True, gridcolor='lightgray')
+                # khung lưới
+                fig.update_xaxes(
+                    showline=True,
+                    linecolor='black',
+                    linewidth=1,
+                    mirror=True,
+                    showgrid=True,
+                    gridcolor='lightgray'
+                )
+                
+                fig.update_yaxes(
+                    showline=True,
+                    linecolor='black',
+                    linewidth=1,
+                    mirror=True,
+                    showgrid=True,
+                    gridcolor='lightgray'
+                )
                 
                 st.plotly_chart(fig, use_container_width=True)
     else:
