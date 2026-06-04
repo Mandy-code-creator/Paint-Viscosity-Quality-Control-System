@@ -15,7 +15,7 @@ if 'raw_data' not in st.session_state:
 # =========================
 df = render_sidebar_filters(st.session_state['raw_data'])
 
-st.header("Process Improvement Analysis (No Spec Required)")
+st.header("Process Improvement Analysis (Simplified QC View)")
 
 if df.empty:
     st.info("No data available.")
@@ -62,7 +62,7 @@ st.dataframe(table_df.round(2), use_container_width=True)
 st.divider()
 
 # =========================
-# 2. PROCESS SHIFT (CLEAN 3-GROUP SPLIT)
+# 2. PROCESS SHIFT (2 GROUPS ONLY)
 # =========================
 st.subheader("2. Process Shift Over Time (Resin → Paint Code)")
 
@@ -81,7 +81,7 @@ for resin in resin_list:
     # =========================
     # 🟢 GROUP 1: NORMAL CHANGE
     # =========================
-    st.markdown("### 🟢 Normal Change (Before ≠ After)")
+    st.markdown("### 🟢 Normal Change")
 
     for paint in paint_list:
 
@@ -107,7 +107,7 @@ for resin in resin_list:
             x='Mix_Date',
             y=['Before', 'After'],
             markers=True,
-            title=f"{resin} / {paint} (Change)"
+            title=f"{resin} / {paint}"
         )
 
         fig.update_layout(
@@ -120,37 +120,21 @@ for resin in resin_list:
         st.plotly_chart(fig, use_container_width=True)
 
     # =========================
-    # ⚪ GROUP 2: NO CHANGE (PROCESS ISSUE)
+    # ⚪ GROUP 2: NO EFFECT / INVALID DATA (MERGED)
     # =========================
-    st.markdown("### ⚪ No Change (Before = After)")
+    st.markdown("### ⚪ No Effect / Invalid Data")
 
-    no_change_df = df_r[df_r['Viscosity_Before'] == df_r['Viscosity_After']]
+    no_effect_df = df_r[
+        (df_r['Viscosity_Before'] == df_r['Viscosity_After']) |
+        (df_r['黏度(秒)_1'].isna())
+    ]
 
-    if not no_change_df.empty:
+    if not no_effect_df.empty:
 
-        no_change_summary = no_change_df.groupby('Paint_Code_Str').agg(
+        summary = no_effect_df.groupby('Paint_Code_Str').agg(
             Count=('Mix_ID', 'nunique')
         ).reset_index()
 
-        st.dataframe(no_change_summary, use_container_width=True)
+        st.dataframe(summary, use_container_width=True)
 
-        st.info("No Change = process executed but no viscosity impact (possible no thinner added).")
-
-    # =========================
-    # 🔴 GROUP 3: MISSING DATA (DATA ISSUE)
-    # =========================
-    st.markdown("### 🔴 Missing Data (黏度(秒)_1 = NaN)")
-
-    if '黏度(秒)_1' in df_r.columns:
-
-        missing_df = df_r[df_r['黏度(秒)_1'].isna()]
-
-        if not missing_df.empty:
-
-            miss_summary = missing_df.groupby('Paint_Code_Str').agg(
-                Missing_Count=('Mix_ID', 'nunique')
-            ).reset_index()
-
-            st.dataframe(miss_summary, use_container_width=True)
-
-            st.warning("Missing data = measurement/system issue, not process behavior.")
+        st.info("Includes: No Change (process no effect) + Missing data (invalid measurement)")
