@@ -122,19 +122,47 @@ for resin in resin_list:
     # =========================
     # ⚪ GROUP 2: NO EFFECT / INVALID DATA (MERGED)
     # =========================
-    st.markdown("### ⚪ No Effect / Invalid Data")
+    st.markdown("### ⚪ No Effect / Invalid Data (Detail View)")
 
-    no_effect_df = df_r[
-        (df_r['Viscosity_Before'] == df_r['Viscosity_After']) |
-        (df_r['黏度(秒)_1'].isna())
-    ]
+no_effect_df = df_r[
+    (df_r['Viscosity_Before'] == df_r['Viscosity_After']) |
+    (df_r['黏度(秒)_1'].isna())
+].copy()
 
-    if not no_effect_df.empty:
+if not no_effect_df.empty:
 
-        summary = no_effect_df.groupby('Paint_Code_Str').agg(
-            Count=('Mix_ID', 'nunique')
-        ).reset_index()
+    # =========================
+    # ADD DIAGNOSIS COLUMN
+    # =========================
+    no_effect_df['Issue_Type'] = no_effect_df.apply(
+        lambda x: "Missing Data" if pd.isna(x['黏度(秒)_1']) else "No Change",
+        axis=1
+    )
 
-        st.dataframe(summary, use_container_width=True)
+    display_df = no_effect_df[[
+        'Mix_ID',
+        'Paint_Code_Str',
+        'Mix_Date',
+        'Viscosity_Before',
+        'Viscosity_After',
+        '黏度(秒)_1',
+        'Issue_Type'
+    ]].sort_values('Mix_Date')
 
-        st.info("Includes: No Change (process no effect) + Missing data (invalid measurement)")
+    st.dataframe(display_df, use_container_width=True)
+
+    # =========================
+    # SUMMARY WITH VALUE INSIGHT
+    # =========================
+    value_summary = no_effect_df.groupby('Paint_Code_Str').agg(
+        Count=('Mix_ID', 'nunique'),
+        Avg_Before=('Viscosity_Before', 'mean'),
+        Avg_After=('Viscosity_After', 'mean')
+    ).reset_index()
+
+    value_summary['Delta'] = value_summary['Avg_After'] - value_summary['Avg_Before']
+
+    st.markdown("#### 📊 Impact Summary (Value View)")
+    st.dataframe(value_summary.round(2), use_container_width=True)
+
+    st.info("Shows actual viscosity values so you can assess severity of No Effect / Missing cases.")
