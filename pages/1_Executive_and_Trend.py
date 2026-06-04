@@ -11,7 +11,7 @@ if 'raw_data' not in st.session_state:
     st.stop()
 
 # =========================
-# FILTER SIDEBAR (RESTORED)
+# FILTER
 # =========================
 df = render_sidebar_filters(st.session_state['raw_data'])
 
@@ -22,14 +22,14 @@ if df.empty:
     st.stop()
 
 # =========================
-# PREP DATA
+# PREP
 # =========================
 df = df.copy()
 df['Mix_Date'] = pd.to_datetime(df['Mix_Date'])
 df = df.sort_values('Mix_Date')
 
 # =========================
-# KPI OVERALL SHIFT
+# KPI
 # =========================
 overall_before = df['Viscosity_Before'].mean()
 overall_after = df['Viscosity_After'].mean()
@@ -43,9 +43,32 @@ c3.metric("Δ Change", f"{delta:.1f} s")
 st.divider()
 
 # =========================
-# 1. SHIFT TREND
+# 📊 TABLE (GROUP ANALYSIS)
 # =========================
-st.subheader("1. Process Shift Over Time")
+st.subheader("1. Group Performance Table (Color / Resin / Supplier / Paint Code)")
+
+table_df = df.groupby(
+    ['Color_Group', 'Resin_Type', 'Supplier', 'Paint_Code_Str']
+).agg(
+    Total_Mixes=('Mix_ID', 'nunique'),
+    Avg_Before=('Viscosity_Before', 'mean'),
+    Avg_After=('Viscosity_After', 'mean'),
+    Avg_Delta=('Viscosity_After', lambda x: None)  # placeholder fixed below
+).reset_index()
+
+# FIX delta properly
+table_df['Avg_Delta'] = table_df['Avg_After'] - table_df['Avg_Before']
+
+table_df = table_df.round(2)
+
+st.dataframe(table_df, use_container_width=True)
+
+st.divider()
+
+# =========================
+# 2. SHIFT TREND
+# =========================
+st.subheader("2. Process Shift Over Time")
 
 trend_df = df.groupby('Mix_Date').agg(
     Before=('Viscosity_Before', 'mean'),
@@ -73,9 +96,9 @@ fig1.update_yaxes(showgrid=True, gridcolor="lightgray")
 st.plotly_chart(fig1, use_container_width=True)
 
 # =========================
-# 2. IMPROVEMENT PER BATCH
+# 3. IMPROVEMENT PER BATCH
 # =========================
-st.subheader("2. Improvement per Batch (After - Before)")
+st.subheader("3. Improvement per Batch")
 
 improve_df = df.groupby('Mix_ID').agg(
     Before=('Viscosity_Before', 'mean'),
@@ -90,7 +113,7 @@ fig2 = px.bar(
     y='Delta',
     color='Delta',
     color_continuous_scale='RdYlGn_r',
-    title="Viscosity Change per Batch"
+    title="Batch Improvement (After - Before)"
 )
 
 fig2.update_layout(
@@ -106,9 +129,9 @@ fig2.update_yaxes(showgrid=True, gridcolor="lightgray")
 st.plotly_chart(fig2, use_container_width=True)
 
 # =========================
-# 3. DISTRIBUTION SHIFT
+# 4. DISTRIBUTION SHIFT
 # =========================
-st.subheader("3. Distribution Shift (Stability)")
+st.subheader("4. Distribution Shift (Stability)")
 
 dist_df = df.melt(
     id_vars=['Mix_ID'],
