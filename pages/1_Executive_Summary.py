@@ -14,38 +14,42 @@ rejected_data = st.session_state['rejected_data'].copy()
 st.title("📊 Executive Summary")
 st.markdown("---")
 
-# --- 3. PHÂN TÍCH HIỆU QUẢ THEO NHỰA & TỶ LỆ DUNG MÔI ---
-st.subheader("💡 Resin Performance & Solvent Consumption")
+# --- 3. PHÂN TÍCH HIỆU QUẢ THEO NHỰA, NHÀ CUNG CẤP & ĐỊNH MỨC DUNG MÔI ---
+st.subheader("💡 Resin & Vendor Performance Analysis")
 
-# Tính toán tỷ lệ dung môi theo từng mẻ (trước khi group by)
+# Tính toán tỷ lệ dung môi cho từng mẻ
 group_a['Solvent_Ratio_Percent'] = (group_a['添加重量'] / group_a['塗料重量']) * 100
 
-# Tính toán các chỉ số trung bình
-resin_summary = group_a.groupby('Resin').agg({
-    '塗料批號': 'nunique',            # Số mẻ (Batch count)
-    '黏度(秒)': 'mean',               # Độ nhớt gốc
-    '黏度(秒)_1': 'mean',             # Độ nhớt sau pha
-    'Delta_V': 'mean',                # Độ giảm nhớt
-    'Solvent_Ratio_Percent': 'mean'   # Tỷ lệ dung môi trung bình (%)
+# Nhóm dữ liệu theo Resin VÀ Vendor
+detailed_summary = group_a.groupby(['Resin', 'Vendor']).agg({
+    '塗料批號': 'nunique',                # Tổng số mẻ
+    '塗料重量': 'sum',                    # Tổng trọng lượng sơn
+    '添加重量': 'sum',                    # Tổng trọng lượng dung môi
+    '黏度(秒)': 'mean',                   # Độ nhớt gốc
+    '黏度(秒)_1': 'mean',                 # Độ nhớt sau pha
+    'Solvent_Ratio_Percent': 'mean'       # Tỷ lệ dung môi (%)
 }).rename(columns={
-    '塗料批號': 'Total Batches',
+    '塗料批號': 'Batches',
+    '塗料重量': 'Total Paint (kg)',
+    '添加重量': 'Total Solvent (kg)',
     '黏度(秒)': 'Initial V (s)',
     '黏度(秒)_1': 'Final V (s)',
-    'Delta_V': 'Avg Delta V (s)',
-    'Solvent_Ratio_Percent': 'Avg Solvent Ratio (%)'
+    'Solvent_Ratio_Percent': 'Avg Solvent %'
 })
 
-# Hiển thị bảng phân tích
-st.dataframe(resin_summary.style.format({
+# Hiển thị bảng phân tích chi tiết
+st.dataframe(detailed_summary.style.format({
+    'Total Paint (kg)': '{:,.0f}',
+    'Total Solvent (kg)': '{:,.0f}',
     'Initial V (s)': '{:.2f}',
     'Final V (s)': '{:.2f}',
-    'Avg Delta V (s)': '{:.2f}',
-    'Avg Solvent Ratio (%)': '{:.2f} %'
+    'Avg Solvent %': '{:.2f} %'
 }), use_container_width=True)
 
 st.markdown("""
-* **Avg Solvent Ratio (%):** Tỷ lệ dung môi trung bình so với trọng lượng sơn ban đầu.
-* *Công thức:* (Trọng lượng dung môi / Trọng lượng sơn) x 100
+* **Total Batches:** Số lượng mẻ sơn hợp lệ.
+* **Total Paint / Solvent (kg):** Tổng khối lượng sơn và dung môi đã tiêu thụ.
+* **Avg Solvent %:** Tỷ lệ trung bình của dung môi so với sơn (Cảnh báo: Nếu tỷ lệ này vượt ngưỡng chuẩn cho từng loại nhựa, cần kiểm tra lại quy trình).
 """)
 st.markdown("---")
 
