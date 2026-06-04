@@ -35,31 +35,50 @@ st.markdown("---")
 # --- 3. HEATMAP ANALYSIS ---
 st.subheader("🌡️ Process Sensitivity Heatmap (Solvent Efficiency)")
 
-# Filter data
-filtered_data = group_a[(group_a['Resin'] == selected_resin) & (group_a['Vendor'].isin(selected_vendors))].copy()
+# Khai báo bộ lọc (Widget) TRƯỚC khi lọc dữ liệu
+unique_resins = group_a['Resin'].unique()
+unique_vendors = group_a['Vendor'].unique()
 
-# Create bins using pd.cut
-filtered_data['Solvent_Bin'] = pd.cut(filtered_data['Solvent_Ratio_Percent'], bins=10)
-filtered_data['Initial_V_Bin'] = pd.cut(filtered_data['黏度(秒)'], bins=10)
+col_f1, col_f2 = st.columns(2)
+with col_f1:
+    selected_resin = st.selectbox("Filter Heatmap by Resin", unique_resins, index=0)
+with col_f2:
+    selected_vendors = st.multiselect("Filter Heatmap by Vendor", unique_vendors, default=unique_vendors)
 
-# Group and pivot
-heatmap_data = filtered_data.groupby(['Initial_V_Bin', 'Solvent_Bin'])['Sensitivity'].mean().reset_index()
-pivot_table = heatmap_data.pivot(index='Initial_V_Bin', columns='Solvent_Bin', values='Sensitivity')
+# Filter data dựa trên bộ lọc
+filtered_data = group_a[
+    (group_a['Resin'] == selected_resin) & 
+    (group_a['Vendor'].isin(selected_vendors))
+].copy()
 
-# --- FIX: Convert Interval indices/columns to strings ---
-pivot_table.index = pivot_table.index.astype(str)
-pivot_table.columns = pivot_table.columns.astype(str)
+# Kiểm tra dữ liệu rỗng để tránh lỗi khi render biểu đồ
+if not filtered_data.empty:
+    # Create bins using pd.cut
+    filtered_data['Solvent_Bin'] = pd.cut(filtered_data['Solvent_Ratio_Percent'], bins=10)
+    filtered_data['Initial_V_Bin'] = pd.cut(filtered_data['黏度(秒)'], bins=10)
 
-fig_heatmap = px.imshow(
-    pivot_table,
-    text_auto=".1f",
-    aspect="auto",
-    color_continuous_scale='RdYlGn',
-    labels=dict(x="Solvent Ratio (%)", y="Initial Viscosity (s)", color="Sensitivity"),
-    title=f"Efficiency based on Initial Viscosity ({selected_resin})"
-)
+    # Group and pivot
+    heatmap_data = filtered_data.groupby(['Initial_V_Bin', 'Solvent_Bin'])['Sensitivity'].mean().reset_index()
+    pivot_table = heatmap_data.pivot(index='Initial_V_Bin', columns='Solvent_Bin', values='Sensitivity')
 
-st.plotly_chart(fig_heatmap, use_container_width=True)
+    # FIX: Convert Interval indices/columns to strings (Tránh lỗi JSON serializable)
+    pivot_table.index = pivot_table.index.astype(str)
+    pivot_table.columns = pivot_table.columns.astype(str)
+
+    fig_heatmap = px.imshow(
+        pivot_table,
+        text_auto=".1f",
+        aspect="auto",
+        color_continuous_scale='RdYlGn',
+        labels=dict(x="Solvent Ratio (%)", y="Initial Viscosity (s)", color="Sensitivity"),
+        title=f"Efficiency based on Initial Viscosity ({selected_resin})"
+    )
+
+    st.plotly_chart(fig_heatmap, use_container_width=True)
+else:
+    st.warning("No data available for the selected filters.")
+
+st.markdown("---")
 
 # --- 4. DATA TABLE (RESIN & VENDOR PERFORMANCE) ---
 st.subheader("📋 Resin & Vendor Performance Analysis")
