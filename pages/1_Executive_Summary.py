@@ -1,77 +1,35 @@
+import plotly.express as px
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 
-# --- 1. SYSTEM GUARDRAIL ---
-if 'raw_data_loaded' not in st.session_state or not st.session_state['raw_data_loaded']:
-    st.warning("⚠️ Please upload data on the main page (App) first.")
-    st.stop()
+# --- Đảm bảo cột ngày tháng đã chuẩn hóa ---
+# Thay 'Date' bằng tên cột ngày thực tế trong file của bạn (vd: '生產日期' hoặc 'Ngày')
+date_column = 'Date' 
 
-# --- 2. DATA RETRIEVAL ---
-group_a = st.session_state['group_a_data'].copy()
-rejected_data = st.session_state['rejected_data'].copy()
+# --- 1. XỬ LÝ DỮ LIỆU: Nhóm theo Ngày VÀ Loại nhựa (Resin) ---
+# Đếm số lượng sự kiện (Coil mix) theo từng ngày cho mỗi loại Resin
+daily_resin_activity = group_a.groupby([date_column, 'Resin']).size().reset_index(name='Number of Events')
 
-st.title("📊 Executive Summary")
-st.markdown("---")
+# --- 2. VẼ BIỂU ĐỒ NHIỀU ĐƯỜNG (MULTI-LINE CHART) ---
+fig_activity = px.line(
+    daily_resin_activity,
+    x=date_column,
+    y='Number of Events',
+    color='Resin',        # <-- ĐÂY LÀ CHÌA KHÓA: Tách mỗi loại nhựa thành 1 đường riêng biệt
+    markers=True,
+    title="Daily Valid Mix Events by Resin Type"
+)
 
-# --- 3. PAINT CODE DICTIONARY VERIFICATION ---
-with st.expander("📖 Paint Code Dictionary Verification"):
-    st.markdown("""
-    **System Decoding Logic:**
-    * **Index 0:** Primary Classification (Char_1)
-    * **Index 1:** Vendor
-    * **Index 2:** Resin
-    * **Index 3:** Application / Feature
-    * **Index 6:** Color
-    """)
-    
-    st.info("👇 Auto-decoded results from your raw data:")
-    
-    # Safely display decoded columns if they exist in the dataframe
-    display_cols = ['塗料編號', 'Paint_Code', 'Vendor', 'Resin', 'Feature', 'Color', 'Char_1']
-    available_cols = [col for col in display_cols if col in group_a.columns]
-    
-    if available_cols:
-        sample_decode = group_a[available_cols].drop_duplicates(subset=['Paint_Code'])
-        st.dataframe(sample_decode, use_container_width=True)
+# --- 3. TỐI ƯU GIAO DIỆN HIỂN THỊ ---
+fig_activity.update_layout(
+    xaxis_title="Date",
+    yaxis_title="Number of Events",
+    plot_bgcolor='rgba(0,0,0,0)',   # Nền trong suốt
+    hovermode="x unified",          # Gộp tooltip: Trỏ chuột vào 1 ngày sẽ hiện thông số của tất cả các loại nhựa
+    legend_title_text='Resin Type',
+    margin=dict(l=20, r=20, t=40, b=20)
+)
 
-# --- 4. SMART DATE COLUMN DETECTION ---
-# Added '攪拌日期' as the top priority candidate for automatic detection
-date_candidates = ['攪拌日期', '調漆日期', '日期', 'Date', '生產日期', '調漆時間']
-date_column = None
-
-for col in date_candidates:
-    if col in group_a.columns:
-        date_column = col
-        break
-
-# --- 5. PRODUCTION ACTIVITY CHART ---
+# Render lên giao diện (Giao diện chuẩn tiếng Anh)
 st.subheader("📈 Production Activity Over Time")
-
-if date_column is None:
-    st.error("❌ System could not detect a valid Date column. Please verify your Excel file structure.")
-else:
-    # Group data by the detected Date column and Resin type
-    daily_resin_activity = group_a.groupby([date_column, 'Resin']).size().reset_index(name='Number of Events')
-
-    # Generate the multi-line chart using Plotly Express
-    fig_activity = px.line(
-        daily_resin_activity,
-        x=date_column,
-        y='Number of Events',
-        color='Resin',        # Automatically separates each resin into its own line
-        markers=True,
-        title="Daily Valid Mix Events by Resin Type"
-    )
-
-    # Optimize chart layout parameters (Enforcing English interface standard)
-    fig_activity.update_layout(
-        xaxis_title="Date",
-        yaxis_title="Number of Events",
-        plot_bgcolor='rgba(0,0,0,0)',   
-        hovermode="x unified",          
-        legend_title_text='Resin Type',
-        margin=dict(l=20, r=20, t=40, b=20)
-    )
-
-    st.plotly_chart(fig_activity, use_container_width=True)
+st.plotly_chart(fig_activity, use_container_width=True)
