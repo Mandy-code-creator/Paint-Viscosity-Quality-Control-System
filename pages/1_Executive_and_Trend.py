@@ -67,20 +67,26 @@ if not df_adjusted.empty:
                 # Vẽ biểu đồ lưới (Facet Grid)
                 fig = px.line(
                     df_melt, x='Mix_Date', y='Viscosity',
-                    color='Stage',             # Đỏ/Xanh cho Trước/Sau
-                    symbol='Supplier',         # Hình khối cho Supplier
-                    facet_col='Paint_Code_Str',# TÁCH RIÊNG TỪNG MÃ SƠN
-                    facet_col_wrap=3,          # Xuống dòng sau mỗi 3 mã
+                    color='Stage',
+                    symbol='Supplier',
+                    facet_col='Paint_Code_Str',
+                    facet_col_wrap=3,
                     markers=True,
                     color_discrete_map={'Before': '#FF4B4B', 'After': '#00BFFF'}
                 )
+                
+                # --- NÂNG CẤP: LÀM SẠCH TIÊU ĐỀ FACET ---
+                # Loại bỏ tiền tố "Paint_Code_Str=" khỏi tiêu đề mỗi ô
+                fig.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
                 
                 # Cấu hình thẩm mỹ
                 fig.update_traces(line=dict(width=2), marker=dict(size=7))
                 fig.update_layout(
                     plot_bgcolor='white',
                     height=400 * (len(df_resin['Paint_Code_Str'].unique()) // 3 + 1),
-                    margin=dict(t=50, b=20, l=20, r=20)
+                    margin=dict(t=60, b=20, l=20, r=20),
+                    title_text=f"Viscosity Trend by Paint Code (Resin: {resin})",
+                    title_x=0.5
                 )
                 fig.update_xaxes(showline=True, linecolor='black', gridcolor='lightgray')
                 fig.update_yaxes(showline=True, linecolor='black', gridcolor='lightgray')
