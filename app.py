@@ -1,32 +1,64 @@
 import streamlit as st
-from data_processing import load_and_preprocess, render_sidebar_filters
+import pandas as pd
+from modules.data_validation import process_and_validate
+from modules.charts import render_data_health_kpi
 
-st.set_page_config(page_title="Paint QC Dashboard", layout="wide")
-st.title("Paint Viscosity Quality Control System")
+# 1. Page Configuration (Must be the first command)
+st.set_page_config(
+    page_title="Paint Viscosity Analytics",
+    page_icon="🧪",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-uploaded_file = st.sidebar.file_uploader("Upload Production Data", type=["csv", "xlsx"])
+# 2. Global Session State Initialization
+if 'group_a_data' not in st.session_state:
+    st.session_state['group_a_data'] = None
+if 'rejected_data' not in st.session_state:
+    st.session_state['rejected_data'] = None
+if 'raw_data_loaded' not in st.session_state:
+    st.session_state['raw_data_loaded'] = False
 
-if uploaded_file is not None:
-    try:
-        # Tải dữ liệu 1 lần duy nhất
-        if 'raw_data' not in st.session_state:
-            df = load_and_preprocess(uploaded_file)
-            st.session_state['raw_data'] = df
-        else:
-            df = st.session_state['raw_data']
+# 3. Main Landing Page UI
+st.title("🧪 Paint Viscosity Analytics & SPC Control")
+st.markdown("""
+Welcome to the Viscosity SPC & Recommendation Engine. 
+Please initialize the system by uploading your production data file via the sidebar.
+""")
 
-        st.success("Data loaded successfully. Please select a page from the sidebar.")
-        
-        # Áp dụng bộ lọc Global từ Sidebar
-        df_filtered = render_sidebar_filters(df)
-        
-        st.write("### Filtered Production Data Overview")
-        preview_columns = ['Mix_Date', 'Batch_Lot', 'Drum_No', 'Paint_Code_Str', 'Supplier', 
-                           'Resin_Type', 'Color_Group', 'Viscosity_Before', 'Viscosity_After', 'Reduction']
-        existing_cols = [col for col in preview_columns if col in df_filtered.columns]
-        st.dataframe(df_filtered[existing_cols].head(15))
-        
-    except Exception as e:
-        st.error(f"Error processing file: {e}")
+# 4. Sidebar: Data Upload & Global Validation
+with st.sidebar:
+    st.header("⚙️ System Initialization")
+    uploaded_file = st.file_uploader("Upload Raw Data (CSV/Excel)", type=['csv', 'xlsx'])
+    
+    if uploaded_file is not None:
+        try:
+            # Read file
+            if uploaded_file.name.endswith('.csv'):
+                raw_df = pd.read_csv(uploaded_file)
+            else:
+                raw_df = pd.read_excel(uploaded_file)
+                
+            # Process and Validate (Strict Group A rule)
+            group_a, rejected = process_and_validate(raw_df)
+            
+            # Save to Session State for other pages to use
+            st.session_state['group_a_data'] = group_a
+            st.session_state['rejected_data'] = rejected
+            st.session_state['raw_data_loaded'] = True
+            
+            # Render Data Health KPI at the bottom of the sidebar
+            total_count = len(raw_df)
+            valid_count = len(group_a)
+            rejected_count = len(rejected)
+            
+            render_data_health_kpi(total_count, valid_count, rejected_count)
+            
+        except Exception as e:
+            st.error(f"Error processing file: {str(e)}")
+
+# 5. UI Routing Logic
+if st.session_state['raw_data_loaded']:
+    st.success("Data successfully loaded and validated! Please select a module from the sidebar menu to proceed.")
 else:
-    st.info("Please upload the production dataset to begin.")
+    st.info("Awaiting data upload...")
