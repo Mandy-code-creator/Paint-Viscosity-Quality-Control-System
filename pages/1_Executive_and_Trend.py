@@ -76,26 +76,28 @@ if not df_adjusted.empty:
                 )
                 
                 # --- NÂNG CẤP: DỊCH CHUYỂN NHÃN MÃ SƠN LÊN CAO ---
-                # Đẩy nhãn lên cao (yshift=30) để không bị đè vào khung kẻ
                 fig.for_each_annotation(lambda a: a.update(
                     text=a.text.split("=")[-1],
-                    yshift=30,  # Khoảng cách dịch lên phía trên
-                    font=dict(size=14, color="black")
+                    yshift=40,  # Đẩy nhãn cao hơn để không đè lên khung
+                    font=dict(size=14, color="black", weight="bold")
                 ))
                 
+                # Cho phép mỗi biểu đồ tự quản lý trục X để tránh chồng chéo ngày tháng
                 fig.update_xaxes(matches=None, showticklabels=True)
                 fig.update_traces(line=dict(width=2), marker=dict(size=7))
                 
-                # Cấu hình thẩm mỹ và TĂNG LỀ TRÊN (Top Margin)
+                # --- NÂNG CẤP: TĂNG KHOẢNG CÁCH VÀ KHUNG BAO ---
                 fig.update_layout(
                     plot_bgcolor='white',
-                    height=400 * (len(df_resin['Paint_Code_Str'].unique()) // 3 + 1),
-                    margin=dict(t=100, b=50, l=50, r=20), # t=100 tạo không gian rộng cho nhãn
+                    # Tăng chiều cao mỗi hàng biểu đồ lên 450 để thoáng hơn
+                    height=450 * (len(df_resin['Paint_Code_Str'].unique()) // 3 + 1),
+                    # Tăng lề trên (t=120) để nhãn không bị che khuất
+                    margin=dict(t=120, b=50, l=60, r=20), 
                     title_text=f"Viscosity Trend by Paint Code (Resin: {resin})",
                     title_x=0.5
                 )
                 
-                # Vẽ khung bao
+                # Vẽ khung bao (Mirror) cho từng biểu đồ con
                 fig.update_xaxes(
                     showline=True, linecolor='black', linewidth=1, mirror=True,
                     showgrid=True, gridcolor='lightgray'
