@@ -1,43 +1,78 @@
-import plotly.express as px
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 
-# --- 1. RÚT DỮ LIỆU TỪ BỘ NHỚ (ĐÂY LÀ BƯỚC BẠN BỊ THIẾU) ---
-# Đảm bảo hệ thống đã tải file trước khi chạy
+# --- 1. SYSTEM GUARDRAIL ---
 if 'raw_data_loaded' not in st.session_state or not st.session_state['raw_data_loaded']:
-    st.warning("⚠️ Please upload data on the main page (app) first.")
+    st.warning("⚠️ Please upload data on the main page (App) first.")
     st.stop()
 
-group_a = st.session_state['group_a_data']
+# --- 2. DATA RETRIEVAL ---
+group_a = st.session_state['group_a_data'].copy()
+rejected_data = st.session_state['rejected_data'].copy()
 
-# --- 2. XỬ LÝ DỮ LIỆU NGÀY THÁNG ---
-# BẠN LƯU Ý: Đổi chữ 'Date' dưới đây thành đúng tên cột ngày tháng trong file Excel của bạn 
-# (Ví dụ: '調漆日期', 'Date', hoặc '生產日期'...)
-date_column = 'Date' 
+st.title("📊 Executive Summary")
+st.markdown("---")
 
-# Nhóm theo Ngày VÀ Loại nhựa (Resin)
-daily_resin_activity = group_a.groupby([date_column, 'Resin']).size().reset_index(name='Number of Events')
+# --- 3. PAINT CODE DICTIONARY VERIFICATION ---
+with st.expander("📖 Paint Code Dictionary Verification"):
+    st.markdown("""
+    **System Decoding Logic:**
+    * **Index 0:** Primary Classification (Char_1)
+    * **Index 1:** Vendor
+    * **Index 2:** Resin
+    * **Index 3:** Application / Feature
+    * **Index 6:** Color
+    """)
+    
+    st.info("👇 Auto-decoded results from your raw data:")
+    
+    # Safely display decoded columns if they exist in the dataframe
+    display_cols = ['塗料編號', 'Paint_Code', 'Vendor', 'Resin', 'Feature', 'Color', 'Char_1']
+    available_cols = [col for col in display_cols if col in group_a.columns]
+    
+    if available_cols:
+        sample_decode = group_a[available_cols].drop_duplicates(subset=['Paint_Code'])
+        st.dataframe(sample_decode, use_container_width=True)
 
-# --- 3. VẼ BIỂU ĐỒ NHIỀU ĐƯỜNG ---
-fig_activity = px.line(
-    daily_resin_activity,
-    x=date_column,
-    y='Number of Events',
-    color='Resin',        # Tách mỗi loại nhựa thành 1 đường
-    markers=True,
-    title="Daily Valid Mix Events by Resin Type"
-)
+# --- 4. SMART DATE COLUMN DETECTION ---
+# Hệ thống tự động quét và tìm tên cột ngày tháng trong file Excel
+date_candidates = ['調漆日期', '日期', 'Date', '生產日期', '調漆時間']
+date_column = None
 
-# --- 4. TỐI ƯU GIAO DIỆN HIỂN THỊ (Tiếng Anh 100%) ---
-fig_activity.update_layout(
-    xaxis_title="Date",
-    yaxis_title="Number of Events",
-    plot_bgcolor='rgba(0,0,0,0)',   
-    hovermode="x unified",          
-    legend_title_text='Resin Type',
-    margin=dict(l=20, r=20, t=40, b=20)
-)
+for col in date_candidates:
+    if col in group_a.columns:
+        date_column = col
+        break
 
-# Render lên giao diện
+# --- 5. PRODUCTION ACTIVITY CHART ---
 st.subheader("📈 Production Activity Over Time")
-st.plotly_chart(fig_activity, use_container_width=True)
+
+if date_column is None:
+    # Cảnh báo nếu file Excel hoàn toàn không có cột nào chứa ngày tháng
+    st.error("❌ System could not detect a valid Date column (e.g., '調漆日期', 'Date'). Please verify your Excel file structure.")
+else:
+    # Nhóm dữ liệu theo Ngày và Loại Nhựa (Resin)
+    daily_resin_activity = group_a.groupby([date_column, 'Resin']).size().reset_index(name='Number of Events')
+
+    # Vẽ biểu đồ nhiều đường (Multi-line chart)
+    fig_activity = px.line(
+        daily_resin_activity,
+        x=date_column,
+        y='Number of Events',
+        color='Resin',        # Tự động gán mỗi loại Resin một màu riêng biệt
+        markers=True,
+        title="Daily Valid Mix Events by Resin Type"
+    )
+
+    # Tối ưu giao diện biểu đồ
+    fig_activity.update_layout(
+        xaxis_title="Date",
+        yaxis_title="Number of Events",
+        plot_bgcolor='rgba(0,0,0,0)',   
+        hovermode="x unified",          
+        legend_title_text='Resin Type',
+        margin=dict(l=20, r=20, t=40, b=20)
+    )
+
+    st.plotly_chart(fig_activity, use_container_width=True)
