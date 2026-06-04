@@ -14,12 +14,29 @@ rejected_data = st.session_state['rejected_data'].copy()
 st.title("📊 Executive Summary")
 st.markdown("---")
 
-# --- 3. UPDATED RESIN & VENDOR PERFORMANCE ANALYSIS ---
+# --- 3. RESIN & VENDOR PERFORMANCE ANALYSIS ---
 st.subheader("💡 Resin & Vendor Performance Analysis")
 
-# ... (đoạn code tính toán dataframe của bạn ở đây) ...
+# Calculate the summary dataframe BEFORE calling st.dataframe
+group_a['Solvent_Ratio_Percent'] = (group_a['添加重量'] / group_a['塗料重量']) * 100
 
-# Display the dataframe
+detailed_summary = group_a.groupby(['Resin', 'Vendor']).agg({
+    '塗料批號': 'nunique',
+    '塗料重量': 'sum',
+    '添加重量': 'sum',
+    '黏度(秒)': 'mean',
+    '黏度(秒)_1': 'mean',
+    'Solvent_Ratio_Percent': 'mean'
+}).rename(columns={
+    '塗料批號': 'Batches',
+    '塗料重量': 'Total Paint (kg)',
+    '添加重量': 'Total Solvent (kg)',
+    '黏度(秒)': 'Initial V (s)',
+    '黏度(秒)_1': 'Final V (s)',
+    'Solvent_Ratio_Percent': 'Avg Solvent %'
+})
+
+# Now display the dataframe safely
 st.dataframe(detailed_summary.style.format({
     'Total Paint (kg)': '{:,.0f}',
     'Total Solvent (kg)': '{:,.0f}',
@@ -28,7 +45,7 @@ st.dataframe(detailed_summary.style.format({
     'Avg Solvent %': '{:.2f} %'
 }), use_container_width=True)
 
-# --- CHỖ SỬA: Đưa chú thích vào đây và dùng tiếng Anh ---
+# Footer caption
 st.caption("""
 **Metrics Definition:**
 * **Batches:** Number of valid mix events.
