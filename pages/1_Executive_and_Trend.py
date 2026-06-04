@@ -1,6 +1,7 @@
 import streamlit as st
 import plotly.express as px
 import pandas as pd
+from data_processing import render_sidebar_filters
 
 # =========================
 # CHECK DATA
@@ -9,7 +10,10 @@ if 'raw_data' not in st.session_state:
     st.warning("Please upload data on main page.")
     st.stop()
 
-df = st.session_state['raw_data']
+# =========================
+# FILTER SIDEBAR (RESTORED)
+# =========================
+df = render_sidebar_filters(st.session_state['raw_data'])
 
 st.header("Process Improvement Analysis (No Spec Required)")
 
@@ -25,25 +29,21 @@ df['Mix_Date'] = pd.to_datetime(df['Mix_Date'])
 df = df.sort_values('Mix_Date')
 
 # =========================
-# KPI - SHIFT OVERALL
+# KPI OVERALL SHIFT
 # =========================
-df_before = df.groupby('Mix_ID')['Viscosity_Before'].mean()
-df_after = df.groupby('Mix_ID')['Viscosity_After'].mean()
-
 overall_before = df['Viscosity_Before'].mean()
 overall_after = df['Viscosity_After'].mean()
-
 delta = overall_after - overall_before
 
 c1, c2, c3 = st.columns(3)
 c1.metric("Avg Before", f"{overall_before:.1f} s")
 c2.metric("Avg After", f"{overall_after:.1f} s")
-c3.metric("Δ Change (After - Before)", f"{delta:.1f} s")
+c3.metric("Δ Change", f"{delta:.1f} s")
 
 st.divider()
 
 # =========================
-# 1. SHIFT TREND OVER TIME
+# 1. SHIFT TREND
 # =========================
 st.subheader("1. Process Shift Over Time")
 
@@ -67,21 +67,13 @@ fig1.update_layout(
     title_x=0.5
 )
 
-fig1.update_xaxes(
-    tickformat="%Y-%m-%d",
-    showgrid=True,
-    gridcolor="lightgray"
-)
-
-fig1.update_yaxes(
-    showgrid=True,
-    gridcolor="lightgray"
-)
+fig1.update_xaxes(tickformat="%Y-%m-%d", showgrid=True, gridcolor="lightgray")
+fig1.update_yaxes(showgrid=True, gridcolor="lightgray")
 
 st.plotly_chart(fig1, use_container_width=True)
 
 # =========================
-# 2. IMPROVEMENT (Δ PER BATCH)
+# 2. IMPROVEMENT PER BATCH
 # =========================
 st.subheader("2. Improvement per Batch (After - Before)")
 
@@ -96,9 +88,9 @@ fig2 = px.bar(
     improve_df,
     x='Mix_ID',
     y='Delta',
-    title="Viscosity Change per Batch (Negative = Improvement)",
     color='Delta',
-    color_continuous_scale='RdYlGn_r'
+    color_continuous_scale='RdYlGn_r',
+    title="Viscosity Change per Batch"
 )
 
 fig2.update_layout(
@@ -116,7 +108,7 @@ st.plotly_chart(fig2, use_container_width=True)
 # =========================
 # 3. DISTRIBUTION SHIFT
 # =========================
-st.subheader("3. Distribution Shift (Process Stability)")
+st.subheader("3. Distribution Shift (Stability)")
 
 dist_df = df.melt(
     id_vars=['Mix_ID'],
