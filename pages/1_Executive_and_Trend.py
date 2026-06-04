@@ -67,7 +67,9 @@ if not df_adjusted.empty:
 
                 df_resin = df_adjusted[df_adjusted['Resin_Type'] == resin].copy()
 
-                # datetime chuẩn
+                # =========================
+                # KEEP DATETIME (IMPORTANT)
+                # =========================
                 df_resin['Mix_Date'] = pd.to_datetime(df_resin['Mix_Date'])
                 df_resin = df_resin.sort_values('Mix_Date')
 
@@ -97,10 +99,13 @@ if not df_adjusted.empty:
 
                 num_rows = len(df_resin['Paint_Code_Str'].unique())
 
+                # =========================
+                # LAYOUT
+                # =========================
                 fig.update_layout(
                     plot_bgcolor='white',
                     paper_bgcolor='white',
-                    margin=dict(t=120, b=60, l=70, r=30),
+                    margin=dict(t=160, b=60, l=70, r=30),
                     height=450 * num_rows,
                     title={
                         'text': f"Viscosity Trend by Paint Code (Resin: {resin})",
@@ -108,14 +113,18 @@ if not df_adjusted.empty:
                     }
                 )
 
-                # clean facet label
+                # =========================
+                # MOVE FACET LABEL UP
+                # =========================
                 fig.for_each_annotation(lambda a: a.update(
                     text=a.text.split("=")[-1],
+                    y=1.08,
+                    yanchor="bottom",
                     font=dict(size=14, color="black")
                 ))
 
                 # =========================
-                # CHỈ BỎ GIỜ TRÊN TRỤC X
+                # X AXIS (REMOVE TIME ONLY VISUAL)
                 # =========================
                 fig.update_xaxes(
                     tickformat="%Y-%m-%d",
@@ -123,19 +132,17 @@ if not df_adjusted.empty:
                     gridcolor="lightgray",
                     showline=True,
                     linecolor="black",
-                    linewidth=1,
                     mirror=True
                 )
 
                 # =========================
-                # GRID RÕ RÀNG TRỤC Y
+                # Y AXIS GRID
                 # =========================
                 fig.update_yaxes(
                     showgrid=True,
                     gridcolor="lightgray",
                     showline=True,
                     linecolor="black",
-                    linewidth=1,
                     mirror=True
                 )
 
