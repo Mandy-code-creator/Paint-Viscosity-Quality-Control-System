@@ -3,10 +3,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 
+# Set page configuration
 st.set_page_config(page_title="Viscosity Analysis", page_icon="🔬", layout="wide")
 
 st.title("🔬 Viscosity Reduction Analysis")
-st.markdown("Analyze how viscosity changes before and after solvent addition across different resin types and features.")
+st.markdown("Analyze how viscosity changes before and after solvent addition across different resin types and solvent types.")
 
 # 1. Global State Check
 if not st.session_state.get('raw_data_loaded', False):
@@ -17,15 +18,23 @@ group_a = st.session_state['group_a_data'].copy()
 
 # 2. Sidebar Filters
 st.sidebar.header("🔍 Analysis Filters")
-selected_vendor = st.sidebar.selectbox("Vendor", ["All"] + sorted(group_a['Vendor'].unique().tolist()))
-selected_resin = st.sidebar.selectbox("Resin Type", ["All"] + sorted(group_a['Resin'].unique().tolist()))
+vendors = sorted([v for v in group_a['Vendor'].unique() if v != 'Unknown'])
+selected_vendor = st.sidebar.selectbox("Vendor", ["All"] + vendors)
 
-# Apply Filters
-filtered_df = group_a.copy()
-if selected_vendor != "All":
-    filtered_df = filtered_df[filtered_df['Vendor'] == selected_vendor]
-if selected_resin != "All":
-    filtered_df = filtered_df[filtered_df['Resin'] == selected_resin]
+# Apply Vendor filter for dynamic Resin options
+df_v = group_a[group_a['Vendor'] == selected_vendor] if selected_vendor != "All" else group_a
+resins = sorted([r for r in df_v['Resin'].unique() if r != 'Unknown'])
+selected_resin = st.sidebar.selectbox("Resin Type", ["All"] + resins)
+
+# Apply Resin filter for dynamic Solvent options
+df_vr = df_v[df_v['Resin'] == selected_resin] if selected_resin != "All" else df_v
+solvents = sorted([s for s in df_vr['Solvent_Type'].unique() if s != 'Unknown'])
+selected_solvent = st.sidebar.selectbox("Solvent Type", ["All"] + solvents)
+
+# Apply all filters
+filtered_df = df_vr.copy()
+if selected_solvent != "All":
+    filtered_df = filtered_df[filtered_df['Solvent_Type'] == selected_solvent]
 
 if filtered_df.empty:
     st.error("No valid data available for the selected filters.")
@@ -33,18 +42,18 @@ if filtered_df.empty:
 
 # 3. Chart: Scatter Plot (Before vs After)
 st.markdown("### 1. Viscosity Shift (Before vs After)")
-# Create a scatter plot with a reference line (y=x)
 fig_scatter = px.scatter(
     filtered_df, 
     x="黏度(秒)", 
     y="黏度(秒)_1", 
     color="Resin",
+    facet_col="Solvent_Type", # Facet by solvent to see the difference clearly
     hover_data=["Paint_Code", "Delta_V", "Solvent_Ratio"],
-    title="Initial vs Final Viscosity (Points below the line indicate reduction)",
+    title="Initial vs Final Viscosity (Points below the red line indicate reduction)",
     labels={"黏度(秒)": "Initial Viscosity (sec)", "黏度(秒)_1": "Final Viscosity (sec)"}
 )
 
-# Add y=x line (No reduction line)
+# Add y=x reference line to all facets
 max_val = max(filtered_df['黏度(秒)'].max(), filtered_df['黏度(秒)_1'].max())
 fig_scatter.add_shape(
     type="line", line=dict(dash="dash", color="red"),
@@ -70,14 +79,15 @@ with col1:
     st.plotly_chart(fig_hist, use_container_width=True)
 
 with col2:
-    st.markdown("### 3. Sensitivity by Resin Type")
-    # Box plot to show how sensitive different resins are to solvent
+    st.markdown("### 3. Sensitivity by Resin & Solvent Type")
+    # Box plot with facet to compare sensitivity accurately
     fig_box = px.box(
         filtered_df, 
         x="Resin", 
         y="Viscosity_Sensitivity",
         color="Resin",
+        facet_col="Solvent_Type",
         title="Viscosity Reduction per 1% Solvent Added",
-        labels={"Viscosity_Sensitivity": "Sensitivity (sec drop per 1% solvent)"}
+        labels={"Viscosity_Sensitivity": "Sensitivity (sec/1%)"}
     )
     st.plotly_chart(fig_box, use_container_width=True)
