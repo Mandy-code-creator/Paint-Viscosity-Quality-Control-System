@@ -79,18 +79,23 @@ with col1:
     st.plotly_chart(fig_hist, use_container_width=True)
 
 with col2:
-    st.markdown("### 3. Sensitivity by Resin & Solvent Type")
-    # Tăng chiều cao lên 1000 hoặc hơn để biểu đồ "giãn" ra
-    fig_box = px.box(
-        filtered_df, 
-        x="Resin", 
-        y="Viscosity_Sensitivity",
-        color="Resin",
-        facet_col="Solvent_Type",
-        facet_col_wrap=2, 
-        title="Viscosity Reduction per 1% Solvent Added",
-        labels={"Viscosity_Sensitivity": "Sensitivity (sec/1%)"}
-    )
-    # Tăng chiều cao đáng kể để các ô không bị co lại
-    fig_box.update_layout(height=1200) 
-    st.plotly_chart(fig_box, use_container_width=True)
+    st.markdown("### 3. Average Sensitivity by Resin & Solvent (Simplified)")
+
+# Tính trung bình và độ lệch chuẩn
+summary_df = filtered_df.groupby(['Resin', 'Solvent_Type'])['Viscosity_Sensitivity'].agg(['mean', 'std']).reset_index()
+
+# Vẽ biểu đồ Bar Chart
+fig_bar = px.bar(
+    summary_df,
+    x='Resin',
+    y='mean',
+    error_y='std',  # Thanh sai số thể hiện độ ổn định (càng ngắn càng đều)
+    color='Resin',
+    facet_col='Solvent_Type',
+    facet_col_wrap=3,
+    title="Average Sensitivity with Stability Range (Error Bars)",
+    labels={'mean': 'Avg Sensitivity (sec/1%)', 'std': 'Variation'}
+)
+
+fig_bar.update_layout(height=600)
+st.plotly_chart(fig_bar, use_container_width=True)
