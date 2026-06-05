@@ -12,7 +12,11 @@ if not st.session_state.get('raw_data_loaded', False):
     st.warning("⚠️ No data loaded.")
     st.stop()
 
+# Load and prepare data
 group_a = st.session_state['group_a_data'].copy()
+
+# Ép kiểu Solvent_Type sang string để Plotly hiểu là Category (ngăn lỗi dàn trải)
+group_a['Solvent_Type'] = group_a['Solvent_Type'].astype(str)
 
 # 2. Sidebar Filters
 st.sidebar.header("🔍 Analysis Filters")
@@ -32,7 +36,7 @@ color_map = {solvent: px.colors.qualitative.Plotly[i % len(px.colors.qualitative
 # 5. Hiển thị biểu đồ và bảng dữ liệu cho từng loại nhựa
 st.markdown("### Sensitivity Analysis by Resin")
 for resin in resins:
-    st.markdown(f"---")
+    st.markdown("---")
     st.markdown(f"#### Resin Type: {resin}")
     resin_data = summary_df[summary_df['Resin'] == resin].copy()
     
@@ -44,20 +48,21 @@ for resin in resins:
         error_y='std',
         title=f"Sensitivity Profile for {resin}",
         labels={'mean': 'Avg Sensitivity (sec/1%)', 'Solvent_Type': 'Solvent'},
-        color='Solvent_Type', # Gán màu theo dung môi
-        color_discrete_map=color_map # Áp dụng bảng màu đồng nhất
+        color='Solvent_Type',
+        color_discrete_map=color_map
     )
     
-    # Cấu hình chuẩn báo cáo
+    # Cấu hình chuẩn báo cáo: Nền trắng, trục rõ ràng
     fig.update_layout(
         plot_bgcolor='white',
-        height=350,
+        height=400,
         font=dict(size=14),
         margin=dict(l=50, r=50, t=50, b=50),
         showlegend=True
     )
+    # Ép trục X về dạng category để cột hiển thị độc lập
+    fig.update_xaxes(type='category', showline=True, linecolor='black', linewidth=1)
     fig.update_yaxes(showgrid=True, gridcolor='lightgray', linecolor='black', linewidth=1)
-    fig.update_xaxes(showline=True, linecolor='black', linewidth=1)
     
     st.plotly_chart(fig, use_container_width=True)
     
