@@ -181,3 +181,48 @@ st.caption("""
 * **Total Paint / Solvent (kg):** Aggregate consumption.
 * **Avg Solvent %:** Average solvent-to-paint ratio.
 """)
+# --- 5. SMART RECOMMENDATION ENGINE (MULTI-FACTOR) ---
+st.markdown("---")
+st.subheader("🧠 Smart Recommendation Engine")
+st.caption("Combines Initial Viscosity, Temperature, and Humidity to calculate the exact optimal solvent amount based on historical peak performance.")
+
+with st.container():
+    # User Inputs for Current Conditions
+    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+    with col_m1:
+        curr_viscosity = st.number_input("Current Viscosity (s)", value=120.0, step=5.0)
+    with col_m2:
+        curr_temp = st.number_input("Current Temp (°C)", value=32.0, step=1.0)
+    with col_m3:
+        curr_humidity = st.number_input("Current Humidity (%)", value=85.0, step=5.0)
+    with col_m4:
+        paint_qty = st.number_input("Paint Weight (kg)", value=200.0, step=10.0)
+
+    # --- THE ALGORITHM: Combining all parameters ---
+    # 1. Filter historical data for SIMILAR conditions (Margin of error allowed)
+    subset = group_a[
+        (group_a['Resin'] == selected_resin) &
+        (group_a['Vendor'].isin(selected_vendors)) &
+        (group_a['黏度(秒)'] >= curr_viscosity - 15) & (group_a['黏度(秒)'] <= curr_viscosity + 15) &
+        (group_a['溫度'] >= curr_temp - 5) & (group_a['溫度'] <= curr_temp + 5) &
+        (group_a['濕度'] >= curr_humidity - 10) & (group_a['濕度'] <= curr_humidity + 10)
+    ]
+
+    # 2. Extract the optimal value
+    if not subset.empty:
+        # Find the historical batch with the absolute best efficiency (Sensitivity)
+        best_scenario = subset.loc[subset['Sensitivity'].idxmax()]
+        
+        optimal_ratio_combined = best_scenario['Solvent_Ratio_Percent']
+        expected_sensitivity = best_scenario['Sensitivity']
+        recommended_solvent = paint_qty * (optimal_ratio_combined / 100)
+
+        st.success(f"""
+        ### 🎯 Recommended Solvent Addition: {recommended_solvent:.2f} kg
+        
+        **Algorithm Reference (Historical Best Match):**
+        * Optimal Solvent Ratio: **{optimal_ratio_combined:.2f}%**
+        * Expected Efficiency: **{expected_sensitivity:.2f} s reduction per 1% solvent**
+        """)
+    else:
+        st.warning("⚠️ Insufficient historical data for this exact combination of weather and viscosity. Please rely on the primary Optimal Formula heatmap above.")
