@@ -269,7 +269,7 @@ st.caption("A robust lookup table providing a standard 'Solvent Factor'. Multipl
 with st.container():
     c_ref1, c_ref2 = st.columns([1, 2])
     with c_ref1:
-        ref_coil_weight = st.number_input("Standard Coil Paint Weight (kg)", value=200.0, step=10.0)
+        ref_coil_weight = st.number_input("Standard Paint Weight (kg)", value=200.0, step=10.0)
 
     matrix_data = []
     matrix_df = filtered_data.copy()
