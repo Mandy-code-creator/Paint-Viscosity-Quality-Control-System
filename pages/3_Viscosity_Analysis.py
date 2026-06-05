@@ -1,6 +1,5 @@
 import streamlit as st
 import plotly.express as px
-import plotly.graph_objects as go
 import pandas as pd
 
 # Set page configuration
@@ -21,12 +20,12 @@ st.sidebar.header("🔍 Analysis Filters")
 vendors = sorted([v for v in group_a['Vendor'].unique() if v != 'Unknown'])
 selected_vendor = st.sidebar.selectbox("Vendor", ["All"] + vendors)
 
-# Apply Vendor filter for dynamic Resin options
+# Apply Vendor filter
 df_v = group_a[group_a['Vendor'] == selected_vendor] if selected_vendor != "All" else group_a
 resins = sorted([r for r in df_v['Resin'].unique() if r != 'Unknown'])
 selected_resin = st.sidebar.selectbox("Resin Type", ["All"] + resins)
 
-# Apply Resin filter for dynamic Solvent options
+# Apply Resin filter
 df_vr = df_v[df_v['Resin'] == selected_resin] if selected_resin != "All" else df_v
 solvents = sorted([s for s in df_vr['Solvent_Type'].unique() if s != 'Unknown'])
 selected_solvent = st.sidebar.selectbox("Solvent Type", ["All"] + solvents)
@@ -47,18 +46,19 @@ fig_scatter = px.scatter(
     x="黏度(秒)", 
     y="黏度(秒)_1", 
     color="Resin",
-    facet_col="Solvent_Type", # Facet to see performance per solvent
+    facet_col="Solvent_Type",
+    facet_col_wrap=3,
     hover_data=["Paint_Code", "Delta_V", "Solvent_Ratio"],
     title="Initial vs Final Viscosity (Points below the red line indicate reduction)",
     labels={"黏度(秒)": "Initial Viscosity (sec)", "黏度(秒)_1": "Final Viscosity (sec)"}
 )
 
-# Add y=x reference line to all facets
 max_val = max(filtered_df['黏度(秒)'].max(), filtered_df['黏度(秒)_1'].max())
 fig_scatter.add_shape(
     type="line", line=dict(dash="dash", color="red"),
     x0=0, y0=0, x1=max_val, y1=max_val
 )
+fig_scatter.update_layout(height=600)
 st.plotly_chart(fig_scatter, use_container_width=True)
 
 st.divider()
@@ -80,14 +80,16 @@ with col1:
 
 with col2:
     st.markdown("### 3. Sensitivity by Resin & Solvent Type")
-    # Box plot with facet to compare sensitivity accurately
+    # Faceted box plot to prevent chart explosion
     fig_box = px.box(
         filtered_df, 
         x="Resin", 
         y="Viscosity_Sensitivity",
         color="Resin",
         facet_col="Solvent_Type",
+        facet_col_wrap=2, 
         title="Viscosity Reduction per 1% Solvent Added",
         labels={"Viscosity_Sensitivity": "Sensitivity (sec/1%)"}
     )
+    fig_box.update_layout(height=600)
     st.plotly_chart(fig_box, use_container_width=True)
