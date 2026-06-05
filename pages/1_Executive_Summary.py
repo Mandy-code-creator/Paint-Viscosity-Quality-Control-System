@@ -264,7 +264,7 @@ with st.container():
 # --- 6. COMPREHENSIVE REFERENCE MATRIX (SOP LOOKUP) ---
 st.markdown("---")
 st.subheader("📚 SOP Coefficient Matrix (Coil-Level)")
-st.caption("A robust lookup table providing a standard 'Solvent Factor' for ALL resins and applications. Multiply this factor by your required viscosity drop to get the exact Theoretical Value of solvent.")
+st.caption("A robust lookup table providing a standard 'Solvent Factor' for ALL resins and clean applications. Multiply this factor by your required viscosity drop to get the exact Theoretical Value of solvent.")
 
 with st.container():
     c_ref1, c_ref2 = st.columns([1, 2])
@@ -274,18 +274,15 @@ with st.container():
     matrix_data = []
     matrix_df = group_a.copy()
 
-    # ==========================================
-    # LOGIC RÚT TRÍCH ỨNG DỤNG TỪ MÃ SƠN GỐC
-    # ==========================================
-    # ĐỔI TÊN CỘT NÀY CHO KHỚP VỚI FILE CỦA BẠN (VD: 'Paint_Code', '塗料代碼', 'Item_Code')
+    # Paint code column configuration
     paint_code_col = '塗料代碼' 
     
-    def get_application(code_str):
+    def get_clean_application(code_str):
         if not isinstance(code_str, str) or len(str(code_str).strip()) < 4:
             return 'Unknown/Other'
             
         code = str(code_str).strip().upper()
-        char_4 = code[3] # Lấy ký tự thứ 4 (index 3)
+        char_4 = code[3]
         
         f_map = {
             'B': 'Anti-Bacteria', 'C': 'High-Corrosion Resistance', 'D': 'Anti-Dust', 
@@ -296,20 +293,18 @@ with st.container():
             'V': 'Variety', 'U': 'Ultra-High Formability', 'W': 'Wrinkle Paint', 'Z': 'Other'
         }
         
-        # Nếu ký tự thứ 4 là bất kỳ chữ số nào (0-9)
         if char_4.isdigit():
             return 'General Usage'
             
         return f_map.get(char_4, 'Unknown/Other')
 
-    # Ưu tiên bóc tách trực tiếp từ mã sơn gốc
     if paint_code_col in matrix_df.columns:
-        matrix_df['Application'] = matrix_df[paint_code_col].apply(get_application)
-    # Phương án dự phòng: Nếu trong file đã có sẵn cột 'Feature' từ hàm giải mã của bạn
+        matrix_df['Application'] = matrix_df[paint_code_col].apply(get_clean_application)
     elif 'Feature' in matrix_df.columns:
+        # Strip out any legacy tail format text from the string if present
         matrix_df['Application'] = matrix_df['Feature'].astype(str).apply(lambda x: x.split(' (')[0] if '(' in x else x)
     else:
-        matrix_df['Application'] = f'Column "{paint_code_col}" Not Found'
+        matrix_df['Application'] = 'Unknown/Other'
 
     def generate_dynamic_bins(series):
         if len(series) < 4:
@@ -319,29 +314,23 @@ with st.container():
         except ValueError:
             return pd.cut(series, bins=4, precision=0)
 
-    # Chia vùng độ nhớt động
     matrix_df['Viscosity_Zone'] = matrix_df.groupby('Resin')['黏度(秒)'].transform(generate_dynamic_bins)
 
-    # Cập nhật danh sách các cột dùng để nhóm dữ liệu
     grouping_cols = ['Resin', 'Vendor', 'Application', 'Viscosity_Zone']
     has_solvent_type = 'Solvent_Type' in matrix_df.columns
     if has_solvent_type:
         grouping_cols.insert(2, 'Solvent_Type')
 
-    # 1. Tính toán Typical Target chi tiết
     target_viscosity_map = matrix_df.groupby(['Resin', 'Vendor', 'Application'])['黏度(秒)_1'].median().reset_index()
     target_viscosity_map = target_viscosity_map.rename(columns={'黏度(秒)_1': 'Typical_Target'})
 
-    # 2. Tính toán Độ nhạy (Sensitivity)
     sensitivity_map = matrix_df.groupby(grouping_cols, observed=False)['Sensitivity'].mean().reset_index()
     sensitivity_map = sensitivity_map[sensitivity_map['Sensitivity'] > 0]
 
-    # 3. Kết nối dữ liệu
     sop_grouped = pd.merge(sensitivity_map, target_viscosity_map, on=['Resin', 'Vendor', 'Application'], how='inner')
 
     for _, row in sop_grouped.iterrows():
         sens = row['Sensitivity']
-        
         theo_ratio_per_sec = 1.0 / sens
         factor_kg_per_sec = ref_coil_weight * (theo_ratio_per_sec / 100.0)
 
@@ -387,7 +376,7 @@ with st.container():
         st.download_button(
             label="📥 Download Coefficient Matrix as CSV",
             data=csv,
-            file_name='SOP_Coefficient_Matrix_With_Application.csv',
+            file_name='SOP_Coefficient_Matrix_Clean.csv',
             mime='text/csv',
         )
     else:
