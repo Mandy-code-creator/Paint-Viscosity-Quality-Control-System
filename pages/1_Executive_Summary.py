@@ -150,16 +150,17 @@ st.markdown("---")
 st.markdown("---")
 st.subheader("📋 Resin & Vendor Performance Analysis")
 
-# Sử dụng bản sao dữ liệu gốc
+# Sử dụng bản sao dữ liệu
 matrix_df = group_a.copy()
 
-# Cấu hình cột mã sơn
-paint_code_col = '塗料代碼' 
+# TỰ ĐỘNG PHÁT HIỆN TÊN CỘT MÃ SƠN
+# Thay vì ép buộc tên cột, ta kiểm tra danh sách cột có sẵn trong file
+possible_names = ['塗料代碼', '塗料代碼(Paint Code)', 'Paint Code', 'Item Code']
+paint_code_col = next((col for col in matrix_df.columns if col in possible_names), None)
 
-# Hàm giải mã ứng dụng (Đúng logic chuẩn)
+# Hàm giải mã (giữ nguyên logic chuẩn)
 def get_clean_application(code_str):
-    if not isinstance(code_str, str) or len(str(code_str).strip()) < 4:
-        return 'Unknown/Other'
+    if not isinstance(code_str, str) or len(str(code_str).strip()) < 4: return 'Unknown/Other'
     code = str(code_str).strip().upper()
     char_4 = code[3]
     f_map = {
@@ -172,64 +173,40 @@ def get_clean_application(code_str):
     }
     return 'General Usage' if char_4.isdigit() else f_map.get(char_4, 'Unknown/Other')
 
-# Áp dụng giải mã
-if paint_code_col in matrix_df.columns:
+# Cập nhật Application
+if paint_code_col:
     matrix_df['Application'] = matrix_df[paint_code_col].apply(get_clean_application)
 else:
-    matrix_df['Application'] = 'Unknown/Other'
+    # Nếu không tìm thấy cột mã sơn, báo lỗi rõ ràng để bạn biết tên cột thực là gì
+    matrix_df['Application'] = f"Not Found: {list(matrix_df.columns)[:3]}"
 
-# Đảm bảo các cột cần thiết tồn tại
-if 'Solvent_Type' not in matrix_df.columns: matrix_df['Solvent_Type'] = 'N/A'
-if '溫度' not in matrix_df.columns: matrix_df['溫度'] = 0
-if '濕度' not in matrix_df.columns: matrix_df['濕度'] = 0
+# Đảm bảo các cột môi trường (nếu chưa có thì tạo giá trị mặc định để tránh lỗi)
+for col in ['溫度', '濕度', 'Solvent_Type']:
+    if col not in matrix_df.columns: matrix_df[col] = 'N/A'
 
-# Perform grouping (Thêm cột 溫度 và 濕度 vào để tính trung bình)
+# Grouping
 detailed_summary = matrix_df.groupby(['Resin', 'Vendor', 'Application', 'Solvent_Type']).agg({
-    '塗料批號': 'nunique',
-    '塗料重量': 'sum',
-    '添加重量': 'sum',
-    '黏度(秒)': 'mean',
-    '黏度(秒)_1': 'mean',
-    '溫度': 'mean',
-    '濕度': 'mean',
-    'Solvent_Ratio_Percent': 'mean',
-    'Sensitivity': 'mean'
+    '塗料批號': 'nunique', '塗料重量': 'sum', '添加重量': 'sum',
+    '黏度(秒)': 'mean', '黏度(秒)_1': 'mean',
+    '溫度': 'mean', '濕度': 'mean',
+    'Solvent_Ratio_Percent': 'mean', 'Sensitivity': 'mean'
 }).rename(columns={
-    '塗料批號': 'Batches',
-    '塗料重量': 'Total Paint (kg)',
-    '添加重量': 'Total Solvent (kg)',
-    '黏度(秒)': 'Initial V (s)',
-    '黏度(秒)_1': 'Final V (s)',
-    '溫度': 'Avg Temp (°C)',
-    '濕度': 'Avg Humidity (%)',
-    'Solvent_Ratio_Percent': 'Avg Solvent %',
-    'Sensitivity': 'Avg Sensitivity'
+    '塗料批號': 'Batches', '塗料重量': 'Total Paint (kg)', '添加重量': 'Total Solvent (kg)',
+    '黏度(秒)': 'Initial V (s)', '黏度(秒)_1': 'Final V (s)',
+    '溫度': 'Avg Temp (°C)', '濕度': 'Avg Humidity (%)',
+    'Solvent_Ratio_Percent': 'Avg Solvent %', 'Sensitivity': 'Avg Sensitivity'
 })
 
-# Calculate Solvent % / 1s Drop
-detailed_summary['Solvent % / 1s Drop'] = detailed_summary['Avg Sensitivity'].apply(
-    lambda x: (1.0 / x) if x > 0 else 0
-)
+detailed_summary['Solvent % / 1s Drop'] = detailed_summary['Avg Sensitivity'].apply(lambda x: (1.0 / x) if x > 0 else 0)
 detailed_summary = detailed_summary.drop(columns=['Avg Sensitivity'])
 
-# Display
 st.dataframe(detailed_summary.style.format({
-    'Total Paint (kg)': '{:,.0f}',
-    'Total Solvent (kg)': '{:,.0f}',
-    'Initial V (s)': '{:.2f}',
-    'Final V (s)': '{:.2f}',
-    'Avg Temp (°C)': '{:.1f}',
-    'Avg Humidity (%)': '{:.1f}',
-    'Avg Solvent %': '{:.2f} %',
-    'Solvent % / 1s Drop': '{:.3f} %'
+    'Total Paint (kg)': '{:,.0f}', 'Total Solvent (kg)': '{:,.0f}',
+    'Initial V (s)': '{:.2f}', 'Final V (s)': '{:.2f}',
+    'Avg Temp (°C)': '{:.1f}', 'Avg Humidity (%)': '{:.1f}',
+    'Avg Solvent %': '{:.2f} %', 'Solvent % / 1s Drop': '{:.3f} %'
 }), use_container_width=True)
 
-st.caption("""
-**Metrics Definition:**
-* **Batches:** Number of valid mix events at the coil level.
-* **Solvent % / 1s Drop:** The average theoretical percentage of solvent required to reduce viscosity by exactly 1 second.
-* **Avg Temp/Humidity:** Average environmental conditions during production, useful for correlating with solvent evaporation rates.
-""")
 # --- 5. SMART RECOMMENDATION ENGINE (MULTI-FACTOR) ---
 st.markdown("---")
 st.subheader("🧠 Smart Recommendation Engine")
