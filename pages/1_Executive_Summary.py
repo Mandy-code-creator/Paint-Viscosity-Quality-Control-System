@@ -86,11 +86,31 @@ if not filtered_data.empty:
     fig_heatmap.update_yaxes(categoryorder='array', categoryarray=correct_y_order)
 
     st.plotly_chart(fig_heatmap, use_container_width=True)
+    
+    # --- THÊM MỚI: CÔNG THỨC VÀ MÁY TÍNH DƯỚI BIỂU ĐỒ ---
+    st.info("""
+    **SOP: HƯỚNG DẪN TÍNH TOÁN LƯỢNG DUNG MÔI CẦN CHÂM**
+    1. Đo độ nhớt thực tế của thùng sơn hiện tại.
+    2. Dóng trên biểu đồ để tìm ô **Màu Xanh Lá (Sensitivity cao nhất)** tương ứng với độ nhớt đó.
+    3. Nhìn xuống trục ngang để lấy **Tỷ lệ dung môi tối ưu (%)**.
+    
+    **Công thức:** **Khối lượng dung môi (kg) = Khối lượng sơn (kg) × Tỷ lệ dung môi tối ưu (%)**
+    """)
+
+    with st.expander("🧮 Máy Tính Pha Dung Môi Nhanh (Quick Calculator)", expanded=False):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            paint_weight = st.number_input("1. Nhập Khối lượng sơn (kg)", min_value=0.0, value=200.0, step=10.0)
+        with c2:
+            optimal_ratio = st.number_input("2. Nhập Tỷ lệ tối ưu từ biểu đồ (%)", min_value=0.0, value=7.0, step=0.5)
+        with c3:
+            required_solvent = paint_weight * (optimal_ratio / 100)
+            st.success(f"**Lượng dung môi cần đổ:**\n### {required_solvent:.2f} kg")
+
 else:
     st.warning("No data available for the selected filters.")
 
 st.markdown("---")
-
 # --- 4. DATA TABLE (RESIN & VENDOR PERFORMANCE) ---
 st.subheader("📋 Resin & Vendor Performance Analysis")
 
