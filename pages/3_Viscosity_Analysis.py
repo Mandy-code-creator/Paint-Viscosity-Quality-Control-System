@@ -80,22 +80,40 @@ with col1:
 
 with col2:
     st.markdown("### 3. Average Sensitivity by Resin & Solvent (Simplified)")
+    
+    # Tính toán dữ liệu
+    summary_df = filtered_df.groupby(['Resin', 'Solvent_Type'])['Viscosity_Sensitivity'].agg(['mean', 'std']).reset_index()
 
-# Tính trung bình và độ lệch chuẩn
-summary_df = filtered_df.groupby(['Resin', 'Solvent_Type'])['Viscosity_Sensitivity'].agg(['mean', 'std']).reset_index()
+    # Vẽ biểu đồ Bar Chart
+    fig_bar = px.bar(
+        summary_df,
+        x='Resin',
+        y='mean',
+        error_y='std',
+        color='Resin',
+        facet_col='Solvent_Type',
+        facet_col_wrap=3,
+        title="Average Sensitivity with Stability Range",
+        labels={'mean': 'Avg Sensitivity (sec/1%)', 'std': 'Variation'}
+    )
 
-# Vẽ biểu đồ Bar Chart
-fig_bar = px.bar(
-    summary_df,
-    x='Resin',
-    y='mean',
-    error_y='std',  # Thanh sai số thể hiện độ ổn định (càng ngắn càng đều)
-    color='Resin',
-    facet_col='Solvent_Type',
-    facet_col_wrap=3,
-    title="Average Sensitivity with Stability Range (Error Bars)",
-    labels={'mean': 'Avg Sensitivity (sec/1%)', 'std': 'Variation'}
-)
+    # 1. Làm rõ đường kẻ ô và màu sắc trục
+    fig_bar.update_yaxes(
+        showgrid=True, 
+        gridwidth=1, 
+        gridcolor='black', # Đường kẻ đen
+        showline=True, 
+        linecolor='black'
+    )
+    
+    # 2. Xử lý nhãn trục Y bị đè: Chỉ hiện nhãn ở cột đầu tiên
+    fig_bar.for_each_yaxis(lambda yaxis: yaxis.update(showticklabels=True))
+    
+    # 3. Tăng khoảng cách giữa các ô để không bị chồng chéo
+    fig_bar.update_layout(
+        height=800, 
+        margin=dict(l=100, r=20, t=50, b=50),
+        showlegend=True
+    )
 
-fig_bar.update_layout(height=600)
-st.plotly_chart(fig_bar, use_container_width=True)
+    st.plotly_chart(fig_bar, use_container_width=True)
