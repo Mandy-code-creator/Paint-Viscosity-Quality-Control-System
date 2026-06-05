@@ -264,7 +264,7 @@ with st.container():
 # --- 6. COMPREHENSIVE REFERENCE MATRIX (SOP LOOKUP) ---
 st.markdown("---")
 st.subheader("📚 SOP Coefficient Matrix (Coil-Level)")
-st.caption("A robust lookup table providing a standard 'Solvent Factor' for ALL resins. Multiply this factor by your required viscosity drop to get the exact Theoretical Value of solvent.")
+st.caption("A robust lookup table providing a standard 'Solvent Factor' for ALL resins and applications. Multiply this factor by your required viscosity drop to get the exact Theoretical Value of solvent.")
 
 with st.container():
     c_ref1, c_ref2 = st.columns([1, 2])
@@ -272,9 +272,28 @@ with st.container():
         ref_coil_weight = st.number_input("Standard Coil Paint Weight (kg)", value=200.0, step=10.0)
 
     matrix_data = []
-    
-    # FIX: Dùng dữ liệu tổng (group_a) thay vì dữ liệu bị lọc (filtered_data) để hiển thị toàn bộ các loại Resin
     matrix_df = group_a.copy()
+
+    # 3. Application / Feature Dictionary
+    f_map = {
+        'B': 'Anti-Bacteria', 'C': 'High-Corrosion Resistance', 'D': 'Anti-Dust', 
+        'E': 'Anti-Electrostatics', 'F': 'High Formability', 'G': 'General Usage', 
+        'H': 'Thermal Insulation', 'K': 'Anti-Stain/Grease', 'L': 'Whiteboard', 
+        'M': 'Mirror-like Paint', 'N': 'Neo Matt', 'P': 'Primer B', 
+        'R': 'Repaint System', 'S': 'Shutter', 'T': 'Texture Surface', 
+        'V': 'Variety', 'U': 'Ultra-High Formability', 'W': 'Wrinkle Paint', 'Z': 'Other'
+    }
+
+    # ==========================================
+    # CẤU HÌNH CỘT CHỨA MÃ ỨNG DỤNG (B, C, D...)
+    # Hãy thay đổi 'Feature' thành tên cột thực tế trong file Excel/CSV của bạn
+    # ==========================================
+    feature_col = 'Feature' 
+    if feature_col in matrix_df.columns:
+        matrix_df['Application'] = matrix_df[feature_col].map(f_map).fillna('Unknown/Other')
+    else:
+        # Nếu không tìm thấy cột, hệ thống sẽ báo lỗi nhẹ nhàng trên bảng
+        matrix_df['Application'] = 'N/A (Column Not Found)'
 
     def generate_dynamic_bins(series):
         if len(series) < 4:
@@ -284,24 +303,25 @@ with st.container():
         except ValueError:
             return pd.cut(series, bins=4, precision=0)
 
-    # Tự động chia khoảng phân bố theo từng loại Resin
+    # Chia vùng độ nhớt động
     matrix_df['Viscosity_Zone'] = matrix_df.groupby('Resin')['黏度(秒)'].transform(generate_dynamic_bins)
 
-    grouping_cols = ['Resin', 'Vendor', 'Viscosity_Zone']
+    # Cập nhật danh sách các cột dùng để nhóm dữ liệu (Thêm 'Application')
+    grouping_cols = ['Resin', 'Vendor', 'Application', 'Viscosity_Zone']
     has_solvent_type = 'Solvent_Type' in matrix_df.columns
     if has_solvent_type:
         grouping_cols.insert(2, 'Solvent_Type')
 
-    # 1. Quét lấy Typical Target Viscosities cho TẤT CẢ các loại nhựa
-    target_viscosity_map = matrix_df.groupby(['Resin', 'Vendor'])['黏度(秒)_1'].median().reset_index()
+    # 1. Tính toán Typical Target chi tiết đến từng Ứng dụng
+    target_viscosity_map = matrix_df.groupby(['Resin', 'Vendor', 'Application'])['黏度(秒)_1'].median().reset_index()
     target_viscosity_map = target_viscosity_map.rename(columns={'黏度(秒)_1': 'Typical_Target'})
 
-    # 2. Quét lấy Historical Sensitivity theo từng nhóm
+    # 2. Tính toán Độ nhạy (Sensitivity)
     sensitivity_map = matrix_df.groupby(grouping_cols, observed=False)['Sensitivity'].mean().reset_index()
     sensitivity_map = sensitivity_map[sensitivity_map['Sensitivity'] > 0]
 
-    # 3. Hợp nhất dữ liệu
-    sop_grouped = pd.merge(sensitivity_map, target_viscosity_map, on=['Resin', 'Vendor'], how='inner')
+    # 3. Kết nối dữ liệu
+    sop_grouped = pd.merge(sensitivity_map, target_viscosity_map, on=['Resin', 'Vendor', 'Application'], how='inner')
 
     for _, row in sop_grouped.iterrows():
         sens = row['Sensitivity']
@@ -313,6 +333,7 @@ with st.container():
         record = {
             'Resin': row['Resin'],
             'Vendor': row['Vendor'],
+            'Application': row['Application'],
             'Current Viscosity Zone': str(row['Viscosity_Zone']),
             'Typical Target (s)': round(row['Typical_Target'], 1),
             'Sensitivity Applied (s/%)': round(sens, 2),
@@ -331,8 +352,8 @@ with st.container():
             cols.insert(2, cols.pop(cols.index('Solvent Type')))
         df_matrix = df_matrix[cols]
 
-        # Sắp xếp gọn gàng theo thứ tự Resin -> Vendor -> Viscosity Zone
-        df_matrix = df_matrix.sort_values(by=['Resin', 'Vendor', 'Current Viscosity Zone'])
+        # Sắp xếp hiển thị hệ thống theo: Nhựa -> Vendor -> Ứng Dụng -> Vùng Độ Nhớt
+        df_matrix = df_matrix.sort_values(by=['Resin', 'Vendor', 'Application', 'Current Viscosity Zone'])
 
         st.dataframe(df_matrix.style.format({
             'Typical Target (s)': '{:.1f}',
@@ -352,7 +373,7 @@ with st.container():
         st.download_button(
             label="📥 Download Coefficient Matrix as CSV",
             data=csv,
-            file_name='SOP_Coefficient_Matrix_All_Resins.csv',
+            file_name='SOP_Coefficient_Matrix_With_Application.csv',
             mime='text/csv',
         )
     else:
