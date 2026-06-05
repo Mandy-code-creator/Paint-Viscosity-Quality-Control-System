@@ -150,8 +150,32 @@ st.markdown("---")
 st.markdown("---")
 st.subheader("📋 Resin & Vendor Performance Analysis")
 
-# Perform the grouping for the table
-detailed_summary = group_a.groupby(['Resin', 'Vendor']).agg({
+# Lấy dữ liệu và giải mã Application trước khi nhóm (để đảm bảo không thay đổi logic tính toán)
+matrix_df = group_a.copy()
+paint_code_col = '塗料代碼' 
+
+def get_clean_application(code_str):
+    if not isinstance(code_str, str) or len(str(code_str).strip()) < 4: return 'Unknown/Other'
+    code = str(code_str).strip().upper()
+    char_4 = code[3]
+    f_map = {
+        'B': 'Anti-Bacteria', 'C': 'High-Corrosion Resistance', 'D': 'Anti-Dust', 
+        'E': 'Anti-Electrostatics', 'F': 'High Formability', 'G': 'General Usage', 
+        'H': 'Thermal Insulation', 'K': 'Anti-Stain/Grease', 'L': 'Whiteboard', 
+        'M': 'Mirror-like Paint', 'N': 'Neo Matt', 'P': 'Primer B', 
+        'R': 'Repaint System', 'S': 'Shutter', 'T': 'Texture Surface', 
+        'V': 'Variety', 'U': 'Ultra-High Formability', 'W': 'Wrinkle Paint', 'Z': 'Other'
+    }
+    return 'General Usage' if char_4.isdigit() else f_map.get(char_4, 'Unknown/Other')
+
+# Thêm cột Application và Solvent_Type vào DataFrame trước khi group
+if paint_code_col in matrix_df.columns:
+    matrix_df['Application'] = matrix_df[paint_code_col].apply(get_clean_application)
+else:
+    matrix_df['Application'] = 'Unknown/Other'
+
+# Perform the grouping (Thêm Application và Solvent_Type vào nhóm)
+detailed_summary = matrix_df.groupby(['Resin', 'Vendor', 'Application', 'Solvent_Type']).agg({
     '塗料批號': 'nunique',
     '塗料重量': 'sum',
     '添加重量': 'sum',
