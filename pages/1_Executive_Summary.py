@@ -150,10 +150,11 @@ st.markdown("---")
 st.markdown("---")
 st.subheader("📋 Resin & Vendor Performance Analysis")
 
-# Lấy dữ liệu và giải mã Application trước khi nhóm (để đảm bảo không thay đổi logic tính toán)
+# Tạo bản sao dữ liệu
 matrix_df = group_a.copy()
-paint_code_col = '塗料代碼' 
 
+# TÍCH HỢP LOGIC GIẢI MÃ CHUẨN (Đúng với phần 6)
+# Nếu bạn đã có cột '塗料代碼' trong group_a, code sẽ tự bóc tách
 def get_clean_application(code_str):
     if not isinstance(code_str, str) or len(str(code_str).strip()) < 4: return 'Unknown/Other'
     code = str(code_str).strip().upper()
@@ -168,13 +169,17 @@ def get_clean_application(code_str):
     }
     return 'General Usage' if char_4.isdigit() else f_map.get(char_4, 'Unknown/Other')
 
-# Thêm cột Application và Solvent_Type vào DataFrame trước khi group
-if paint_code_col in matrix_df.columns:
-    matrix_df['Application'] = matrix_df[paint_code_col].apply(get_clean_application)
+# Đảm bảo mã sơn là cột '塗料代碼'
+if '塗料代碼' in matrix_df.columns:
+    matrix_df['Application'] = matrix_df['塗料代碼'].apply(get_clean_application)
 else:
     matrix_df['Application'] = 'Unknown/Other'
 
-# Perform the grouping (Thêm Application và Solvent_Type vào nhóm)
+# Đảm bảo có Solvent_Type
+if 'Solvent_Type' not in matrix_df.columns:
+    matrix_df['Solvent_Type'] = 'N/A'
+
+# Perform grouping (Giữ nguyên logic tính toán của bạn)
 detailed_summary = matrix_df.groupby(['Resin', 'Vendor', 'Application', 'Solvent_Type']).agg({
     '塗料批號': 'nunique',
     '塗料重量': 'sum',
@@ -193,15 +198,12 @@ detailed_summary = matrix_df.groupby(['Resin', 'Vendor', 'Application', 'Solvent
     'Sensitivity': 'Avg Sensitivity'
 })
 
-# Calculate the exact Theoretical Ratio (%) needed to drop 1 second of viscosity
 detailed_summary['Solvent % / 1s Drop'] = detailed_summary['Avg Sensitivity'].apply(
     lambda x: (1.0 / x) if x > 0 else 0
 )
-
-# Clean up table by dropping the intermediate Sensitivity column
 detailed_summary = detailed_summary.drop(columns=['Avg Sensitivity'])
 
-# Display the table
+# Display
 st.dataframe(detailed_summary.style.format({
     'Total Paint (kg)': '{:,.0f}',
     'Total Solvent (kg)': '{:,.0f}',
@@ -210,12 +212,6 @@ st.dataframe(detailed_summary.style.format({
     'Avg Solvent %': '{:.2f} %',
     'Solvent % / 1s Drop': '{:.3f} %'
 }), use_container_width=True)
-
-st.caption("""
-**Metrics Definition:**
-* **Batches:** Number of valid mix events at the coil level.
-* **Solvent % / 1s Drop:** The average theoretical percentage of solvent required to reduce viscosity by exactly 1 second. Lower is more efficient.
-""")
 # --- 5. SMART RECOMMENDATION ENGINE (MULTI-FACTOR) ---
 st.markdown("---")
 st.subheader("🧠 Smart Recommendation Engine")
