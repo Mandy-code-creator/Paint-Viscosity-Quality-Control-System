@@ -11,26 +11,34 @@ if 'raw_data_loaded' not in st.session_state or not st.session_state['raw_data_l
 # --- 2. RÚT DỮ LIỆU TỪ BỘ NHỚ ---
 group_a = st.session_state['group_a_data']
 
-# --- 3. TẠO BỘ LỌC SIDEBAR ---
-st.sidebar.header("🔍 Bộ Lọc Dữ Liệu")
+# --- 3. DYNAMIC SIDEBAR FILTERS ---
+st.sidebar.header("🔍 Data Filters")
 
-# Lọc bỏ 'Unknown' và 'General' khỏi danh sách chọn để UI sạch đẹp
-vendors = sorted([v for v in group_a['Vendor'].unique() if v != 'Unknown'])
-resins = sorted([r for r in group_a['Resin'].unique() if r != 'Unknown'])
-features = sorted([f for f in group_a['Feature'].unique() if f not in ['Unknown', 'General']])
+# Base data
+df = group_a.copy()
 
-selected_vendor = st.sidebar.selectbox("Nhà cung cấp (Vendor)", ["Tất cả"] + vendors)
-selected_resin = st.sidebar.selectbox("Loại nhựa (Resin)", ["Tất cả"] + resins)
-selected_feature = st.sidebar.selectbox("Mục đích sử dụng", ["Tất cả"] + features)
+# 1. Vendor Filter
+vendors = sorted([v for v in df['Vendor'].unique() if v != 'Unknown'])
+selected_vendor = st.sidebar.selectbox("Vendor", ["All"] + vendors)
 
-# --- 4. ÁP DỤNG BỘ LỌC DỮ LIỆU ---
-filtered_df = group_a.copy()
+# Apply Vendor filter to Resin options
+df_v = df[df['Vendor'] == selected_vendor] if selected_vendor != "All" else df
+resins = sorted([r for r in df_v['Resin'].unique() if r != 'Unknown'])
+selected_resin = st.sidebar.selectbox("Resin", ["All"] + resins)
 
-if selected_vendor != "Tất cả":
+# Apply Resin filter to Feature options
+df_vr = df_v[df_v['Resin'] == selected_resin] if selected_resin != "All" else df_v
+features = sorted([f for f in df_vr['Feature'].unique() if f not in ['Unknown', 'General']])
+selected_feature = st.sidebar.selectbox("Application", ["All"] + features)
+
+# --- 4. APPLY DATA FILTERS ---
+filtered_df = df.copy()
+
+if selected_vendor != "All":
     filtered_df = filtered_df[filtered_df['Vendor'] == selected_vendor]
-if selected_resin != "Tất cả":
+if selected_resin != "All":
     filtered_df = filtered_df[filtered_df['Resin'] == selected_resin]
-if selected_feature != "Tất cả":
+if selected_feature != "All":
     filtered_df = filtered_df[filtered_df['Feature'] == selected_feature]
 
 # --- 5. GIAO DIỆN CHÍNH (MAIN UI) ---
