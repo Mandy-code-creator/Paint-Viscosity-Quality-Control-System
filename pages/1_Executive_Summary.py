@@ -146,7 +146,8 @@ else:
 
 st.markdown("---")
 
-# --- 4. DATA TABLE (RESIN & VENDOR PERFORMANCE) ---
+# --- 4. RESIN & VENDOR PERFORMANCE ANALYSIS ---
+st.markdown("---")
 st.subheader("📋 Resin & Vendor Performance Analysis")
 
 # Perform the grouping for the table
@@ -156,15 +157,25 @@ detailed_summary = group_a.groupby(['Resin', 'Vendor']).agg({
     '添加重量': 'sum',
     '黏度(秒)': 'mean',
     '黏度(秒)_1': 'mean',
-    'Solvent_Ratio_Percent': 'mean'
+    'Solvent_Ratio_Percent': 'mean',
+    'Sensitivity': 'mean'
 }).rename(columns={
     '塗料批號': 'Batches',
     '塗料重量': 'Total Paint (kg)',
     '添加重量': 'Total Solvent (kg)',
     '黏度(秒)': 'Initial V (s)',
     '黏度(秒)_1': 'Final V (s)',
-    'Solvent_Ratio_Percent': 'Avg Solvent %'
+    'Solvent_Ratio_Percent': 'Avg Solvent %',
+    'Sensitivity': 'Avg Sensitivity'
 })
+
+# Calculate the exact Theoretical Ratio (%) needed to drop 1 second of viscosity
+detailed_summary['Solvent % / 1s Drop'] = detailed_summary['Avg Sensitivity'].apply(
+    lambda x: (1.0 / x) if x > 0 else 0
+)
+
+# Clean up table by dropping the intermediate Sensitivity column
+detailed_summary = detailed_summary.drop(columns=['Avg Sensitivity'])
 
 # Display the table
 st.dataframe(detailed_summary.style.format({
@@ -172,14 +183,14 @@ st.dataframe(detailed_summary.style.format({
     'Total Solvent (kg)': '{:,.0f}',
     'Initial V (s)': '{:.2f}',
     'Final V (s)': '{:.2f}',
-    'Avg Solvent %': '{:.2f} %'
+    'Avg Solvent %': '{:.2f} %',
+    'Solvent % / 1s Drop': '{:.3f} %'
 }), use_container_width=True)
 
 st.caption("""
 **Metrics Definition:**
-* **Batches:** Number of valid mix events.
-* **Total Paint / Solvent (kg):** Aggregate consumption.
-* **Avg Solvent %:** Average solvent-to-paint ratio.
+* **Batches:** Number of valid mix events at the coil level.
+* **Solvent % / 1s Drop:** The average theoretical percentage of solvent required to reduce viscosity by exactly 1 second. Lower is more efficient.
 """)
 # --- 5. SMART RECOMMENDATION ENGINE (MULTI-FACTOR) ---
 st.markdown("---")
