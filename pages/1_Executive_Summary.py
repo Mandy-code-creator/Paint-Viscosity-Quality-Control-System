@@ -263,16 +263,18 @@ with st.container():
             
 # --- 6. COMPREHENSIVE REFERENCE MATRIX (SOP LOOKUP) ---
 st.markdown("---")
-st.subheader("📚 SOP Coefficient Matrix")
-st.caption("A robust lookup table providing a standard 'Solvent Factor'. Multiply this factor by your required viscosity drop to get the exact Theoretical Value of solvent.")
+st.subheader("📚 SOP Coefficient Matrix (Coil-Level)")
+st.caption("A robust lookup table providing a standard 'Solvent Factor' for ALL resins. Multiply this factor by your required viscosity drop to get the exact Theoretical Value of solvent.")
 
 with st.container():
     c_ref1, c_ref2 = st.columns([1, 2])
     with c_ref1:
-        ref_coil_weight = st.number_input("Standard Paint Weight (kg)", value=200.0, step=10.0)
+        ref_coil_weight = st.number_input("Standard Coil Paint Weight (kg)", value=200.0, step=10.0)
 
     matrix_data = []
-    matrix_df = filtered_data.copy()
+    
+    # FIX: Dùng dữ liệu tổng (group_a) thay vì dữ liệu bị lọc (filtered_data) để hiển thị toàn bộ các loại Resin
+    matrix_df = group_a.copy()
 
     def generate_dynamic_bins(series):
         if len(series) < 4:
@@ -282,6 +284,7 @@ with st.container():
         except ValueError:
             return pd.cut(series, bins=4, precision=0)
 
+    # Tự động chia khoảng phân bố theo từng loại Resin
     matrix_df['Viscosity_Zone'] = matrix_df.groupby('Resin')['黏度(秒)'].transform(generate_dynamic_bins)
 
     grouping_cols = ['Resin', 'Vendor', 'Viscosity_Zone']
@@ -289,15 +292,15 @@ with st.container():
     if has_solvent_type:
         grouping_cols.insert(2, 'Solvent_Type')
 
-    # 1. Get Typical Target Viscosities
+    # 1. Quét lấy Typical Target Viscosities cho TẤT CẢ các loại nhựa
     target_viscosity_map = matrix_df.groupby(['Resin', 'Vendor'])['黏度(秒)_1'].median().reset_index()
     target_viscosity_map = target_viscosity_map.rename(columns={'黏度(秒)_1': 'Typical_Target'})
 
-    # 2. Get historical sensitivity per bin
+    # 2. Quét lấy Historical Sensitivity theo từng nhóm
     sensitivity_map = matrix_df.groupby(grouping_cols, observed=False)['Sensitivity'].mean().reset_index()
     sensitivity_map = sensitivity_map[sensitivity_map['Sensitivity'] > 0]
 
-    # 3. Merge data
+    # 3. Hợp nhất dữ liệu
     sop_grouped = pd.merge(sensitivity_map, target_viscosity_map, on=['Resin', 'Vendor'], how='inner')
 
     for _, row in sop_grouped.iterrows():
@@ -328,6 +331,7 @@ with st.container():
             cols.insert(2, cols.pop(cols.index('Solvent Type')))
         df_matrix = df_matrix[cols]
 
+        # Sắp xếp gọn gàng theo thứ tự Resin -> Vendor -> Viscosity Zone
         df_matrix = df_matrix.sort_values(by=['Resin', 'Vendor', 'Current Viscosity Zone'])
 
         st.dataframe(df_matrix.style.format({
@@ -348,7 +352,7 @@ with st.container():
         st.download_button(
             label="📥 Download Coefficient Matrix as CSV",
             data=csv,
-            file_name='SOP_Coefficient_Matrix.csv',
+            file_name='SOP_Coefficient_Matrix_All_Resins.csv',
             mime='text/csv',
         )
     else:
