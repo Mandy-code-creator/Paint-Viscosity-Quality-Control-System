@@ -263,7 +263,7 @@ with st.container():
             
 # --- 6. COMPREHENSIVE REFERENCE MATRIX (SOP LOOKUP) ---
 st.markdown("---")
-st.subheader("📚 SOP Coefficient Matrix (Coil-Level)")
+st.subheader("📚 SOP Coefficient Matrix")
 st.caption("A robust lookup table providing a standard 'Solvent Factor'. Multiply this factor by your required viscosity drop to get the exact Theoretical Value of solvent.")
 
 with st.container():
