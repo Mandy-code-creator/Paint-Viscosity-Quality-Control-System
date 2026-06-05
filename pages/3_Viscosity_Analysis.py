@@ -80,7 +80,7 @@ with col1:
 
 with col2:
     st.markdown("### 3. Sensitivity by Resin & Solvent Type")
-    # Faceted box plot to prevent chart explosion
+    # Tăng chiều cao lên 1000 hoặc hơn để biểu đồ "giãn" ra
     fig_box = px.box(
         filtered_df, 
         x="Resin", 
@@ -91,5 +91,6 @@ with col2:
         title="Viscosity Reduction per 1% Solvent Added",
         labels={"Viscosity_Sensitivity": "Sensitivity (sec/1%)"}
     )
-    fig_box.update_layout(height=600)
+    # Tăng chiều cao đáng kể để các ô không bị co lại
+    fig_box.update_layout(height=1200) 
     st.plotly_chart(fig_box, use_container_width=True)
