@@ -274,26 +274,42 @@ with st.container():
     matrix_data = []
     matrix_df = group_a.copy()
 
-    # 3. Application / Feature Dictionary
-    f_map = {
-        'B': 'Anti-Bacteria', 'C': 'High-Corrosion Resistance', 'D': 'Anti-Dust', 
-        'E': 'Anti-Electrostatics', 'F': 'High Formability', 'G': 'General Usage', 
-        'H': 'Thermal Insulation', 'K': 'Anti-Stain/Grease', 'L': 'Whiteboard', 
-        'M': 'Mirror-like Paint', 'N': 'Neo Matt', 'P': 'Primer B', 
-        'R': 'Repaint System', 'S': 'Shutter', 'T': 'Texture Surface', 
-        'V': 'Variety', 'U': 'Ultra-High Formability', 'W': 'Wrinkle Paint', 'Z': 'Other'
-    }
+    # ==========================================
+    # LOGIC RÚT TRÍCH ỨNG DỤNG TỪ MÃ SƠN GỐC
+    # ==========================================
+    # ĐỔI TÊN CỘT NÀY CHO KHỚP VỚI FILE CỦA BẠN (VD: 'Paint_Code', '塗料代碼', 'Item_Code')
+    paint_code_col = '塗料代碼' 
+    
+    def get_application(code_str):
+        if not isinstance(code_str, str) or len(str(code_str).strip()) < 4:
+            return 'Unknown/Other'
+            
+        code = str(code_str).strip().upper()
+        char_4 = code[3] # Lấy ký tự thứ 4 (index 3)
+        
+        f_map = {
+            'B': 'Anti-Bacteria', 'C': 'High-Corrosion Resistance', 'D': 'Anti-Dust', 
+            'E': 'Anti-Electrostatics', 'F': 'High Formability', 'G': 'General Usage', 
+            'H': 'Thermal Insulation', 'K': 'Anti-Stain/Grease', 'L': 'Whiteboard', 
+            'M': 'Mirror-like Paint', 'N': 'Neo Matt', 'P': 'Primer B', 
+            'R': 'Repaint System', 'S': 'Shutter', 'T': 'Texture Surface', 
+            'V': 'Variety', 'U': 'Ultra-High Formability', 'W': 'Wrinkle Paint', 'Z': 'Other'
+        }
+        
+        # Nếu ký tự thứ 4 là bất kỳ chữ số nào (0-9)
+        if char_4.isdigit():
+            return 'General Usage'
+            
+        return f_map.get(char_4, 'Unknown/Other')
 
-    # ==========================================
-    # CẤU HÌNH CỘT CHỨA MÃ ỨNG DỤNG (B, C, D...)
-    # Hãy thay đổi 'Feature' thành tên cột thực tế trong file Excel/CSV của bạn
-    # ==========================================
-    feature_col = 'Feature' 
-    if feature_col in matrix_df.columns:
-        matrix_df['Application'] = matrix_df[feature_col].map(f_map).fillna('Unknown/Other')
+    # Ưu tiên bóc tách trực tiếp từ mã sơn gốc
+    if paint_code_col in matrix_df.columns:
+        matrix_df['Application'] = matrix_df[paint_code_col].apply(get_application)
+    # Phương án dự phòng: Nếu trong file đã có sẵn cột 'Feature' từ hàm giải mã của bạn
+    elif 'Feature' in matrix_df.columns:
+        matrix_df['Application'] = matrix_df['Feature'].astype(str).apply(lambda x: x.split(' (')[0] if '(' in x else x)
     else:
-        # Nếu không tìm thấy cột, hệ thống sẽ báo lỗi nhẹ nhàng trên bảng
-        matrix_df['Application'] = 'N/A (Column Not Found)'
+        matrix_df['Application'] = f'Column "{paint_code_col}" Not Found'
 
     def generate_dynamic_bins(series):
         if len(series) < 4:
@@ -306,13 +322,13 @@ with st.container():
     # Chia vùng độ nhớt động
     matrix_df['Viscosity_Zone'] = matrix_df.groupby('Resin')['黏度(秒)'].transform(generate_dynamic_bins)
 
-    # Cập nhật danh sách các cột dùng để nhóm dữ liệu (Thêm 'Application')
+    # Cập nhật danh sách các cột dùng để nhóm dữ liệu
     grouping_cols = ['Resin', 'Vendor', 'Application', 'Viscosity_Zone']
     has_solvent_type = 'Solvent_Type' in matrix_df.columns
     if has_solvent_type:
         grouping_cols.insert(2, 'Solvent_Type')
 
-    # 1. Tính toán Typical Target chi tiết đến từng Ứng dụng
+    # 1. Tính toán Typical Target chi tiết
     target_viscosity_map = matrix_df.groupby(['Resin', 'Vendor', 'Application'])['黏度(秒)_1'].median().reset_index()
     target_viscosity_map = target_viscosity_map.rename(columns={'黏度(秒)_1': 'Typical_Target'})
 
@@ -326,7 +342,6 @@ with st.container():
     for _, row in sop_grouped.iterrows():
         sens = row['Sensitivity']
         
-        # Calculate exactly how many kg of solvent is needed to drop 1 second of viscosity
         theo_ratio_per_sec = 1.0 / sens
         factor_kg_per_sec = ref_coil_weight * (theo_ratio_per_sec / 100.0)
 
@@ -352,7 +367,6 @@ with st.container():
             cols.insert(2, cols.pop(cols.index('Solvent Type')))
         df_matrix = df_matrix[cols]
 
-        # Sắp xếp hiển thị hệ thống theo: Nhựa -> Vendor -> Ứng Dụng -> Vùng Độ Nhớt
         df_matrix = df_matrix.sort_values(by=['Resin', 'Vendor', 'Application', 'Current Viscosity Zone'])
 
         st.dataframe(df_matrix.style.format({
