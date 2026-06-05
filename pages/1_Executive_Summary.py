@@ -206,33 +206,57 @@ with st.container():
     else:
         viscosity_drop = curr_viscosity - target_viscosity
         
-        # 1. Filter historical data for SIMILAR conditions
-        # Note: Replace '溫度' and '濕度' if your column names differ
-        subset = group_a[
+        # Base filter: Resin and Vendor
+        base_subset = group_a[
             (group_a['Resin'] == selected_resin) &
-            (group_a['Vendor'].isin(selected_vendors)) &
-            (group_a['黏度(秒)'] >= curr_viscosity - 10) & (group_a['黏度(秒)'] <= curr_viscosity + 10) &
-            (group_a['溫度'] >= curr_temp - 5) & (group_a['溫度'] <= curr_temp + 5) &
-            (group_a['濕度'] >= curr_humidity - 10) & (group_a['濕度'] <= curr_humidity + 10)
+            (group_a['Vendor'].isin(selected_vendors))
         ]
-
-        if not subset.empty:
-            # Use the average sensitivity of the matching conditions
-            expected_sensitivity = subset['Sensitivity'].mean()
+        
+        # Define condition masks
+        visc_mask = (base_subset['黏度(秒)'] >= curr_viscosity - 15) & (base_subset['黏度(秒)'] <= curr_viscosity + 15)
+        
+        weather_mask = True
+        if '溫度' in base_subset.columns and '濕度' in base_subset.columns:
+            weather_mask = (base_subset['溫度'] >= curr_temp - 5) & (base_subset['溫度'] <= curr_temp + 5) & \
+                           (base_subset['濕度'] >= curr_humidity - 10) & (base_subset['濕度'] <= curr_humidity + 10)
+        
+        # --- FALLBACK ALGORITHM ---
+        # Attempt 1: Strict Match (Viscosity + Weather)
+        subset_strict = base_subset[visc_mask & weather_mask]
+        
+        # Attempt 2: Partial Match (Viscosity only)
+        subset_partial = base_subset[visc_mask]
+        
+        # Attempt 3: General Match (Resin/Vendor overall average)
+        subset_general = base_subset
+        
+        expected_sensitivity = 0
+        match_level = ""
+        
+        # Cascade through attempts to find valid historical data
+        if not subset_strict.empty and subset_strict['Sensitivity'].mean() > 0:
+            expected_sensitivity = subset_strict['Sensitivity'].mean()
+            match_level = "High (Matched Viscosity & Environment)"
+        elif not subset_partial.empty and subset_partial['Sensitivity'].mean() > 0:
+            expected_sensitivity = subset_partial['Sensitivity'].mean()
+            match_level = "Medium (Matched Viscosity only, ignoring environment)"
+        elif not subset_general.empty and subset_general['Sensitivity'].mean() > 0:
+            expected_sensitivity = subset_general['Sensitivity'].mean()
+            match_level = "Low (Based on overall Resin average)"
             
-            if expected_sensitivity > 0:
-                theoretical_ratio = viscosity_drop / expected_sensitivity
-                theoretical_solvent_kg = coil_paint_qty * (theoretical_ratio / 100)
+        # Final Output Generation
+        if expected_sensitivity > 0:
+            theoretical_ratio = viscosity_drop / expected_sensitivity
+            theoretical_solvent_kg = coil_paint_qty * (theoretical_ratio / 100)
 
-                st.success(f"""
-                ### 🎯 Theoretical Value to Add: {theoretical_solvent_kg:.2f} kg
-                
-                **Calculation Breakdown:**
-                * Required Viscosity Drop: **{viscosity_drop:.1f} s**
-                * Historical Sensitivity: **{expected_sensitivity:.2f} s reduction per 1% solvent**
-                * Theoretical Solvent Ratio: **{theoretical_ratio:.2f}%**
-                """)
-            else:
-                st.warning("Historical data shows 0 or negative sensitivity in these conditions. Cannot calculate a reliable Theoretical Value.")
+            st.success(f"""
+            ### 🎯 Theoretical Value to Add: {theoretical_solvent_kg:.2f} kg
+            
+            **Calculation Breakdown:**
+            * Required Viscosity Drop: **{viscosity_drop:.1f} s**
+            * Historical Sensitivity: **{expected_sensitivity:.2f} s reduction per 1% solvent**
+            * Theoretical Solvent Ratio: **{theoretical_ratio:.2f}%**
+            * Data Confidence: **{match_level}**
+            """)
         else:
-            st.warning("⚠️ Insufficient historical data for this exact combination of weather and viscosity. Please rely on the primary Optimal Formula heatmap above.")
+            st.error("Unable to calculate Theoretical Value. Historical sensitivity data is invalid or missing.")
