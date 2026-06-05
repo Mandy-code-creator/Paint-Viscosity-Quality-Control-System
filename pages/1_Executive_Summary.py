@@ -184,45 +184,55 @@ st.caption("""
 # --- 5. SMART RECOMMENDATION ENGINE (MULTI-FACTOR) ---
 st.markdown("---")
 st.subheader("🧠 Smart Recommendation Engine")
-st.caption("Combines Initial Viscosity, Temperature, and Humidity to calculate the exact optimal solvent amount based on historical peak performance.")
+st.caption("Calculates the Theoretical Value of solvent required to hit a specific target viscosity based on historical environmental data.")
 
 with st.container():
-    # User Inputs for Current Conditions
-    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+    # User Inputs
+    col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
     with col_m1:
-        curr_viscosity = st.number_input("Current Viscosity (s)", value=120.0, step=5.0)
+        curr_viscosity = st.number_input("Current Viscosity (s)", value=55.0, step=1.0)
     with col_m2:
-        curr_temp = st.number_input("Current Temp (°C)", value=32.0, step=1.0)
+        target_viscosity = st.number_input("Target Viscosity (s)", value=52.0, step=1.0)
     with col_m3:
-        curr_humidity = st.number_input("Current Humidity (%)", value=85.0, step=5.0)
+        curr_temp = st.number_input("Temp (°C)", value=32.0, step=1.0)
     with col_m4:
-        paint_qty = st.number_input("Paint Weight (kg)", value=200.0, step=10.0)
+        curr_humidity = st.number_input("Humidity (%)", value=85.0, step=5.0)
+    with col_m5:
+        coil_paint_qty = st.number_input("Coil Paint Weight (kg)", value=200.0, step=10.0)
 
-    # --- THE ALGORITHM: Combining all parameters ---
-    # 1. Filter historical data for SIMILAR conditions (Margin of error allowed)
-    subset = group_a[
-        (group_a['Resin'] == selected_resin) &
-        (group_a['Vendor'].isin(selected_vendors)) &
-        (group_a['黏度(秒)'] >= curr_viscosity - 15) & (group_a['黏度(秒)'] <= curr_viscosity + 15) &
-        (group_a['溫度'] >= curr_temp - 5) & (group_a['溫度'] <= curr_temp + 5) &
-        (group_a['濕度'] >= curr_humidity - 10) & (group_a['濕度'] <= curr_humidity + 10)
-    ]
-
-    # 2. Extract the optimal value
-    if not subset.empty:
-        # Find the historical batch with the absolute best efficiency (Sensitivity)
-        best_scenario = subset.loc[subset['Sensitivity'].idxmax()]
-        
-        optimal_ratio_combined = best_scenario['Solvent_Ratio_Percent']
-        expected_sensitivity = best_scenario['Sensitivity']
-        recommended_solvent = paint_qty * (optimal_ratio_combined / 100)
-
-        st.success(f"""
-        ### 🎯 Recommended Solvent Addition: {recommended_solvent:.2f} kg
-        
-        **Algorithm Reference (Historical Best Match):**
-        * Optimal Solvent Ratio: **{optimal_ratio_combined:.2f}%**
-        * Expected Efficiency: **{expected_sensitivity:.2f} s reduction per 1% solvent**
-        """)
+    # Logic Calculation
+    if target_viscosity >= curr_viscosity:
+        st.info("Target viscosity is higher than or equal to current viscosity. No solvent required.")
     else:
-        st.warning("⚠️ Insufficient historical data for this exact combination of weather and viscosity. Please rely on the primary Optimal Formula heatmap above.")
+        viscosity_drop = curr_viscosity - target_viscosity
+        
+        # 1. Filter historical data for SIMILAR conditions
+        # Note: Replace '溫度' and '濕度' if your column names differ
+        subset = group_a[
+            (group_a['Resin'] == selected_resin) &
+            (group_a['Vendor'].isin(selected_vendors)) &
+            (group_a['黏度(秒)'] >= curr_viscosity - 10) & (group_a['黏度(秒)'] <= curr_viscosity + 10) &
+            (group_a['溫度'] >= curr_temp - 5) & (group_a['溫度'] <= curr_temp + 5) &
+            (group_a['濕度'] >= curr_humidity - 10) & (group_a['濕度'] <= curr_humidity + 10)
+        ]
+
+        if not subset.empty:
+            # Use the average sensitivity of the matching conditions
+            expected_sensitivity = subset['Sensitivity'].mean()
+            
+            if expected_sensitivity > 0:
+                theoretical_ratio = viscosity_drop / expected_sensitivity
+                theoretical_solvent_kg = coil_paint_qty * (theoretical_ratio / 100)
+
+                st.success(f"""
+                ### 🎯 Theoretical Value to Add: {theoretical_solvent_kg:.2f} kg
+                
+                **Calculation Breakdown:**
+                * Required Viscosity Drop: **{viscosity_drop:.1f} s**
+                * Historical Sensitivity: **{expected_sensitivity:.2f} s reduction per 1% solvent**
+                * Theoretical Solvent Ratio: **{theoretical_ratio:.2f}%**
+                """)
+            else:
+                st.warning("Historical data shows 0 or negative sensitivity in these conditions. Cannot calculate a reliable Theoretical Value.")
+        else:
+            st.warning("⚠️ Insufficient historical data for this exact combination of weather and viscosity. Please rely on the primary Optimal Formula heatmap above.")
