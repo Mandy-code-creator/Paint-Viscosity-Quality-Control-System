@@ -6,7 +6,7 @@ def decode_paint_code(paint_code_str):
     - Index 0 (1st char): Primary Classification (Char_1)
     - Index 1 (2nd char): Vendor (V_MAP)
     - Index 2 (3rd char): Resin (R_MAP)
-    - Index 3 (4th char): Application / Feature (F_MAP)
+    - Index 3 (4th char): Application / Feature (F_MAP) - Numbers default to 'General Usage'
     - Index 6 (7th char): Color (C_MAP)
     """
     if not isinstance(paint_code_str, str) or len(paint_code_str) < 1:
@@ -51,24 +51,17 @@ def decode_paint_code(paint_code_str):
     vendor = v_map.get(code[1], 'Unknown') if len(code) >= 2 else 'Unknown'
     resin = r_map.get(code[2], 'Unknown') if len(code) >= 3 else 'Unknown'
     
-    # --- LOGIC CẬP NHẬT: Xử lý ký tự ứng dụng (Ký tự thứ 4) ---
+    # Extract Application from the 4th character
     if len(code) >= 4:
         char_4 = code[3]
-        if char_4.isdigit():  # Kiểm tra nếu là bất kỳ số nào (0-9)
-            app_feature = f_map.get('G')  # Quy về 'General Usage'
+        if char_4.isdigit():  
+            feature = f_map.get('G')  # Default numeric codes to General Usage
         else:
-            app_feature = f_map.get(char_4, 'Unknown')
+            feature = f_map.get(char_4, 'Unknown')
     else:
-        app_feature = 'Unknown'
+        feature = 'Unknown'
     
     # Extract Color (7th character -> Index 6)
     color = c_map.get(code[6], 'Unknown') if len(code) >= 7 else 'Unknown'
     
-    # Extract the remaining tail starting from the 5th character
-    tail = code[4:] if len(code) >= 5 else ''
-    
-    # Combine application and tail for the complete feature string
-    feature = f"{app_feature} ({tail})" if tail else app_feature
-
-    # Return exactly 5 elements: Vendor, Resin, Feature, Color, Char_1
     return pd.Series([vendor, resin, feature, color, char_1])
