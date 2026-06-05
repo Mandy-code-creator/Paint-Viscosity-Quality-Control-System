@@ -150,13 +150,16 @@ st.markdown("---")
 st.markdown("---")
 st.subheader("📋 Resin & Vendor Performance Analysis")
 
-# Tạo bản sao dữ liệu
+# Sử dụng bản sao dữ liệu gốc
 matrix_df = group_a.copy()
 
-# TÍCH HỢP LOGIC GIẢI MÃ CHUẨN (Đúng với phần 6)
-# Nếu bạn đã có cột '塗料代碼' trong group_a, code sẽ tự bóc tách
+# 1. Cấu hình cột mã sơn (Hãy chắc chắn tên cột này khớp với file thực tế)
+paint_code_col = '塗料代碼' 
+
+# 2. Hàm giải mã ứng dụng (Đúng logic phần 6)
 def get_clean_application(code_str):
-    if not isinstance(code_str, str) or len(str(code_str).strip()) < 4: return 'Unknown/Other'
+    if not isinstance(code_str, str) or len(str(code_str).strip()) < 4:
+        return 'Unknown/Other'
     code = str(code_str).strip().upper()
     char_4 = code[3]
     f_map = {
@@ -167,19 +170,26 @@ def get_clean_application(code_str):
         'R': 'Repaint System', 'S': 'Shutter', 'T': 'Texture Surface', 
         'V': 'Variety', 'U': 'Ultra-High Formability', 'W': 'Wrinkle Paint', 'Z': 'Other'
     }
-    return 'General Usage' if char_4.isdigit() else f_map.get(char_4, 'Unknown/Other')
+    # Logic: Nếu là số thì quy về 'General Usage'
+    if char_4.isdigit():
+        return 'General Usage'
+    return f_map.get(char_4, 'Unknown/Other')
 
-# Đảm bảo mã sơn là cột '塗料代碼'
-if '塗料代碼' in matrix_df.columns:
-    matrix_df['Application'] = matrix_df['塗料代碼'].apply(get_clean_application)
+# 3. Áp dụng giải mã vào DataFrame trước khi group
+if paint_code_col in matrix_df.columns:
+    matrix_df['Application'] = matrix_df[paint_code_col].apply(get_clean_application)
 else:
-    matrix_df['Application'] = 'Unknown/Other'
+    # Nếu không tìm thấy cột mã sơn, cố gắng dùng cột 'Feature' nếu có
+    if 'Feature' in matrix_df.columns:
+        matrix_df['Application'] = matrix_df['Feature'].astype(str).apply(lambda x: x.split(' (')[0] if '(' in x else x)
+    else:
+        matrix_df['Application'] = 'Unknown/Other'
 
-# Đảm bảo có Solvent_Type
+# Đảm bảo có cột Solvent_Type
 if 'Solvent_Type' not in matrix_df.columns:
     matrix_df['Solvent_Type'] = 'N/A'
 
-# Perform grouping (Giữ nguyên logic tính toán của bạn)
+# 4. Perform grouping (Tính toán dựa trên các cột đã có)
 detailed_summary = matrix_df.groupby(['Resin', 'Vendor', 'Application', 'Solvent_Type']).agg({
     '塗料批號': 'nunique',
     '塗料重量': 'sum',
@@ -198,12 +208,13 @@ detailed_summary = matrix_df.groupby(['Resin', 'Vendor', 'Application', 'Solvent
     'Sensitivity': 'Avg Sensitivity'
 })
 
+# Calculate Solvent % / 1s Drop
 detailed_summary['Solvent % / 1s Drop'] = detailed_summary['Avg Sensitivity'].apply(
     lambda x: (1.0 / x) if x > 0 else 0
 )
 detailed_summary = detailed_summary.drop(columns=['Avg Sensitivity'])
 
-# Display
+# 5. Display
 st.dataframe(detailed_summary.style.format({
     'Total Paint (kg)': '{:,.0f}',
     'Total Solvent (kg)': '{:,.0f}',
@@ -212,6 +223,12 @@ st.dataframe(detailed_summary.style.format({
     'Avg Solvent %': '{:.2f} %',
     'Solvent % / 1s Drop': '{:.3f} %'
 }), use_container_width=True)
+
+st.caption("""
+**Metrics Definition:**
+* **Batches:** Number of valid mix events at the coil level.
+* **Solvent % / 1s Drop:** The average theoretical percentage of solvent required to reduce viscosity by exactly 1 second. Lower is more efficient.
+""")
 # --- 5. SMART RECOMMENDATION ENGINE (MULTI-FACTOR) ---
 st.markdown("---")
 st.subheader("🧠 Smart Recommendation Engine")
