@@ -260,3 +260,79 @@ with st.container():
             """)
         else:
             st.error("Unable to calculate Theoretical Value. Historical sensitivity data is invalid or missing.")
+# --- 6. COMPREHENSIVE REFERENCE MATRIX (SOP LOOKUP) ---
+st.markdown("---")
+st.subheader("📚 SOP Reference Matrix (Coil-Level)")
+st.caption("A consolidated lookup table for standard viscosity drops. All calculations use Theoretical Values based on Coil-level historical data.")
+
+with st.container():
+    c_ref1, c_ref2 = st.columns([1, 2])
+    with c_ref1:
+        # Nhập khối lượng sơn cuộn tiêu chuẩn để bảng tự động quy đổi ra kg
+        ref_coil_weight = st.number_input("Standard Coil Paint Weight (kg) for Matrix Calculation", value=200.0, step=10.0)
+    
+    # Các mốc giảm độ nhớt mục tiêu (Bạn có thể thêm bớt các số này tùy thực tế xưởng)
+    standard_drops = [5.0, 10.0, 15.0, 20.0]
+    
+    matrix_data = []
+    
+    # Tự động nhận diện nếu dữ liệu có cột "Solvent_Type" (Loại dung môi)
+    grouping_cols = ['Resin', 'Vendor', 'Initial_V_Bin']
+    has_solvent_type = 'Solvent_Type' in filtered_data.columns
+    if has_solvent_type:
+        grouping_cols.insert(2, 'Solvent_Type')
+        
+    # Tính toán độ nhạy trung bình theo từng nhóm
+    sop_grouped = filtered_data.groupby(grouping_cols, observed=False)['Sensitivity'].mean().reset_index()
+    sop_grouped = sop_grouped[sop_grouped['Sensitivity'] > 0] # Lọc bỏ các dữ liệu lỗi hoặc không có tác dụng
+    
+    for _, row in sop_grouped.iterrows():
+        for drop in standard_drops:
+            # Tính toán Theoretical Value
+            theo_ratio = drop / row['Sensitivity']
+            theo_kg = ref_coil_weight * (theo_ratio / 100)
+            
+            record = {
+                'Resin': row['Resin'],
+                'Vendor': row['Vendor'],
+                'Initial Viscosity Range': str(row['Initial_V_Bin']),
+                'Target Drop (s)': drop,
+                'Historical Sensitivity': round(row['Sensitivity'], 2),
+                'Theoretical Solvent (%)': round(theo_ratio, 2),
+                'Theoretical Value (kg)': round(theo_kg, 2)
+            }
+            if has_solvent_type:
+                record['Solvent Type'] = row['Solvent_Type']
+                
+            matrix_data.append(record)
+            
+    df_matrix = pd.DataFrame(matrix_data)
+    
+    if not df_matrix.empty:
+        # Sắp xếp lại thứ tự cột cho dễ nhìn
+        cols = df_matrix.columns.tolist()
+        if has_solvent_type:
+            cols.insert(2, cols.pop(cols.index('Solvent Type')))
+        df_matrix = df_matrix[cols]
+        
+        # Sắp xếp dữ liệu theo Resin và Độ nhớt để bảng có tính hệ thống
+        df_matrix = df_matrix.sort_values(by=['Resin', 'Vendor', 'Initial Viscosity Range', 'Target Drop (s)'])
+        
+        # Hiển thị bảng
+        st.dataframe(df_matrix.style.format({
+            'Target Drop (s)': '{:.1f}',
+            'Historical Sensitivity': '{:.2f}',
+            'Theoretical Solvent (%)': '{:.2f} %',
+            'Theoretical Value (kg)': '{:.2f} kg'
+        }), use_container_width=True)
+        
+        # Nút tải bảng dữ liệu về máy (Excel/CSV)
+        csv = df_matrix.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Download SOP Matrix as CSV",
+            data=csv,
+            file_name='SOP_Solvent_Reference_Matrix.csv',
+            mime='text/csv',
+        )
+    else:
+        st.warning("Not enough valid historical data to generate the SOP Reference Matrix.")
