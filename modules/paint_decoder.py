@@ -50,7 +50,16 @@ def decode_paint_code(paint_code_str):
     char_1 = code[0] if len(code) >= 1 else 'Unknown'
     vendor = v_map.get(code[1], 'Unknown') if len(code) >= 2 else 'Unknown'
     resin = r_map.get(code[2], 'Unknown') if len(code) >= 3 else 'Unknown'
-    app_feature = f_map.get(code[3], 'Unknown') if len(code) >= 4 else 'Unknown'
+    
+    # --- LOGIC CẬP NHẬT: Xử lý ký tự ứng dụng (Ký tự thứ 4) ---
+    if len(code) >= 4:
+        char_4 = code[3]
+        if char_4.isdigit():  # Kiểm tra nếu là bất kỳ số nào (0-9)
+            app_feature = f_map.get('G')  # Quy về 'General Usage'
+        else:
+            app_feature = f_map.get(char_4, 'Unknown')
+    else:
+        app_feature = 'Unknown'
     
     # Extract Color (7th character -> Index 6)
     color = c_map.get(code[6], 'Unknown') if len(code) >= 7 else 'Unknown'
