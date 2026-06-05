@@ -263,17 +263,17 @@ with st.container():
             
 # --- 6. COMPREHENSIVE REFERENCE MATRIX (SOP LOOKUP) ---
 st.markdown("---")
-st.subheader("📚 SOP Reference Matrix (Coil-Level)")
-st.caption("Actionable lookup table. Finds the exact Theoretical Value of solvent required for specific starting viscosities.")
+st.subheader("📚 SOP Coefficient Matrix (Coil-Level)")
+st.caption("A robust lookup table providing a standard 'Solvent Factor'. Multiply this factor by your required viscosity drop to get the exact Theoretical Value of solvent.")
 
 with st.container():
     c_ref1, c_ref2 = st.columns([1, 2])
     with c_ref1:
         ref_coil_weight = st.number_input("Standard Coil Paint Weight (kg)", value=200.0, step=10.0)
-    
+
     matrix_data = []
     matrix_df = filtered_data.copy()
-    
+
     def generate_dynamic_bins(series):
         if len(series) < 4:
             return pd.cut(series, bins=1, precision=0)
@@ -281,96 +281,75 @@ with st.container():
             return pd.qcut(series, q=4, precision=0, duplicates='drop')
         except ValueError:
             return pd.cut(series, bins=4, precision=0)
-            
-    matrix_df['Dynamic_Initial_V_Bin'] = matrix_df.groupby('Resin')['黏度(秒)'].transform(generate_dynamic_bins)
-    
-    grouping_cols = ['Resin', 'Vendor', 'Dynamic_Initial_V_Bin']
+
+    matrix_df['Viscosity_Zone'] = matrix_df.groupby('Resin')['黏度(秒)'].transform(generate_dynamic_bins)
+
+    grouping_cols = ['Resin', 'Vendor', 'Viscosity_Zone']
     has_solvent_type = 'Solvent_Type' in matrix_df.columns
     if has_solvent_type:
         grouping_cols.insert(2, 'Solvent_Type')
-        
-    # 1. Get Target Viscosities
+
+    # 1. Get Typical Target Viscosities
     target_viscosity_map = matrix_df.groupby(['Resin', 'Vendor'])['黏度(秒)_1'].median().reset_index()
     target_viscosity_map = target_viscosity_map.rename(columns={'黏度(秒)_1': 'Typical_Target'})
-        
+
     # 2. Get historical sensitivity per bin
     sensitivity_map = matrix_df.groupby(grouping_cols, observed=False)['Sensitivity'].mean().reset_index()
-    sensitivity_map = sensitivity_map[sensitivity_map['Sensitivity'] > 0] 
-    
-    # 3. Generate actionable, specific starting points (Target + 5s, 10s, 15s, 20s, 30s)
-    offsets = [5.0, 10.0, 15.0, 20.0, 30.0]
-    
-    for _, target_row in target_viscosity_map.iterrows():
-        resin = target_row['Resin']
-        vendor = target_row['Vendor']
-        target_v = target_row['Typical_Target']
+    sensitivity_map = sensitivity_map[sensitivity_map['Sensitivity'] > 0]
+
+    # 3. Merge data
+    sop_grouped = pd.merge(sensitivity_map, target_viscosity_map, on=['Resin', 'Vendor'], how='inner')
+
+    for _, row in sop_grouped.iterrows():
+        sens = row['Sensitivity']
         
-        sens_subset = sensitivity_map[(sensitivity_map['Resin'] == resin) & (sensitivity_map['Vendor'] == vendor)]
-        
-        for offset in offsets:
-            current_v = target_v + offset
-            
-            matching_row = None
-            for _, s_row in sens_subset.iterrows():
-                interval = s_row['Dynamic_Initial_V_Bin']
-                if hasattr(interval, 'left') and hasattr(interval, 'right'):
-                    if interval.left <= current_v <= interval.right:
-                        matching_row = s_row
-                        break
-                else:
-                    matching_row = s_row
-                    break
-            
-            # Fallback if the current_v is higher than historical data
-            if matching_row is None and not sens_subset.empty:
-                sens_subset_sorted = sens_subset.sort_values(by='Dynamic_Initial_V_Bin')
-                matching_row = sens_subset_sorted.iloc[-1]
-            
-            if matching_row is not None:
-                sens = matching_row['Sensitivity']
-                theo_ratio = offset / sens
-                theo_kg = ref_coil_weight * (theo_ratio / 100)
-                
-                record = {
-                    'Resin': resin,
-                    'Vendor': vendor,
-                    'Target Viscosity (s)': round(target_v, 1),
-                    'Current Viscosity (s)': round(current_v, 1),
-                    'Required Drop (s)': offset,
-                    'Sensitivity Applied': round(sens, 2),
-                    'Theoretical Solvent (%)': round(theo_ratio, 2),
-                    'Theoretical Value (kg)': round(theo_kg, 2)
-                }
-                if has_solvent_type:
-                    record['Solvent Type'] = matching_row['Solvent_Type']
-                    
-                matrix_data.append(record)
-                
+        # Calculate exactly how many kg of solvent is needed to drop 1 second of viscosity
+        theo_ratio_per_sec = 1.0 / sens
+        factor_kg_per_sec = ref_coil_weight * (theo_ratio_per_sec / 100.0)
+
+        record = {
+            'Resin': row['Resin'],
+            'Vendor': row['Vendor'],
+            'Current Viscosity Zone': str(row['Viscosity_Zone']),
+            'Typical Target (s)': round(row['Typical_Target'], 1),
+            'Sensitivity Applied (s/%)': round(sens, 2),
+            'Solvent Factor (kg / 1s drop)': round(factor_kg_per_sec, 3)
+        }
+        if has_solvent_type:
+            record['Solvent Type'] = row['Solvent_Type']
+
+        matrix_data.append(record)
+
     df_matrix = pd.DataFrame(matrix_data)
-    
+
     if not df_matrix.empty:
         cols = df_matrix.columns.tolist()
         if has_solvent_type:
             cols.insert(2, cols.pop(cols.index('Solvent Type')))
         df_matrix = df_matrix[cols]
-        
-        df_matrix = df_matrix.sort_values(by=['Resin', 'Vendor', 'Current Viscosity (s)'])
-        
+
+        df_matrix = df_matrix.sort_values(by=['Resin', 'Vendor', 'Current Viscosity Zone'])
+
         st.dataframe(df_matrix.style.format({
-            'Target Viscosity (s)': '{:.1f}',
-            'Current Viscosity (s)': '{:.1f}',
-            'Required Drop (s)': '{:.1f}',
-            'Sensitivity Applied': '{:.2f}',
-            'Theoretical Solvent (%)': '{:.2f} %',
-            'Theoretical Value (kg)': '{:.2f} kg'
+            'Typical Target (s)': '{:.1f}',
+            'Sensitivity Applied (s/%)': '{:.2f}',
+            'Solvent Factor (kg / 1s drop)': '{:.3f}'
         }), use_container_width=True)
-        
+
+        st.info("""
+        **SOP Execution Guide:**
+        1. Measure the coil's current viscosity.
+        2. Calculate the drop: `(Current Viscosity - Typical Target)`.
+        3. Match the current viscosity to the correct `Viscosity Zone` row.
+        4. **Theoretical Value (kg) = Required Drop × Solvent Factor**
+        """)
+
         csv = df_matrix.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="📥 Download SOP Matrix as CSV",
+            label="📥 Download Coefficient Matrix as CSV",
             data=csv,
-            file_name='SOP_Solvent_Reference_Matrix.csv',
+            file_name='SOP_Coefficient_Matrix.csv',
             mime='text/csv',
         )
     else:
-        st.warning("Not enough valid historical data to generate the SOP Reference Matrix.")
+        st.warning("Not enough valid historical data to generate the SOP Coefficient Matrix.")
