@@ -18,12 +18,42 @@ group_a = st.session_state['group_a_data'].copy()
 # Ép kiểu dữ liệu để biểu đồ không bị dàn trải (Category/String)
 group_a['Solvent_Type'] = group_a['Solvent_Type'].astype(str)
 
+# ==========================================
+# --- BƯỚC LÀM SẠCH DỮ LIỆU (DATA CLEANING) ---
+# ==========================================
+visc_before = '黏度(秒)'     # Độ nhớt trước khi pha
+visc_after = '黏度(秒)_1'   # Độ nhớt sau khi pha
+paint_weight = '塗料重量'    # Trọng lượng sơn
+solvent_weight = '添加重量'  # Trọng lượng dung môi
+
+# Kiểm tra xem các cột có tồn tại không trước khi làm sạch
+if all(col in group_a.columns for col in [visc_before, visc_after, paint_weight, solvent_weight]):
+    # 1. Loại bỏ các dòng bị trống (Null/NA)
+    clean_data = group_a.dropna(subset=[visc_before, visc_after]).copy()
+
+    # 2. Loại bỏ các dòng có giá trị bằng 0 (Sơn, Dung môi, Độ nhớt)
+    clean_data = clean_data[
+        (clean_data[visc_before] > 0) & 
+        (clean_data[visc_after] > 0) & 
+        (clean_data[paint_weight] > 0) & 
+        (clean_data[solvent_weight] > 0)
+    ]
+
+    # 3. Loại bỏ các dòng mà Độ nhớt trước và sau GIỐNG Y HỆT NHAU
+    clean_data = clean_data[clean_data[visc_before] != clean_data[visc_after]]
+
+    group_a = clean_data.copy()
+    st.caption("🧹 **Hệ thống tự động:** Đã lọc bỏ các dữ liệu rác (Giá trị trống, bằng 0, hoặc độ nhớt không thay đổi).")
+else:
+    st.warning("⚠️ Bỏ qua bước làm sạch do không tìm thấy đủ các cột: Độ nhớt, Trọng lượng sơn, Trọng lượng dung môi.")
+# ==========================================
+
 # Đảm bảo cột Vendor tồn tại (tránh lỗi nếu data thiếu)
 if 'Vendor' not in group_a.columns:
     group_a['Vendor'] = 'Unknown'
 
 # 2. Logic: Nhóm dữ liệu 
-# Lưu ý: Sử dụng toàn bộ dữ liệu để so sánh hiệu quả giữa các loại dung môi
+# Sử dụng toàn bộ dữ liệu sạch để so sánh hiệu quả giữa các loại dung môi
 summary_df = group_a.groupby(['Resin', 'Solvent_Type'])['Viscosity_Sensitivity'].agg(['mean', 'std']).reset_index()
 resins = sorted(summary_df['Resin'].unique())
 
@@ -73,26 +103,26 @@ for i in range(0, len(resins), 2):
                     height=150
                 )
 
-                # --- C. BIỂU ĐỒ SCATTER KÈM ĐƯỜNG XU HƯỚNG (THÊM MỚI) ---
+                # --- C. BIỂU ĐỒ SCATTER KÈM ĐƯỜNG XU HƯỚNG ---
                 st.markdown(f"**📈 Trend: Paint vs Solvent Usage ({resin})**")
                 
                 # Lọc dữ liệu thô cho loại nhựa hiện tại
                 resin_raw_data = group_a[group_a['Resin'] == resin].copy()
                 
-                if not resin_raw_data.empty and '塗料重量' in resin_raw_data.columns and '添加重量' in resin_raw_data.columns:
+                if not resin_raw_data.empty and paint_weight in resin_raw_data.columns and solvent_weight in resin_raw_data.columns:
                     try:
                         # Dùng color & symbol gom chung vào 1 chart để không bị dính chữ trên layout hẹp
                         fig_trend = px.scatter(
                             resin_raw_data,
-                            x='塗料重量',
-                            y='添加重量',
+                            x=paint_weight,
+                            y=solvent_weight,
                             color='Solvent_Type',
                             symbol='Vendor',
                             trendline='ols', # Đường xu hướng tuyến tính
                             color_discrete_map=color_map,
                             labels={
-                                '塗料重量': 'Paint Weight (kg)',
-                                '添加重量': 'Solvent Added (kg)',
+                                paint_weight: 'Paint Weight (kg)',
+                                solvent_weight: 'Solvent Added (kg)',
                                 'Solvent_Type': 'Solvent',
                                 'Vendor': 'Vendor'
                             }
@@ -114,7 +144,7 @@ for i in range(0, len(resins), 2):
                         st.plotly_chart(fig_trend, use_container_width=True)
                         
                     except Exception as e:
-                        st.error("⚠️ Vui lòng cài đặt 'statsmodels' (chạy lệnh: `pip install statsmodels`) để vẽ được đường xu hướng.")
+                        st.error("⚠️ Lỗi vẽ xu hướng. Vui lòng cài đặt 'statsmodels' (chạy lệnh: `pip install statsmodels`).")
                 else:
                     st.info("Không đủ dữ liệu Trọng lượng sơn/dung môi để vẽ biểu đồ.")
                     
