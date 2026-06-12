@@ -1,338 +1,264 @@
 import streamlit as st
-import plotly.express as px
 import plotly.graph_objects as go
+import plotly.express as px
 import pandas as pd
 import numpy as np
 
 # ==========================================
-# SECTION 0: PAGE CONFIGURATION & CSS FIX
+# 1. PAGE CONFIGURATION & CUSTOM CSS
 # ==========================================
-st.set_page_config(page_title="Solvent Intelligence Dashboard", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Solvent Adjustment Intelligence", layout="wide")
 
-# Inject CSS to completely remove the blurry text-shadow from Plotly Sankey nodes
-st.markdown("""
+custom_css = """
 <style>
-g.sankey-node text {
-    text-shadow: none !important;
-}
+    /* Light gray app background */
+    .stApp { background-color: #F4F7F9; font-family: 'Segoe UI', sans-serif; }
+    
+    /* Reduce default Streamlit padding */
+    .block-container { padding-top: 2rem; padding-bottom: 2rem; max-width: 98%; }
+    
+    /* Main Titles */
+    .main-title { font-size: 24px; font-weight: 800; color: #1E293B; margin-bottom: 5px; }
+    .sub-title { font-size: 14px; color: #64748B; margin-bottom: 20px; }
+    
+    /* Metric Cards */
+    .metric-card {
+        background-color: white;
+        border-radius: 10px;
+        padding: 15px;
+        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+        border: 1px solid #E2E8F0;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        height: 100px;
+    }
+    .metric-title { font-size: 13px; color: #64748B; font-weight: 600; margin-bottom: 5px;}
+    .metric-value { font-size: 24px; font-weight: 700; color: #0F172A; margin:0;}
+    .metric-trend-up { font-size: 12px; color: #10B981; font-weight: 600;}
+    
+    /* Content Boxes */
+    .content-box {
+        background-color: white; border-radius: 12px; padding: 20px;
+        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border: 1px solid #E2E8F0;
+        margin-bottom: 20px; height: 100%;
+    }
+    
+    /* Sankey Headers (Pills) */
+    .pill-header {
+        border-radius: 20px; padding: 5px 15px; color: white; font-weight: bold; font-size: 12px; text-align: center;
+    }
+    .pill-blue { background-color: #3B82F6; }
+    .pill-teal { background-color: #14B8A6; }
+    .pill-purple { background-color: #8B5CF6; }
+    
+    /* Breadcrumb */
+    .breadcrumb { display: flex; align-items: center; gap: 10px; margin-bottom: 15px;}
+    .bc-item { background-color: #EEF2FF; color: #4F46E5; padding: 5px 15px; border-radius: 6px; font-size: 13px; font-weight: 600;}
+    
+    /* Detail Table */
+    .info-table { width: 100%; font-size: 13px; color: #334155; }
+    .info-table td { padding: 8px 0; border-bottom: 1px dashed #E2E8F0; }
+    .info-table td:last-child { text-align: right; font-weight: 600; }
+    .highlight-row { color: #7C3AED; font-weight: bold; font-size: 14px;}
+    
+    /* Reference Value Card */
+    .ref-card { background-color: #FAFAFA; border: 1px solid #E2E8F0; border-radius: 8px; padding: 15px; text-align: center; }
+    .ref-title { color: #64748B; font-size: 12px; font-weight: bold; margin-bottom: 10px;}
+    .ref-val { color: #7C3AED; font-size: 28px; font-weight: bold; margin: 5px 0;}
+    .ref-desc { color: #64748B; font-size: 12px;}
+    
+    /* Result Box */
+    .result-box { background-color: #ECFDF5; border: 1px solid #A7F3D0; border-radius: 8px; padding: 15px; margin-top: 15px;}
+    .result-val { color: #059669; font-size: 24px; font-weight: bold; margin: 5px 0;}
 </style>
-""", unsafe_allow_html=True)
-
-st.title("🧠 Solvent Adjustment Intelligence Dashboard")
-st.markdown("Decision Support System (DSS) based on historical data. Standardized solvent usage ratio unit: **g solvent / kg paint / 1 viscosity second drop**.")
-st.markdown("---")
-
+"""
+st.markdown(custom_css, unsafe_allow_html=True)
 
 # ==========================================
-# SECTION 1: STATE CHECK & DATA LOADING
+# 2. HEADER & FILTERS
 # ==========================================
-if not st.session_state.get('raw_data_loaded', False):
-    st.warning("⚠️ No data loaded. Please upload your data file first.")
-    st.stop()
+c_title, c_filt1, c_filt2, c_filt3, c_filt4, c_upd = st.columns([3, 1.5, 1.5, 1.5, 2, 1])
 
-group_a = st.session_state['group_a_data'].copy()
-group_a['Solvent_Type'] = group_a['Solvent_Type'].astype(str)
+with c_title:
+    st.markdown("<div class='main-title'>SOLVENT ADJUSTMENT INTELLIGENCE</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-title'>Flow Relationship: Supplier ➔ Resin ➔ Solvent</div>", unsafe_allow_html=True)
 
-# Ensure Vendor column exists gracefully
-if 'Vendor' not in group_a.columns:
-    group_a['Vendor'] = 'Unknown'
-
-
-# ==========================================
-# SECTION 2: PREPROCESSING & DATA CLEANING
-# ==========================================
-visc_before = '黏度(秒)'      # Initial Viscosity
-visc_after = '黏度(秒)_1'    # Final Viscosity
-paint_weight = '塗料重量'     # Paint Weight (kg)
-solvent_weight = '添加重量'   # Solvent Weight (kg)
-
-if all(col in group_a.columns for col in [visc_before, visc_after, paint_weight, solvent_weight]):
-    # Drop empty rows for critical columns
-    df = group_a.dropna(subset=[visc_before, visc_after, paint_weight, solvent_weight]).copy()
-    
-    # Cast to numeric types
-    for col in [visc_before, visc_after, paint_weight, solvent_weight]:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
-    df = df.dropna(subset=[visc_before, visc_after, paint_weight, solvent_weight])
-    
-    # Calculate Viscosity Reduction
-    df['Viscosity_Reduction'] = df[visc_before] - df[visc_after]
-    
-    # DATA CLEANING: Paint > 0, Solvent > 0, and Reduction > 0
-    df = df[
-        (df[paint_weight] > 0) & 
-        (df[solvent_weight] > 0) & 
-        (df['Viscosity_Reduction'] > 0)
-    ]
-    
-    # CALCULATE STANDARDIZED REFERENCE VALUE (g/kg/s)
-    # Formula: (Solvent(kg) * 1000) / (Paint(kg) * Reduction(s))
-    df['Reference_Value'] = (df[solvent_weight] * 1000) / (df[paint_weight] * df['Viscosity_Reduction'])
-    
-    # CALCULATE SOLVENT RATIO (g/kg)
-    df['Solvent_Ratio_g_kg'] = (df[solvent_weight] * 1000) / df[paint_weight]
-
-else:
-    st.error("⚠️ Missing required data columns (Viscosity, Paint Weight, Solvent Weight).")
-    st.stop()
-
+with c_filt1: st.selectbox("Supplier", ["All", "Yungchi", "CCP", "Nan Ya"])
+with c_filt2: st.selectbox("Resin Type", ["All", "PE", "EPOXY", "PU"])
+with c_filt3: st.selectbox("Solvent", ["All", "5203", "CB5203", "ISOPHORONE"])
+with c_filt4: st.text_input("Time Period", "01/01/2024  ➔  12/31/2024")
+with c_upd:
+    st.markdown("<div style='font-size:12px; color:#64748B; margin-top:25px;'><i class='fas fa-clock'></i> Last updated<br><b>05/20/2024 10:30</b></div>", unsafe_allow_html=True)
 
 # ==========================================
-# SECTION 3: MASTER UI LAYOUT DEFINITION
+# 3. KPI CARDS
+# ==========================================
+k1, k2, k3, k4, k5 = st.columns(5)
+
+k1.markdown("""
+<div class='metric-card'>
+    <div class='metric-title'>Total Batches</div>
+    <div style='display:flex; justify-content:space-between; align-items:baseline;'>
+        <p class='metric-value'>1,248</p>
+        <span class='metric-trend-up'>↑ 12.5%</span>
+    </div>
+</div>""", unsafe_allow_html=True)
+
+k2.markdown("""
+<div class='metric-card'>
+    <div class='metric-title'>Total Solvent Used</div>
+    <div style='display:flex; justify-content:space-between; align-items:baseline;'>
+        <p class='metric-value'>48,520 kg</p>
+        <span class='metric-trend-up'>↑ 8.3%</span>
+    </div>
+</div>""", unsafe_allow_html=True)
+
+k3.markdown("<div class='metric-card'><div class='metric-title'>Resin Types</div><p class='metric-value'>12</p></div>", unsafe_allow_html=True)
+k4.markdown("<div class='metric-card'><div class='metric-title'>Solvent Types</div><p class='metric-value'>8</p></div>", unsafe_allow_html=True)
+k5.markdown("<div class='metric-card'><div class='metric-title'>Suppliers</div><p class='metric-value'>6</p></div>", unsafe_allow_html=True)
+
+st.write("") # Spacer
+
+# ==========================================
+# 4. MAIN LAYOUT (TWO COLUMNS)
 # ==========================================
 col_left, col_right = st.columns([6, 4], gap="large")
 
-
-# ==========================================
-# SECTION 4: LEFT COLUMN - CASCADING FILTERS
-# ==========================================
+# ------------------------------------------
+# LEFT COLUMN: SANKEY DIAGRAM
+# ------------------------------------------
 with col_left:
-    st.subheader("🌊 Material & Process Flow (Sankey)")
+    st.markdown("""
+    <div style='background:white; padding:20px; border-radius:12px; border:1px solid #E2E8F0;'>
+        <div style='font-weight:bold; color:#1E293B; font-size:16px;'>RELATIONSHIP: SUPPLIER ➔ RESIN ➔ SOLVENT</div>
+        <div style='font-size:12px; color:#64748B; margin-bottom:15px;'>Flow thickness represents batch count</div>
+        
+        <div style='display:flex; justify-content:space-between; margin-bottom:0px; padding:0 30px;'>
+            <div class='pill-header pill-blue' style='width:150px;'>SUPPLIER</div>
+            <div class='pill-header pill-teal' style='width:150px;'>RESIN TYPE</div>
+            <div class='pill-header pill-purple' style='width:150px;'>SOLVENT</div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # Mock Data for Design Representation
+    labels = ["Yungchi (420)", "CCP (310)", "Nan Ya (210)", "Atul (150)", "Formosa (100)", "Other (58)", # 0-5
+              "PE (320)", "EPOXY (280)", "PU (210)", "PVDF (150)", "SMP (120)", "Other (168)", # 6-11
+              "5203 (420)", "CB5203 (310)", "ISOPHORONE (250)", "PMA (220)", "BUTYL (180)", "BAC (150)"] # 12-17
     
-    c_f1, c_f2, c_f3 = st.columns(3)
-    with c_f1:
-        selected_vendor = st.selectbox("1. Supplier (Vendor)", options=['All'] + list(df['Vendor'].unique()))
-    with c_f2:
-        resins_available = df[df['Vendor'] == selected_vendor]['Resin'].unique() if selected_vendor != 'All' else df['Resin'].unique()
-        selected_resin = st.selectbox("2. Resin Type", options=['All'] + list(resins_available))
-    with c_f3:
-        mask_solvent = pd.Series(True, index=df.index)
-        if selected_vendor != 'All':
-            mask_solvent &= (df['Vendor'] == selected_vendor)
-        if selected_resin != 'All':
-            mask_solvent &= (df['Resin'] == selected_resin)
-            
-        solvents_available = df[mask_solvent]['Solvent_Type'].unique()
-        selected_solvent = st.selectbox("3. Solvent Type", options=['All'] + list(solvents_available))
-
-    # --- FILTER DATA BASED ON DROPDOWN SELECTIONS ---
-    filtered_df = df.copy()
-    if selected_vendor != 'All': 
-        filtered_df = filtered_df[filtered_df['Vendor'] == selected_vendor]
-    if selected_resin != 'All': 
-        filtered_df = filtered_df[filtered_df['Resin'] == selected_resin]
-    if selected_solvent != 'All': 
-        filtered_df = filtered_df[filtered_df['Solvent_Type'] == selected_solvent]
-
-
-# ==========================================
-# ==========================================
-# ==========================================
-# SECTION 5: LEFT COLUMN - MODERN STYLED SANKEY (FIXED OVERLAP)
-# ==========================================
-    if filtered_df.empty:
-        st.info("👈 Please select a valid combination on the left.")
-    else:
-        sankey_df = filtered_df.copy()
-        
-        # Extract unique entities
-        vendors = list(sankey_df['Vendor'].unique())
-        resins = list(sankey_df['Resin'].unique())
-        solvents = list(sankey_df['Solvent_Type'].unique())
-        
-        # Count batches and calculate total solvent weights
-        v_counts = sankey_df['Vendor'].value_counts()
-        r_counts = sankey_df['Resin'].value_counts()
-        s_counts = sankey_df['Solvent_Type'].value_counts()
-        s_weights = sankey_df.groupby('Solvent_Type')[solvent_weight].sum()
-        
-        # SỬA LỖI ĐÈ CHỮ: Dùng <br> để ngắt thành 2 dòng, giúp label gọn gàng không vươn tới cột giữa
-        node_labels = (
-            [f"🏭 {v}<br>({v_counts.get(v, 0)} batches)" for v in vendors] +
-            [f"🧪 {r}<br>({r_counts.get(r, 0)} batches)" for r in resins] +
-            [f"💧 {s}<br>({s_weights.get(s, 0):.1f} kg)" for s in solvents]
+    node_colors = ["#3B82F6"]*6 + ["#14B8A6"]*6 + ["#C4B5FD"]*6
+    
+    source = [0, 0, 1, 1, 2, 3, 6, 6, 7, 7, 8, 9]
+    target = [6, 7, 7, 8, 9, 10, 12, 13, 13, 14, 15, 16]
+    value  = [200, 220, 150, 160, 210, 150, 200, 120, 100, 180, 210, 150]
+    
+    fig = go.Figure(data=[go.Sankey(
+        node = dict(
+            pad = 20, thickness = 25,
+            line = dict(color = "white", width = 0),
+            label = labels,
+            color = node_colors
+        ),
+        link = dict(
+            source = source, target = target, value = value,
+            color = "rgba(226, 232, 240, 0.6)" 
         )
-        
-        vendor_idx = {v: i for i, v in enumerate(vendors)}
-        resin_idx = {r: i + len(vendors) for i, r in enumerate(resins)}
-        solvent_idx = {s: i + len(vendors) + len(resins) for i, s in enumerate(solvents)}
-        
-        source, target, value, link_colors = [], [], [], []
-        
-        # Group 1: Vendor -> Resin
-        v_r_group = sankey_df.groupby(['Vendor', 'Resin']).size().reset_index(name='count')
-        for _, row in v_r_group.iterrows():
-            source.append(vendor_idx[row['Vendor']])
-            target.append(resin_idx[row['Resin']])
-            value.append(row['count'])
-            link_colors.append("rgba(135, 186, 222, 0.4)") # Soft modern blue
+    )])
+    
+    fig.update_layout(height=450, margin=dict(l=20, r=20, t=10, b=10), font=dict(size=11, color="black"))
+    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    st.markdown("</div>", unsafe_allow_html=True)
 
-        # Group 2: Resin -> Solvent
-        r_s_group = sankey_df.groupby(['Resin', 'Solvent_Type']).size().reset_index(name='count')
-        for _, row in r_s_group.iterrows():
-            source.append(resin_idx[row['Resin']])
-            target.append(solvent_idx[row['Solvent_Type']])
-            value.append(row['count'])
-            link_colors.append("rgba(252, 203, 163, 0.4)") # Soft modern orange
-
-        # Build Sankey with Clear Columns
-        fig_sankey = go.Figure(data=[go.Sankey(
-            node=dict(
-                pad=40, 
-                thickness=15, # Độ dày vừa phải để tăng không gian trống giữa 2 cột
-                line=dict(color="white", width=1), 
-                label=node_labels,
-                color="#2C3E50" # Đổ khối đặc màu xanh đen để xác định rõ cột thứ 3
-            ),
-            link=dict(
-                source=source, 
-                target=target, 
-                value=value, 
-                color=link_colors
-            )
-        )])
-        
-        # Dynamic height to maintain aesthetics
-        total_nodes = len(node_labels)
-        dynamic_height = max(380, min(750, total_nodes * 60))
-        
-        fig_sankey.update_layout(
-            height=dynamic_height, 
-            font=dict(size=13, color="#2C3E50", family="Segoe UI, Arial, sans-serif"), 
-            margin=dict(l=10, r=60, t=30, b=20), # Rút ngắn margin phải để nới rộng không gian bên trong
-            plot_bgcolor='#F4F7F9',
-            paper_bgcolor='#F4F7F9'
-        )
-        st.plotly_chart(fig_sankey, use_container_width=True)
-
-
-# ==========================================
-# SECTION 6: RIGHT COLUMN - DATA AGGREGATION
-# ==========================================
+# ------------------------------------------
+# RIGHT COLUMN: METRICS & PREDICTION
+# ------------------------------------------
 with col_right:
-    if filtered_df.empty or len(filtered_df) < 2:
-        st.info("👈 Please select a valid combination on the left (Requires at least 2 batches to analyze).")
-    else:
-        sample_size = len(filtered_df)
-        avg_paint_w = filtered_df[paint_weight].mean()
-        avg_init_v = filtered_df[visc_before].mean()
-        avg_fin_v = filtered_df[visc_after].mean()
-        avg_red = filtered_df['Viscosity_Reduction'].mean()
-        avg_solv_add = filtered_df[solvent_weight].mean()
-        avg_solv_ratio = filtered_df['Solvent_Ratio_g_kg'].mean()
+    st.markdown("<div class='content-box'>", unsafe_allow_html=True)
+    
+    st.markdown("<div style='font-weight:bold; margin-bottom:10px;'>DETAILED INFORMATION</div>", unsafe_allow_html=True)
+    # Breadcrumb
+    st.markdown("""
+        <div class='breadcrumb'>
+            <div class='bc-item'>Yungchi</div> ➔ 
+            <div class='bc-item' style='color:#0D9488; background:#CCFBF1;'>PE</div> ➔ 
+            <div class='bc-item' style='color:#7C3AED; background:#EDE9FE;'>5203</div>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    c_stat, c_ref = st.columns([6, 4])
+    with c_stat:
+        st.markdown("<div style='font-size:12px; font-weight:bold; color:#64748B;'>PERFORMANCE STATISTICS</div>", unsafe_allow_html=True)
+        st.markdown("""
+        <table class='info-table'>
+            <tr><td>Batch Count</td><td>186</td></tr>
+            <tr><td>Avg Initial Viscosity</td><td>45.2 s</td></tr>
+            <tr><td>Avg Adjusted Viscosity</td><td>39.1 s</td></tr>
+            <tr><td>Avg Viscosity Drop</td><td>6.1 s</td></tr>
+            <tr><td>Avg Solvent Added</td><td>3.42 kg</td></tr>
+            <tr class='highlight-row'><td>REFERENCE VALUE <span style='font-size:10px; font-weight:normal;'>(g / kg paint / s)</span></td><td>1.08 g/kg/s</td></tr>
+        </table>
+        """, unsafe_allow_html=True)
         
-        ref_mean = filtered_df['Reference_Value'].mean()
-        ref_median = filtered_df['Reference_Value'].median()
-        ref_std = filtered_df['Reference_Value'].std()
-
-
-# ==========================================
-# SECTION 7: RIGHT COLUMN - REFERENCE TABLES
-# ==========================================
-        st.subheader("📊 Historical Reference Table")
-        metrics_df = pd.DataFrame({
-            "Metric": [
-                "Sample Size (Batches)", 
-                "Avg Paint Weight (kg)", 
-                "Avg Initial Viscosity (s)", 
-                "Avg Final Viscosity (s)", 
-                "Avg Viscosity Reduction (s)", 
-                "Avg Solvent Added (kg)",
-                "Avg Solvent Ratio (g/kg paint)" 
-            ],
-            "Value": [
-                f"{sample_size}", 
-                f"{avg_paint_w:.1f}",
-                f"{avg_init_v:.1f}", 
-                f"{avg_fin_v:.1f}", 
-                f"{avg_red:.1f}", 
-                f"{avg_solv_add:.2f}",
-                f"{avg_solv_ratio:.2f}" 
-            ]
-        })
-        st.dataframe(metrics_df, hide_index=True, use_container_width=True)
-
+    with c_ref:
+        st.markdown("""
+        <div class='ref-card'>
+            <div class='ref-title'>💡 REFERENCE MEANING</div>
+            <div class='ref-desc'>Average required</div>
+            <div class='ref-val'>1.08 g</div>
+            <div class='ref-desc'>of 5203 solvent<br>per 1 kg of paint<br>to reduce 1 sec<br>of viscosity</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    st.markdown("<hr style='margin:15px 0;'>", unsafe_allow_html=True)
+    
+    c_scat, c_pred = st.columns([5, 5])
+    
+    with c_scat:
+        st.markdown("<div style='font-size:12px; font-weight:bold; margin-bottom:5px;'>DATA DISTRIBUTION</div>", unsafe_allow_html=True)
+        st.markdown("<div style='font-size:11px; color:#64748B;'>Each point = 1 batch</div>", unsafe_allow_html=True)
+        
+        np.random.seed(42)
+        scatter_x = np.random.uniform(4, 12, 100)
+        scatter_y = scatter_x * 0.5 + np.random.normal(0, 0.8, 100)
+        df_scatter = pd.DataFrame({'drop': scatter_x, 'added': scatter_y})
+        
+        fig_scatter = px.scatter(df_scatter, x='drop', y='added', trendline='ols', color_discrete_sequence=['#3B82F6'])
+        fig_scatter.update_layout(
+            height=220, margin=dict(l=0, r=0, t=10, b=0), 
+            xaxis_title="Viscosity Drop (s)", yaxis_title="Solvent Added (kg)",
+            plot_bgcolor='white', xaxis=dict(showgrid=True, gridcolor='#F1F5F9'), yaxis=dict(showgrid=True, gridcolor='#F1F5F9')
+        )
+        fig_scatter.data[1].line.color = 'gray'
+        fig_scatter.data[1].line.dash = 'dot'
+        st.plotly_chart(fig_scatter, use_container_width=True, config={'displayModeBar': False})
+        
+    with c_pred:
+        st.markdown("<div style='font-size:12px; font-weight:bold; color:#7C3AED; margin-bottom:10px;'>SOLVENT REQUIREMENT PREDICTOR</div>", unsafe_allow_html=True)
+        
+        col_in1, col_in2 = st.columns([6, 4])
+        with col_in1: st.markdown("<div style='font-size:13px; margin-top:10px;'>Current Viscosity (s)</div>", unsafe_allow_html=True)
+        with col_in2: curr_v = st.number_input("", value=45, label_visibility="collapsed")
+        
+        col_in3, col_in4 = st.columns([6, 4])
+        with col_in3: st.markdown("<div style='font-size:13px; margin-top:10px;'>Target Viscosity (s)</div>", unsafe_allow_html=True)
+        with col_in4: target_v = st.number_input("", value=40, label_visibility="collapsed")
+        
+        col_in5, col_in6 = st.columns([6, 4])
+        with col_in5: st.markdown("<div style='font-size:13px; margin-top:10px;'>Paint Weight (kg)</div>", unsafe_allow_html=True)
+        with col_in6: paint_w = st.number_input("", value=800, label_visibility="collapsed")
+        
+        # Calculate
+        reduction = curr_v - target_v
+        recommended_kg = (1.08 * paint_w * reduction) / 1000 if reduction > 0 else 0
+        
         st.markdown(f"""
-        <div style="background-color: #f0f8ff; padding: 20px; border-radius: 10px; border-left: 5px solid #0066cc; margin-bottom: 20px;">
-            <h4 style="margin-top: 0; color: #0066cc;">⭐ Reference Value</h4>
-            <p style="font-size: 14px; margin-bottom: 5px;">Combination: <b>{selected_vendor} → {selected_resin} → {selected_solvent}</b></p>
-            <h1 style="margin: 0; color: #333;">{ref_mean:.2f} <span style="font-size: 18px; color: #666;">g/kg/s</span></h1>
-            <p style="font-size: 13px; color: #666; margin-top: 5px;"><i>(Median: {ref_median:.2f} | Std Dev: {ref_std:.2f})</i></p>
-            <p style="margin-bottom: 0;"><b>Meaning:</b> On average, add {ref_mean:.2f} grams of solvent per 1 kg of paint to reduce viscosity by 1 second.</p>
+        <div class='result-box'>
+            <div style='font-size:12px; font-weight:bold; color:#065F46;'>Recommended Result</div>
+            <div style='font-size:12px; color:#065F46;'>Target Drop: {reduction} s</div>
+            <div style='font-size:12px; color:#065F46;'>Required Solvent:</div>
+            <div class='result-val'>➔ {recommended_kg:.2f} kg</div>
+            <div style='font-size:12px; color:#065F46;'>(5203)</div>
         </div>
         """, unsafe_allow_html=True)
 
-
-# ==========================================
-# SECTION 8: RIGHT COLUMN - 2-WAY PREDICTION TOOL
-# ==========================================
-        with st.expander("🛠️ PRODUCTION CALCULATORS", expanded=True):
-            tab1, tab2 = st.tabs(["🎯 Find Solvent Amount", "📉 Predict Viscosity Drop"])
-            
-            # Mode 1: Known Target Viscosity -> Calculate Solvent
-            with tab1:
-                c1, c2 = st.columns(2)
-                with c1:
-                    t1_paint = st.number_input("Paint Batch Weight (kg)", value=800.0, step=50.0, key='t1_p')
-                    t1_curr_v = st.number_input("Current Viscosity (s)", value=float(int(avg_init_v)), step=1.0, key='t1_cv')
-                with c2:
-                    t1_target_v = st.number_input("Target Viscosity (s)", value=float(int(avg_fin_v)), step=1.0, key='t1_tv')
-                
-                req_reduction = t1_curr_v - t1_target_v
-                
-                if req_reduction <= 0:
-                    st.warning("Target viscosity must be lower than current viscosity.")
-                else:
-                    rec_solvent_kg = (ref_mean * t1_paint * req_reduction) / 1000
-                    st.success(f"""
-                    ### 💧 Recommended Solvent: {rec_solvent_kg:.2f} kg
-                    *(Formula: {ref_mean:.2f} * {t1_paint} * {req_reduction:.1f} / 1000)*
-                    """)
-                    
-            # Mode 2: Known Solvent Added -> Predict Viscosity Drop
-            with tab2:
-                c3, c4 = st.columns(2)
-                with c3:
-                    t2_paint = st.number_input("Paint Batch Weight (kg)", value=800.0, step=50.0, key='t2_p')
-                    t2_curr_v = st.number_input("Current Viscosity (s)", value=float(int(avg_init_v)), step=1.0, key='t2_cv')
-                with c4:
-                    # Provide a realistic default solvent weight based on historical average ratio
-                    default_solv = (avg_solv_ratio * 800.0) / 1000
-                    t2_solv_added = st.number_input("Solvent Added (kg)", value=float(f"{default_solv:.1f}"), step=0.5, key='t2_s')
-                
-                if t2_solv_added > 0:
-                    # Reverse Formula: Reduction = (Solvent * 1000) / (Paint * Reference)
-                    pred_reduction = (t2_solv_added * 1000) / (t2_paint * ref_mean)
-                    pred_final_v = t2_curr_v - pred_reduction
-                    
-                    st.info(f"""
-                    ### 📉 Predicted Drop: {pred_reduction:.1f} seconds
-                    **Predicted Final Viscosity:** {pred_final_v:.1f} s
-                    """)
-
-
-# ==========================================
-# SECTION 9: RIGHT COLUMN - CAUSAL SCATTER PLOT
-# ==========================================
-        st.subheader("🎯 Solvent Ratio vs. Viscosity Drop")
-        st.caption("Shows the causal relationship: How many seconds dropped based on the solvent ratio added.")
-        
-        try:
-            fig_scatter = px.scatter(
-                filtered_df,
-                x='Solvent_Ratio_g_kg',   # X-Axis: The CAUSE (Solvent Ratio)
-                y='Viscosity_Reduction',  # Y-Axis: The EFFECT (Viscosity Drop)
-                trendline='ols',
-                labels={
-                    'Solvent_Ratio_g_kg': 'Solvent Ratio (g / 1kg Paint)',
-                    'Viscosity_Reduction': 'Viscosity Reduction (seconds)'
-                },
-                color_discrete_sequence=['#e67e22'] # Matched with Sankey orange theme
-            )
-            fig_scatter.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=0), plot_bgcolor='white')
-            fig_scatter.update_xaxes(showline=True, linecolor='lightgray', showgrid=True, gridcolor='whitesmoke')
-            fig_scatter.update_yaxes(showline=True, linecolor='lightgray', showgrid=True, gridcolor='whitesmoke')
-            st.plotly_chart(fig_scatter, use_container_width=True)
-            
-        except Exception:
-            fig_scatter = px.scatter(
-                filtered_df, 
-                x='Solvent_Ratio_g_kg', 
-                y='Viscosity_Reduction', 
-                labels={
-                    'Solvent_Ratio_g_kg': 'Solvent Ratio (g / 1kg Paint)',
-                    'Viscosity_Reduction': 'Viscosity Reduction (seconds)'
-                }
-            )
-            fig_scatter.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=0), plot_bgcolor='white')
-            st.plotly_chart(fig_scatter, use_container_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
