@@ -80,11 +80,11 @@ with col_left:
     
     c_f1, c_f2, c_f3 = st.columns(3)
     
-    # 1. Vendor Filter
+    # 1. Supplier Filter
     with c_f1:
         selected_vendor = st.selectbox("1. Supplier (Vendor)", options=['All'] + list(df['Vendor'].unique()))
     
-    # 2. Resin Filter (Based on Vendor)
+    # 2. Resin Filter (Based on selected Vendor)
     with c_f2:
         if selected_vendor != 'All':
             resins_available = df[df['Vendor'] == selected_vendor]['Resin'].unique()
@@ -93,7 +93,7 @@ with col_left:
             
         selected_resin = st.selectbox("2. Resin Type", options=['All'] + list(resins_available))
         
-    # 3. Solvent Filter (Based on Vendor AND Resin)
+    # 3. Solvent Filter (Based on selected Vendor AND selected Resin)
     with c_f3:
         mask_solvent = pd.Series(True, index=df.index)
         
@@ -105,7 +105,7 @@ with col_left:
         solvents_available = df[mask_solvent]['Solvent_Type'].unique()
         selected_solvent = st.selectbox("3. Solvent Type", options=['All'] + list(solvents_available))
 
-    # --- Create Filtered DataFrame based on selections ---
+    # --- Create Filtered DataFrame based on exact dropdown selections ---
     filtered_df = df.copy()
     if selected_vendor != 'All': 
         filtered_df = filtered_df[filtered_df['Vendor'] == selected_vendor]
@@ -121,7 +121,7 @@ with col_left:
     if filtered_df.empty:
         st.info("No data available for the selected flow.")
     else:
-        # Use filtered data so the chart shrinks to focus only on what is selected
+        # Use the filtered subset to render a clean, focused chart
         sankey_df = filtered_df.copy()
         
         vendors = list(sankey_df['Vendor'].unique())
@@ -158,15 +158,16 @@ with col_left:
                 thickness=25,
                 line=dict(color="white", width=1),
                 label=node_labels,
-                color="#2C3E50" 
+                color="#2C3E50" # Deep elegant corporate nodes
             ),
             link=dict(source=source, target=target, value=value, color=link_colors)
         )])
         
         fig_sankey.update_layout(
             height=600, 
+            # High-contrast solid black text typography
             font=dict(size=14, color="black", family="Arial, sans-serif"), 
-            margin=dict(l=10, r=160, t=40, b=20), 
+            margin=dict(l=10, r=160, t=40, b=20), # r=160 provides full width for long solvent names
             plot_bgcolor='white',
             paper_bgcolor='white'
         )
@@ -241,7 +242,7 @@ with col_right:
         st.subheader("🎯 Data Dispersion & Reliability")
         st.caption("If the points cluster along a straight line, the Reference Value is highly reliable.")
         
-        # Standardize Y-axis: Solvent per 1000kg of Paint
+        # Standardize Y-axis: Solvent per 1000kg of Paint to eliminate batch size variations
         filtered_df['Solvent_per_1000kg_Paint'] = (filtered_df[solvent_weight] / filtered_df[paint_weight]) * 1000
         
         try:
@@ -262,6 +263,7 @@ with col_right:
             st.plotly_chart(fig_scatter, use_container_width=True)
             
         except Exception:
+            # Fallback scatter plot if statsmodels library is not loaded
             fig_scatter = px.scatter(
                 filtered_df, 
                 x='Viscosity_Reduction', 
@@ -271,4 +273,5 @@ with col_right:
                     'Solvent_per_1000kg_Paint': 'Solvent Amount / 1000kg Paint'
                 }
             )
+            fig_scatter.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=0), plot_bgcolor='white')
             st.plotly_chart(fig_scatter, use_container_width=True)
