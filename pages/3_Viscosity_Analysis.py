@@ -73,8 +73,15 @@ with col_left:
         resins_available = df[df['Vendor'] == selected_vendor]['Resin'].unique() if selected_vendor != 'All' else df['Resin'].unique()
         selected_resin = st.selectbox("2. Resin Type", options=['All'] + list(resins_available))
     with c_f3:
-        solvents_available = df[(df['Vendor'] == selected_vendor if selected_vendor != 'All' else True) & 
-                                (df['Resin'] == selected_resin if selected_resin != 'All' else True)]['Solvent_Type'].unique()
+        # Build the filter mask step-by-step to avoid Pandas KeyError
+        mask = pd.Series(True, index=df.index)
+        
+        if selected_vendor != 'All':
+            mask &= (df['Vendor'] == selected_vendor)
+        if selected_resin != 'All':
+            mask &= (df['Resin'] == selected_resin)
+            
+        solvents_available = df[mask]['Solvent_Type'].unique()
         selected_solvent = st.selectbox("3. Solvent Type", options=['All'] + list(solvents_available))
 
     # --- Draw Sankey Diagram ---
