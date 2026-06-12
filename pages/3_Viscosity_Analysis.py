@@ -1,113 +1,70 @@
 import streamlit as st
-import plotly.graph_objects as go
-import plotly.express as px
 import pandas as pd
 import numpy as np
 
 # ==========================================
 # 1. PAGE CONFIGURATION & CUSTOM CSS
 # ==========================================
-st.set_page_config(page_title="Solvent Adjustment Intelligence", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Mind Map View", layout="wide", initial_sidebar_state="expanded")
 
 custom_css = """
 <style>
-    /* Hide Streamlit default header to fix overlapping */
+    /* Hide default Streamlit elements */
     header {visibility: hidden;}
     #MainMenu {visibility: hidden;}
     
-    /* Light gray app background */
+    /* App background */
     .stApp { background-color: #F4F7F9; font-family: 'Segoe UI', sans-serif; }
+    .block-container { padding-top: 2rem; max-width: 95%; }
     
-    /* Reduce default Streamlit padding */
-    .block-container { padding-top: 1rem; padding-bottom: 1rem; max-width: 98%; }
-    
-    /* Main Titles */
-    .main-title { font-size: 24px; font-weight: 800; color: #1E293B; margin-bottom: 0px; }
-    .sub-title { font-size: 13px; color: #64748B; margin-bottom: 15px; }
-    
-    /* Metric Cards */
-    .metric-card {
-        background-color: white; border-radius: 10px; padding: 15px;
-        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border: 1px solid #E2E8F0;
-        display: flex; flex-direction: column; justify-content: center; height: 90px;
-    }
-    .metric-title { font-size: 13px; color: #64748B; font-weight: 600; margin-bottom: 5px;}
-    .metric-value { font-size: 24px; font-weight: 700; color: #0F172A; margin:0;}
-    
-    /* Content Boxes */
-    .content-box {
-        background-color: white; border-radius: 12px; padding: 20px;
-        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border: 1px solid #E2E8F0;
-        margin-bottom: 20px; height: 100%;
-    }
-    
-    /* Breadcrumb */
-    .breadcrumb { display: flex; align-items: center; gap: 10px; margin-bottom: 15px;}
-    .bc-item { background-color: #EEF2FF; color: #4F46E5; padding: 5px 15px; border-radius: 6px; font-size: 13px; font-weight: 600;}
-    
-    /* Detail Table */
-    .info-table { width: 100%; font-size: 13px; color: #334155; border-collapse: collapse; }
-    .info-table td { padding: 8px 0; border-bottom: 1px dashed #E2E8F0; }
-    .info-table td:last-child { text-align: right; font-weight: 600; }
-    .highlight-row { color: #7C3AED; font-weight: bold; font-size: 14px;}
-    
-    /* Reference Value Card */
-    .ref-card { background-color: #FAFAFA; border: 1px solid #E2E8F0; border-radius: 8px; padding: 15px; text-align: center; }
-    .ref-title { color: #64748B; font-size: 12px; font-weight: bold; margin-bottom: 10px;}
-    .ref-val { color: #7C3AED; font-size: 28px; font-weight: bold; margin: 5px 0;}
-    .ref-desc { color: #64748B; font-size: 12px;}
-    
-    /* Result Box */
-    .result-box { background-color: #ECFDF5; border: 1px solid #A7F3D0; border-radius: 8px; padding: 15px; margin-top: 15px;}
-    .result-val { color: #059669; font-size: 24px; font-weight: bold; margin: 5px 0;}
+    /* Titles */
+    .main-title { font-size: 26px; font-weight: 800; color: #1E293B; margin-bottom: 5px; }
+    .sub-title { font-size: 14px; color: #64748B; margin-bottom: 25px; }
     
     /* MIND MAP STYLES */
-    .mindmap-container { display: flex; justify-content: space-between; align-items: center; position: relative; padding: 20px 0; min-height: 450px;}
-    .mindmap-col { display: flex; flex-direction: column; gap: 30px; z-index: 2; width: 30%; }
-    .mindmap-center { z-index: 2; width: 35%; display: flex; justify-content: center; }
+    .mindmap-wrapper { background: white; border-radius: 16px; border: 1px solid #E2E8F0; padding: 40px 20px; position: relative; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+    .mindmap-container { display: flex; justify-content: space-between; align-items: center; position: relative; min-height: 500px; z-index: 2;}
     
-    .mm-card { background: white; border-radius: 40px; padding: 15px 25px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05); border: 1px solid #E2E8F0; }
-    .mm-card-header { font-size: 16px; font-weight: 800; color: #0F172A; display: flex; align-items: center; gap: 8px; margin-bottom: 8px;}
-    .mm-card-row { font-size: 13px; color: #475569; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;}
+    /* Columns */
+    .mindmap-col { display: flex; flex-direction: column; gap: 35px; width: 30%; max-width: 320px; }
+    .mindmap-center { width: 40%; display: flex; justify-content: center; }
+    
+    /* Spoke Cards (Outer Nodes) */
+    .mm-card { background: white; border-radius: 40px; padding: 18px 25px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.08); border: 1px solid #E2E8F0; transition: transform 0.2s;}
+    .mm-card:hover { transform: translateY(-3px); }
+    .mm-card-header { font-size: 17px; font-weight: 800; color: #0F172A; display: flex; align-items: center; gap: 8px; margin-bottom: 10px;}
+    .mm-card-row { font-size: 14px; color: #475569; margin-bottom: 6px; display: flex; align-items: center; gap: 8px;}
     .mm-highlight { font-weight: 700; color: #D97706; } 
     
-    .mm-hub { background: white; border-radius: 15px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); border: 1px solid #E2E8F0; width: 100%; max-width: 280px; overflow: hidden; }
-    .mm-hub-header { background: #0F172A; color: white; padding: 15px; text-align: center; font-size: 20px; font-weight: bold; }
-    .mm-hub-body { padding: 20px; text-align: center; }
-    .mm-hub-stat { font-size: 14px; color: #334155; padding: 8px 0; border-bottom: 1px solid #F1F5F9; font-weight: 500;}
+    /* Center Hub */
+    .mm-hub { background: white; border-radius: 16px; box-shadow: 0 25px 30px -5px rgba(0,0,0,0.15); border: 2px solid #E2E8F0; width: 100%; max-width: 320px; overflow: hidden; }
+    .mm-hub-header { background: #0F172A; color: white; padding: 20px; text-align: center; font-size: 24px; font-weight: bold; letter-spacing: 0.5px;}
+    .mm-hub-body { padding: 25px; text-align: center; }
+    .mm-hub-stat { font-size: 15px; color: #334155; padding: 10px 0; border-bottom: 1px solid #F1F5F9; font-weight: 500;}
     .mm-hub-stat:last-child { border-bottom: none; }
 </style>
 """
 st.markdown(custom_css, unsafe_allow_html=True)
 
-
 # ==========================================
+# 2. DATA LOADING (STANDALONE)
 # ==========================================
-# 2. DATA LOADING & PREPROCESSING (UPDATED FOR STANDALONE)
-# ==========================================
-# Kiểm tra xem dữ liệu đã có trong session_state chưa
 if st.session_state.get('raw_data_loaded', False) and 'group_a_data' in st.session_state:
     group_a = st.session_state['group_a_data'].copy()
 else:
-    # NẾU CHƯA CÓ DỮ LIỆU: Hiện Sidebar tải file hoặc Nút tạo dữ liệu mẫu
     st.sidebar.markdown("### 📂 Data Input")
     uploaded_file = st.sidebar.file_uploader("Upload Data (CSV/Excel)", type=["csv", "xlsx"])
 
     if uploaded_file is not None:
-        # Đọc file người dùng tải lên
         if uploaded_file.name.endswith('.csv'):
             group_a = pd.read_csv(uploaded_file)
         else:
             group_a = pd.read_excel(uploaded_file)
-        
-        # Lưu vào session để dùng cho các bước sau
         st.session_state['raw_data_loaded'] = True
         st.session_state['group_a_data'] = group_a
-        st.rerun() # Tải lại trang để tắt cảnh báo
+        st.rerun()
     else:
         st.warning("⚠️ No data loaded. Please upload your data file in the sidebar, or click below to test with sample data.")
-        
-        # Nút tạo dữ liệu giả lập để xem giao diện Mind Map ngay lập tức
         if st.button("🚀 Load Sample Data for Testing"):
             np.random.seed(42)
             n = 1248
@@ -123,10 +80,11 @@ else:
             st.session_state['raw_data_loaded'] = True
             st.session_state['group_a_data'] = mock_data
             st.rerun()
-            
-        st.stop() # Dừng chạy code bên dưới nếu chưa có dữ liệu
+        st.stop()
 
-# Đảm bảo các cột dữ liệu đúng chuẩn
+# ==========================================
+# 3. PREPROCESSING
+# ==========================================
 group_a['Solvent_Type'] = group_a['Solvent_Type'].astype(str)
 if 'Vendor' not in group_a.columns: group_a['Vendor'] = 'Unknown'
 
@@ -135,32 +93,25 @@ visc_after = '黏度(秒)_1'
 paint_weight = '塗料重量'
 solvent_weight = '添加重量'
 
-if all(col in group_a.columns for col in [visc_before, visc_after, paint_weight, solvent_weight]):
-    df = group_a.dropna(subset=[visc_before, visc_after, paint_weight, solvent_weight]).copy()
-    for col in [visc_before, visc_after, paint_weight, solvent_weight]:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
-    df = df.dropna(subset=[visc_before, visc_after, paint_weight, solvent_weight])
-    
-    df['Viscosity_Reduction'] = df[visc_before] - df[visc_after]
-    df = df[(df[paint_weight] > 0) & (df[solvent_weight] > 0) & (df['Viscosity_Reduction'] > 0)]
-    
-    # Calculate Ratios
-    df['Reference_Value'] = (df[solvent_weight] * 1000) / (df[paint_weight] * df['Viscosity_Reduction'])
-    df['Solvent_Ratio_g_kg'] = (df[solvent_weight] * 1000) / df[paint_weight]
-    df['Pct_Per_Sec'] = (df[solvent_weight] / df[paint_weight] * 100) / df['Viscosity_Reduction']
-else:
-    st.error("⚠️ Missing required data columns (Viscosity, Paint Weight, Solvent Weight). Please check your Excel file.")
-    st.stop()
+df = group_a.dropna(subset=[visc_before, visc_after, paint_weight, solvent_weight]).copy()
+for col in [visc_before, visc_after, paint_weight, solvent_weight]:
+    df[col] = pd.to_numeric(df[col], errors='coerce')
+df = df.dropna()
+
+df['Viscosity_Reduction'] = df[visc_before] - df[visc_after]
+df = df[(df[paint_weight] > 0) & (df[solvent_weight] > 0) & (df['Viscosity_Reduction'] > 0)]
+
+# Calculate standard metrics
+df['Pct_Per_Sec'] = (df[solvent_weight] / df[paint_weight] * 100) / df['Viscosity_Reduction']
 
 
 # ==========================================
-# 3. HEADER & CASCADING FILTERS
+# 4. HEADER & FILTERS
 # ==========================================
-c_title, c_filt1, c_filt2, c_filt3, c_filt4 = st.columns([3.5, 1.5, 1.5, 1.5, 2])
+st.markdown("<div class='main-title'>SOLVENT FLOW INTELLIGENCE</div>", unsafe_allow_html=True)
+st.markdown("<div class='sub-title'>Interactive Mind Map: Supplier ➔ Resin ➔ Solvent Relationship</div>", unsafe_allow_html=True)
 
-with c_title:
-    st.markdown("<div class='main-title'>SOLVENT ADJUSTMENT INTELLIGENCE</div>", unsafe_allow_html=True)
-    st.markdown("<div class='sub-title'>Flow Relationship: Supplier ➔ Resin ➔ Solvent</div>", unsafe_allow_html=True)
+c_filt1, c_filt2, c_filt3, c_spacer = st.columns([2, 2, 2, 4])
 
 with c_filt1: 
     selected_vendor = st.selectbox("Supplier", ["All"] + list(df['Vendor'].unique()))
@@ -173,8 +124,6 @@ with c_filt3:
     if selected_resin != 'All': mask_s &= (df['Resin'] == selected_resin)
     solvs_avail = df[mask_s]['Solvent_Type'].unique()
     selected_solvent = st.selectbox("Solvent Type", ["All"] + list(solvs_avail))
-with c_filt4: 
-    st.text_input("Time Period", "01/01/2024  ➔  12/31/2024", disabled=True)
 
 # Apply Filters
 filtered_df = df.copy()
@@ -182,220 +131,94 @@ if selected_vendor != 'All': filtered_df = filtered_df[filtered_df['Vendor'] == 
 if selected_resin != 'All': filtered_df = filtered_df[filtered_df['Resin'] == selected_resin]
 if selected_solvent != 'All': filtered_df = filtered_df[filtered_df['Solvent_Type'] == selected_solvent]
 
+st.write("") # Spacer
 
 # ==========================================
-# 4. KPI CARDS
+# 5. DYNAMIC MIND MAP RENDERER
 # ==========================================
-k1, k2, k3, k4, k5 = st.columns(5)
-total_batches = len(filtered_df)
-total_solvent_kg = filtered_df[solvent_weight].sum() if not filtered_df.empty else 0
-total_resins = filtered_df['Resin'].nunique() if not filtered_df.empty else 0
-total_solvents = filtered_df['Solvent_Type'].nunique() if not filtered_df.empty else 0
-total_suppliers = filtered_df['Vendor'].nunique() if not filtered_df.empty else 0
+if filtered_df.empty:
+    st.info("👈 No data available for the current selection. Please adjust your filters.")
+else:
+    # 1. Hub Data Aggregation
+    hub_title = selected_vendor if selected_vendor != 'All' else "All Suppliers"
+    total_paint_used = filtered_df[paint_weight].sum()
+    avg_init_visc = filtered_df[visc_before].mean()
+    avg_target_visc = filtered_df[visc_after].mean()
+    total_solvent_added = filtered_df[solvent_weight].sum()
+    avg_pct_per_sec = filtered_df['Pct_Per_Sec'].mean()
+    if pd.isna(avg_pct_per_sec): avg_pct_per_sec = 0.0
 
-k1.markdown(f"<div class='metric-card'><div class='metric-title'>Total Batches</div><p class='metric-value'>{total_batches:,}</p></div>", unsafe_allow_html=True)
-k2.markdown(f"<div class='metric-card'><div class='metric-title'>Total Solvent Used</div><p class='metric-value'>{total_solvent_kg:,.1f} kg</p></div>", unsafe_allow_html=True)
-k3.markdown(f"<div class='metric-card'><div class='metric-title'>Resin Types</div><p class='metric-value'>{total_resins}</p></div>", unsafe_allow_html=True)
-k4.markdown(f"<div class='metric-card'><div class='metric-title'>Solvent Types</div><p class='metric-value'>{total_solvents}</p></div>", unsafe_allow_html=True)
-k5.markdown(f"<div class='metric-card'><div class='metric-title'>Suppliers</div><p class='metric-value'>{total_suppliers}</p></div>", unsafe_allow_html=True)
-st.write("")
-
-
-# ==========================================
-# 5. MAIN LAYOUT (LEFT: MIND MAP, RIGHT: METRICS)
-# ==========================================
-col_left, col_right = st.columns([6, 4], gap="large")
-
-with col_left:
-    st.markdown("<div class='content-box'>", unsafe_allow_html=True)
+    # 2. Spoke Data Aggregation (Grouped by Resin)
+    spoke_data = []
+    for resin, group in filtered_df.groupby('Resin'):
+        top_solvent = group['Solvent_Type'].mode()[0] if not group['Solvent_Type'].empty else "Mixed"
+        r_paint = group[paint_weight].sum()
+        r_solvent = group[solvent_weight].sum()
+        r_pct = group['Pct_Per_Sec'].mean()
+        if pd.isna(r_pct): r_pct = 0.0
+        spoke_data.append({"resin": resin, "paint": r_paint, "solv_name": top_solvent, "solv_weight": r_solvent, "pct": r_pct})
     
-    if filtered_df.empty:
-        st.info("👈 No data available for the current selection.")
-    else:
-        # Calculate Hub Stats
-        hub_title = selected_vendor if selected_vendor != 'All' else "All Suppliers"
-        total_paint_used = filtered_df[paint_weight].sum()
-        avg_init_visc = filtered_df[visc_before].mean()
-        avg_target_visc = filtered_df[visc_after].mean()
-        total_solvent_added = filtered_df[solvent_weight].sum()
-        avg_pct_per_sec = filtered_df['Pct_Per_Sec'].mean()
-        if pd.isna(avg_pct_per_sec): avg_pct_per_sec = 0.0
+    # Split Spokes Left & Right
+    mid_idx = (len(spoke_data) + 1) // 2
+    left_spokes = spoke_data[:mid_idx]
+    right_spokes = spoke_data[mid_idx:]
 
-        # Group data for Spokes
-        resin_groups = filtered_df.groupby('Resin')
-        spoke_data = []
-        for resin, group in resin_groups:
-            top_solvent = group['Solvent_Type'].mode()[0] if not group['Solvent_Type'].empty else "Mixed"
-            r_paint = group[paint_weight].sum()
-            r_solvent = group[solvent_weight].sum()
-            r_pct = group['Pct_Per_Sec'].mean()
-            if pd.isna(r_pct): r_pct = 0.0
-            spoke_data.append({"resin": resin, "paint": r_paint, "solv_name": top_solvent, "solv_weight": r_solvent, "pct": r_pct})
+    # 3. HTML Builder for Spoke Cards
+    def build_spoke_card(data):
+        return f"""
+        <div class='mm-card'>
+            <div class='mm-card-header'>🧪 {data['resin']}</div>
+            <div class='mm-card-row'>⚖️ <b>{data['paint']:,.0f} kg</b> Paint, {data['solv_name']}</div>
+            <div class='mm-card-row'>💧 <b>{data['solv_weight']:,.1f} kg</b> Solvent</div>
+            <div class='mm-card-row'>📉 <span class='mm-highlight'>{data['pct']:.2f}%</span> Solvent / 1s</div>
+        </div>
+        """
+
+    left_spokes_html = "".join([build_spoke_card(d) for d in left_spokes])
+    right_spokes_html = "".join([build_spoke_card(d) for d in right_spokes])
+
+    # 4. SVG Dynamic Connections
+    svg_paths = ""
+    # Left connections
+    for i in range(len(left_spokes)):
+        y_percent = 20 + (60 / max(1, len(left_spokes) - 1)) * i if len(left_spokes) > 1 else 50
+        svg_paths += f'<path d="M 50 50 C 25 50, 25 {y_percent}, 0 {y_percent}" stroke="#3B82F6" stroke-width="5" fill="none" opacity="0.3"/>'
         
-        # Split Spokes Left/Right
-        mid_idx = (len(spoke_data) + 1) // 2
-        left_spokes = spoke_data[:mid_idx]
-        right_spokes = spoke_data[mid_idx:]
+    # Right connections
+    for i in range(len(right_spokes)):
+        y_percent = 20 + (60 / max(1, len(right_spokes) - 1)) * i if len(right_spokes) > 1 else 50
+        svg_paths += f'<path d="M 50 50 C 75 50, 75 {y_percent}, 100 {y_percent}" stroke="#F97316" stroke-width="5" fill="none" opacity="0.3"/>'
 
-        # Helper function to generate Spoke HTML
-        def build_spoke_card(data):
-            return f"""
-            <div class='mm-card' style='position:relative; z-index:2;'>
-                <div class='mm-card-header'>🧪 {data['resin']}</div>
-                <div class='mm-card-row'>⚖️ <b>{data['paint']:,.0f} kg</b> Paint, {data['solv_name']}</div>
-                <div class='mm-card-row'>💧 <b>{data['solv_weight']:,.1f} kg</b> Solvent</div>
-                <div class='mm-card-row'>📉 <span class='mm-highlight'>{data['pct']:.2f}%</span> Solvent / 1s</div>
+    # 5. Render Final Map
+    mindmap_html = f"""
+    <div class="mindmap-wrapper">
+        <svg style="position:absolute; top:0; left:0; width:100%; height:100%; z-index:1;" viewBox="0 0 100 100" preserveAspectRatio="none">
+            {svg_paths}
+        </svg>
+        <div class="mindmap-container">
+            <div class="mindmap-col">
+                {left_spokes_html}
             </div>
-            """
-
-        # Pre-calculate strings outside of the f-string to prevent SyntaxError
-        left_spokes_html = "".join([build_spoke_card(d) for d in left_spokes])
-        right_spokes_html = "".join([build_spoke_card(d) for d in right_spokes])
-
-        # Generate SVG Connections
-        svg_paths = ""
-        for i in range(len(left_spokes)):
-            y_percent = 20 + (60 / max(1, len(left_spokes) - 1)) * i if len(left_spokes) > 1 else 50
-            svg_paths += f'<path d="M 50 50 C 25 50, 25 {y_percent}, 0 {y_percent}" stroke="#3B82F6" stroke-width="4" fill="none" opacity="0.3"/>'
             
-        for i in range(len(right_spokes)):
-            y_percent = 20 + (60 / max(1, len(right_spokes) - 1)) * i if len(right_spokes) > 1 else 50
-            svg_paths += f'<path d="M 50 50 C 75 50, 75 {y_percent}, 100 {y_percent}" stroke="#F97316" stroke-width="4" fill="none" opacity="0.3"/>'
-
-        # Assemble Mind Map HTML
-        mindmap_html = f"""
-        <div style="background: white; border-radius: 12px; position: relative; overflow: hidden;">
-            <svg style="position:absolute; top:0; left:0; width:100%; height:100%; z-index:1;" viewBox="0 0 100 100" preserveAspectRatio="none">
-                {svg_paths}
-            </svg>
-            <div class="mindmap-container">
-                <div class="mindmap-col">
-                    {left_spokes_html}
-                </div>
-                <div class="mindmap-center">
-                    <div class="mm-hub">
-                        <div class="mm-hub-header">🏭 {hub_title}</div>
-                        <div class="mm-hub-body">
-                            <div class="mm-hub-stat"><b>{total_paint_used:,.0f} kg</b> Paint Used</div>
-                            <div class="mm-hub-stat" style="color:#64748B; font-size:12px;">Data Aggregate</div>
-                            <div class="mm-hub-stat">Avg Initial Visc: <b>{avg_init_visc:.1f} s</b></div>
-                            <div class="mm-hub-stat">Avg Target Visc: <b>{avg_target_visc:.1f} s</b></div>
-                            <div class="mm-hub-stat"><b>{total_solvent_added:,.1f} kg</b> Solvent Added</div>
-                            <div class="mm-hub-stat" style="font-style:italic; color:#0F172A; font-weight:700;">
-                                {avg_pct_per_sec:.2f}% Solvent / 1s Drop
-                            </div>
+            <div class="mindmap-center">
+                <div class="mm-hub">
+                    <div class="mm-hub-header">🏭 {hub_title}</div>
+                    <div class="mm-hub-body">
+                        <div class="mm-hub-stat"><b>{total_paint_used:,.0f} kg</b> Paint Used</div>
+                        <div class="mm-hub-stat">Avg Initial Visc: <b>{avg_init_visc:.1f} s</b></div>
+                        <div class="mm-hub-stat">Avg Target Visc: <b>{avg_target_visc:.1f} s</b></div>
+                        <div class="mm-hub-stat"><b>{total_solvent_added:,.1f} kg</b> Solvent Added</div>
+                        <div class="mm-hub-stat" style="font-style:italic; color:#0F172A; font-weight:700;">
+                            {avg_pct_per_sec:.2f}% Solvent / 1s Drop
                         </div>
                     </div>
                 </div>
-                <div class="mindmap-col">
-                    {right_spokes_html}
-                </div>
+            </div>
+            
+            <div class="mindmap-col">
+                {right_spokes_html}
             </div>
         </div>
-        """
-        st.markdown(mindmap_html, unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-
-with col_right:
-    st.markdown("<div class='content-box'>", unsafe_allow_html=True)
-    
-    if filtered_df.empty or len(filtered_df) < 2:
-        st.info("👈 Please select a valid combination on the left.")
-    else:
-        avg_init_v = filtered_df[visc_before].mean()
-        avg_fin_v = filtered_df[visc_after].mean()
-        avg_red = filtered_df['Viscosity_Reduction'].mean()
-        avg_solv_add = filtered_df[solvent_weight].mean()
-        ref_mean = filtered_df['Reference_Value'].mean()
-        
-        st.markdown("<div style='font-weight:bold; margin-bottom:10px;'>DETAILED INFORMATION</div>", unsafe_allow_html=True)
-        
-        v_label = selected_vendor if selected_vendor != 'All' else "All Suppliers"
-        r_label = selected_resin if selected_resin != 'All' else "All Resins"
-        s_label = selected_solvent if selected_solvent != 'All' else "All Solvents"
-        
-        st.markdown(f"""
-        <div class='breadcrumb'>
-            <div class='bc-item'>{v_label}</div> ➔ 
-            <div class='bc-item' style='color:#0D9488; background:#CCFBF1;'>{r_label}</div> ➔ 
-            <div class='bc-item' style='color:#7C3AED; background:#EDE9FE;'>{s_label}</div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        c_stat, c_ref = st.columns([5.5, 4.5])
-        with c_stat:
-            st.markdown("<div style='font-size:12px; font-weight:bold; color:#64748B;'>PERFORMANCE STATISTICS</div>", unsafe_allow_html=True)
-            st.markdown(f"""
-            <table class='info-table'>
-                <tr><td>Batch Count</td><td>{total_batches}</td></tr>
-                <tr><td>Avg Initial Viscosity</td><td>{avg_init_v:.1f} s</td></tr>
-                <tr><td>Avg Adjusted Viscosity</td><td>{avg_fin_v:.1f} s</td></tr>
-                <tr><td>Avg Viscosity Drop</td><td>{avg_red:.1f} s</td></tr>
-                <tr><td>Avg Solvent Added</td><td>{avg_solv_add:.2f} kg</td></tr>
-                <tr class='highlight-row'><td>REFERENCE VALUE <br><span style='font-size:10px; font-weight:normal; color:#64748B;'>(g / kg paint / s)</span></td><td>{ref_mean:.2f} g</td></tr>
-            </table>
-            """, unsafe_allow_html=True)
-            
-        with c_ref:
-            st.markdown(f"""
-            <div class='ref-card'>
-                <div class='ref-title'>💡 REFERENCE MEANING</div>
-                <div class='ref-desc'>Average required</div>
-                <div class='ref-val'>{ref_mean:.2f} g</div>
-                <div class='ref-desc'>of {s_label} solvent<br>per 1 kg of paint<br>to reduce 1 sec<br>of viscosity</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        st.markdown("<hr style='margin:15px 0;'>", unsafe_allow_html=True)
-        
-        c_scat, c_pred = st.columns([5, 5])
-        with c_scat:
-            st.markdown("<div style='font-size:12px; font-weight:bold; margin-bottom:5px;'>DATA DISTRIBUTION</div>", unsafe_allow_html=True)
-            st.markdown("<div style='font-size:11px; color:#64748B;'>Each point = 1 batch</div>", unsafe_allow_html=True)
-            
-            fig_scatter = px.scatter(
-                filtered_df, x='Viscosity_Reduction', y=solvent_weight, 
-                trendline='ols', color_discrete_sequence=['#3B82F6']
-            )
-            fig_scatter.update_layout(
-                height=240, margin=dict(l=0, r=0, t=10, b=0), 
-                xaxis_title="Viscosity Drop (s)", yaxis_title="Solvent Added (kg)",
-                plot_bgcolor='white', xaxis=dict(showgrid=True, gridcolor='#F1F5F9'), yaxis=dict(showgrid=True, gridcolor='#F1F5F9')
-            )
-            if len(fig_scatter.data) > 1:
-                fig_scatter.data[1].line.color = 'gray'
-                fig_scatter.data[1].line.dash = 'dot'
-            st.plotly_chart(fig_scatter, use_container_width=True, config={'displayModeBar': False})
-            
-        with c_pred:
-            st.markdown("<div style='font-size:12px; font-weight:bold; color:#7C3AED; margin-bottom:10px;'>SOLVENT PREDICTOR</div>", unsafe_allow_html=True)
-            
-            col_in1, col_in2 = st.columns([6, 4])
-            with col_in1: st.markdown("<div style='font-size:13px; margin-top:10px;'>Current Viscosity (s)</div>", unsafe_allow_html=True)
-            with col_in2: curr_v = st.number_input("", value=float(int(avg_init_v)), label_visibility="collapsed")
-            
-            col_in3, col_in4 = st.columns([6, 4])
-            with col_in3: st.markdown("<div style='font-size:13px; margin-top:10px;'>Target Viscosity (s)</div>", unsafe_allow_html=True)
-            with col_in4: target_v = st.number_input("", value=float(int(avg_fin_v)), label_visibility="collapsed")
-            
-            col_in5, col_in6 = st.columns([6, 4])
-            with col_in5: st.markdown("<div style='font-size:13px; margin-top:10px;'>Paint Weight (kg)</div>", unsafe_allow_html=True)
-            with col_in6: paint_w = st.number_input("", value=800.0, step=50.0, label_visibility="collapsed")
-            
-            reduction = curr_v - target_v
-            recommended_kg = (ref_mean * paint_w * reduction) / 1000 if reduction > 0 else 0
-            
-            if reduction > 0:
-                st.markdown(f"""
-                <div class='result-box'>
-                    <div style='font-size:12px; font-weight:bold; color:#065F46;'>Recommended Result</div>
-                    <div style='font-size:12px; color:#065F46;'>Target Drop: {reduction:.1f} s</div>
-                    <div class='result-val'>➔ {recommended_kg:.2f} kg</div>
-                    <div style='font-size:12px; color:#065F46;'>({s_label})</div>
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.warning("Target viscosity must be lower.")
-
-    st.markdown("</div>", unsafe_allow_html=True)
+    </div>
+    """
+    st.markdown(mindmap_html, unsafe_allow_html=True)
