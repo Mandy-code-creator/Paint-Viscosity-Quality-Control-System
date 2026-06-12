@@ -80,13 +80,28 @@ total_vendor_solv = tree_summary['Total_Solvent'].sum()
 avg_delta_v = filtered_df['Delta_V'].mean() if not filtered_df.empty else 1
 reduction_pct = ((total_vendor_solv / total_vendor_paint) * 100) / avg_delta_v if total_vendor_paint > 0 else 0
 
-# Styled with Deep Sky Blue (#00BFFF)
+# Tự động tìm cột thời gian để trích xuất Data Period
+date_cols = [col for col in filtered_df.columns if 'date' in col.lower() or '日期' in col.lower() or 'time' in col.lower()]
+if date_cols:
+    date_col = date_cols[0]
+    try:
+        # Định dạng hiển thị thời gian (ví dụ: Jan 2026 - Apr 2026)
+        min_date = pd.to_datetime(filtered_df[date_col]).min().strftime('%b %Y')
+        max_date = pd.to_datetime(filtered_df[date_col]).max().strftime('%b %Y')
+        date_range_str = f"{min_date} - {max_date}" if min_date != max_date else min_date
+    except:
+        date_range_str = "All Available Data"
+else:
+    date_range_str = "All Available Data"
+
+# Cấu trúc Node trung tâm với màu Deep Sky Blue và bổ sung Data Period
 center_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="12">
     <TR><TD BGCOLOR="#00BFFF" STYLE="ROUNDED">
         <FONT COLOR="white" POINT-SIZE="20"><B>🏭 {selected_vendor}</B></FONT>
     </TD></TR>
     <TR><TD BGCOLOR="#F8F9FA" STYLE="ROUNDED">
         <FONT POINT-SIZE="13" COLOR="#333333">
+        Data Period: <B>{date_range_str}</B><BR/><BR/>
         <B>{total_vendor_paint:,.0f} kg</B> Paint Used<BR/>
         Avg Viscosity Reduction: <B>{avg_delta_v:.1f} s</B><BR/>
         <B>{total_vendor_solv:,.0f} kg</B> Solvent Added<BR/>
