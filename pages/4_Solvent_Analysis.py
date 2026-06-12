@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import graphviz
 
 st.set_page_config(page_title="Sơ đồ Tư Duy Phân Tích", layout="wide")
@@ -8,38 +7,34 @@ st.set_page_config(page_title="Sơ đồ Tư Duy Phân Tích", layout="wide")
 st.title("🌳 Sơ đồ Phân Bổ Dung Môi (Mind Map)")
 st.markdown("Phân tích cấu trúc tiêu thụ dung môi theo Nhà cung cấp, Loại nhựa và Loại dung môi.")
 
-# --- 1. KIỂM TRA DỮ LIỆU HOẶC TẠO DỮ LIỆU MOCK ---
+# --- 1. KẾT NỐI DỮ LIỆU THẬT ---
 if not st.session_state.get('raw_data_loaded', False):
-    st.info("🛠️ [Dev Mode] Đang sử dụng dữ liệu giả (Mock Data) để test giao diện...")
-    
-    # Tạo dữ liệu giả phong phú để test bộ lọc
-    mock_data = pd.DataFrame({
-        'Vendor': np.random.choice(['Yungchi', 'Nippon', 'Kansai', 'Akzo Nobel'], 300),
-        'Resin': np.random.choice(['PE', 'PU', 'PVDF', 'SMP', 'EPOXY', 'ACRYLIC'], 300),
-        'Solvent_Type': np.random.choice(['5203', 'Isophorone', '4160', 'BCS', 'CB5203'], 300),
-        '塗料重量': np.random.randint(100, 800, 300), # kg Sơn
-        '添加重量': np.random.randint(5, 50, 300),   # kg Dung môi
-        '黏度(秒)': np.random.randint(35, 50, 300),
-        '黏度(秒)_1': np.random.randint(25, 30, 300),
-    })
-    st.session_state['group_a_data'] = mock_data
-    st.session_state['raw_data_loaded'] = True
+    st.warning("⚠️ Chưa có dữ liệu. Vui lòng quay lại trang Main App để tải file dữ liệu lên trước.")
+    st.stop()
 
-group_a = st.session_state['group_a_data'].copy()
+# Lấy dữ liệu thật từ bộ nhớ an toàn
+group_a = st.session_state.get('group_a_data', pd.DataFrame()).copy()
+
+if group_a.empty:
+    st.error("❌ Dữ liệu trống. Vui lòng kiểm tra lại file đã tải lên.")
+    st.stop()
 
 # --- 2. BỘ LỌC (SIDEBAR FILTERS) ---
 st.sidebar.header("🔍 Bộ Lọc Dữ Liệu")
 
-# Tạo danh sách bộ lọc
-vendor_list = sorted(group_a['Vendor'].unique().tolist())
-resin_list = ['Tất cả'] + sorted(group_a['Resin'].unique().tolist())
-solvent_list = ['Tất cả'] + sorted(group_a['Solvent_Type'].unique().tolist())
+# Xử lý các cột có thể thiếu trong file thật
+for col in ['Vendor', 'Resin', 'Solvent_Type']:
+    if col not in group_a.columns:
+        group_a[col] = 'Unknown'
 
-# Chọn nhà cung cấp (Bắt buộc chọn 1 để làm Node trung tâm)
-selected_vendor = st.sidebar.selectbox("🏭 Nhà cung cấp (Vendor):", vendor_list, 
-                                       index=vendor_list.index('Yungchi') if 'Yungchi' in vendor_list else 0)
+# Tạo danh sách bộ lọc (loại bỏ giá trị rỗng NaN)
+vendor_list = sorted(group_a['Vendor'].dropna().unique().tolist())
+resin_list = ['Tất cả'] + sorted(group_a['Resin'].dropna().unique().tolist())
+solvent_list = ['Tất cả'] + sorted(group_a['Solvent_Type'].dropna().unique().tolist())
 
-# Chọn Loại Nhựa & Dung môi
+# Bắt buộc chọn 1 Vendor để làm Node trung tâm
+selected_vendor = st.sidebar.selectbox("🏭 Nhà cung cấp (Vendor):", vendor_list)
+
 selected_resin = st.sidebar.selectbox("🧪 Loại nhựa (Resin):", resin_list)
 selected_solvent = st.sidebar.selectbox("💧 Loại dung môi (Solvent):", solvent_list)
 
@@ -52,15 +47,21 @@ if selected_solvent != 'Tất cả':
     filtered_df = filtered_df[filtered_df['Solvent_Type'] == selected_solvent]
 
 if filtered_df.empty:
-    st.warning("⚠️ Không có dữ liệu phù hợp với bộ lọc hiện tại.")
+    st.warning(f"⚠️ Không có dữ liệu của {selected_vendor} phù hợp với bộ lọc hiện tại.")
     st.stop()
 
-# --- 3. TÍNH TOÁN CÁC CHỈ SỐ ---
-filtered_df['Delta_V'] = filtered_df['黏度(秒)'] - filtered_df['黏度(秒)_1']
-# Đảm bảo Delta_V không bằng 0 để tránh lỗi chia
-filtered_df['Delta_V'] = filtered_df['Delta_V'].replace(0, 1)
+# --- 3. TÍNH TOÁN CHỈ SỐ TRÊN DỮ LIỆU THẬT ---
+required_cols = ['塗料重量', '添加重量', '黏度(秒)', '黏度(秒)_1']
+if not all(col in filtered_df.columns for col in required_cols):
+    st.error(f"❌ File dữ liệu gốc đang thiếu một trong các cột bắt buộc sau: {', '.join(required_cols)}")
+    st.stop()
 
-filtered_df['Solvent_Ratio_Percent'] = (filtered_df['添加重量'] / filtered_df['塗料重量']) * 100
+# Tính Delta Viscosity (tránh chia cho 0)
+filtered_df['Delta_V'] = filtered_df['黏度(秒)'] - filtered_df['黏度(秒)_1']
+filtered_df['Delta_V'] = filtered_df['Delta_V'].replace(0, 1) 
+
+# Tính toán tỷ lệ
+filtered_df['Solvent_Ratio_Percent'] = (filtered_df['添加重量'] / filtered_df['塗料重量'].replace(0, 1)) * 100
 filtered_df['Kg_per_1s'] = filtered_df['添加重量'] / filtered_df['Delta_V']
 filtered_df['Pct_per_1s'] = filtered_df['Solvent_Ratio_Percent'] / filtered_df['Delta_V']
 
@@ -72,9 +73,15 @@ tree_summary = filtered_df.groupby(['Resin', 'Solvent_Type']).agg(
     Avg_Pct_per_1s=('Pct_per_1s', 'mean')
 ).reset_index()
 
+# Lọc bỏ các hàng có Paint = 0 để tránh hiển thị rác
+tree_summary = tree_summary[tree_summary['Total_Paint'] > 0]
+
+if tree_summary.empty:
+    st.info("Không có dữ liệu hợp lệ (Trọng lượng sơn > 0) để vẽ biểu đồ.")
+    st.stop()
+
 # --- 4. VẼ BIỂU ĐỒ GRAPHVIZ ---
 graph = graphviz.Digraph(engine='dot')
-# splines='curved' giúp các đường nối uốn lượn thay vì thẳng đơ
 graph.attr(rankdir='LR', splines='curved', nodesep='0.6', ranksep='2.0') 
 graph.attr('node', shape='plaintext', fontname='Arial')
 
@@ -82,7 +89,6 @@ graph.attr('node', shape='plaintext', fontname='Arial')
 total_vendor_paint = tree_summary['Total_Paint'].sum()
 total_vendor_solv = tree_summary['Total_Solvent'].sum()
 
-# Tránh lỗi chia cho 0
 avg_delta_v = filtered_df['Delta_V'].mean() if not filtered_df.empty else 1
 reduction_pct = ((total_vendor_solv / total_vendor_paint) * 100) / avg_delta_v if total_vendor_paint > 0 else 0
 
@@ -106,8 +112,7 @@ graph.node('Center', f'<{center_html}>')
 # --- 4.2 LOGIC CHIA NHÁNH TRÁI/PHẢI TỰ ĐỘNG ---
 unique_resins = tree_summary['Resin'].unique().tolist()
 midpoint = (len(unique_resins) + 1) // 2 
-left_resins = unique_resins[:midpoint] # Nửa đầu sang trái
-right_resins = unique_resins[midpoint:] # Nửa sau sang phải
+left_resins = unique_resins[:midpoint] 
 
 # --- 4.3 TẠO CÁC NODE NHÁNH VÀ NỐI ĐƯỜNG ---
 for idx, row in tree_summary.iterrows():
@@ -117,7 +122,6 @@ for idx, row in tree_summary.iterrows():
     
     is_left = resin in left_resins
     
-    # Phối màu Trái (Xanh) - Phải (Cam)
     bg_color = "#D9E6F2" if is_left else "#FDECDA"
     text_color = "#104E8B" if is_left else "#CC5500"
     drop_color = "#3399FF" if is_left else "#FF8800"
@@ -136,7 +140,6 @@ for idx, row in tree_summary.iterrows():
     
     graph.node(node_id, f'<{node_html}>')
     
-    # Nối đường (Mũi tên ngược cho bên trái để giữ bố cục rẽ sang 2 bên)
     if is_left:
         graph.edge(node_id, 'Center', dir='back', color=edge_color, penwidth='2.5')
     else:
@@ -145,7 +148,6 @@ for idx, row in tree_summary.iterrows():
 # --- 5. HIỂN THỊ VÀ XUẤT FILE ---
 st.graphviz_chart(graph, use_container_width=True)
 
-# Lấy dữ liệu dạng hình ảnh (PNG) từ Graphviz để tải về
 try:
     png_data = graph.pipe(format='png')
     col_empty, col_btn = st.columns([4, 1])
@@ -157,4 +159,4 @@ try:
             mime="image/png"
         )
 except Exception as e:
-    st.caption("Cần cài đặt Graphviz trên hệ thống để sử dụng tính năng tải file PNG.")
+    st.caption("Tính năng tải ảnh PNG khả dụng khi server đã cài đặt lõi Graphviz.")
