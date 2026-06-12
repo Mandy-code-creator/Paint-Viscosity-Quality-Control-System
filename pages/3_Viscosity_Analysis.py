@@ -114,12 +114,13 @@ with col_left:
 
 # ==========================================
 # ==========================================
-# SECTION 5: LEFT COLUMN - SANKEY DIAGRAM
+# ==========================================
+# SECTION 5: LEFT COLUMN - SANKEY DIAGRAM (FINELY TUNED FOR ESTHETICS)
 # ==========================================
     if filtered_df.empty:
         st.info("No data available for the selected flow.")
     else:
-        # FIXED: Use filtered_df so Sankey shrinks and removes irrelevant flows
+        # Use filtered data so the chart shrinks to focus only on what is selected
         sankey_df = filtered_df.copy()
         
         # Extract unique entities from the FILTERED data
@@ -143,8 +144,8 @@ with col_left:
             source.append(vendor_idx[row['Vendor']])
             target.append(resin_idx[row['Resin']])
             value.append(row['count'])
-            # THAY ĐỔI: Làm màu mờ hơn (opacity 0.25 thay vì 0.5)
-            link_colors.append("rgba(31, 119, 180, 0.25)") # Clean Blue
+            # THAY ĐỔI: Làm màu mờ hơn rất nhiều (opacity 0.15 thay vì 0.5)
+            link_colors.append("rgba(31, 119, 180, 0.15)") # Fine Light Blue
 
         # Link Group 2: Resin -> Solvent
         r_s_group = sankey_df.groupby(['Resin', 'Solvent_Type']).size().reset_index(name='count')
@@ -152,24 +153,23 @@ with col_left:
             source.append(resin_idx[row['Resin']])
             target.append(solvent_idx[row['Solvent_Type']])
             value.append(row['count'])
-            # THAY ĐỔI: Làm màu mờ hơn (opacity 0.25 thay vì 0.5)
-            link_colors.append("rgba(255, 127, 14, 0.25)") # Clean Orange
+            # THAY ĐỔI: Làm màu mờ hơn rất nhiều (opacity 0.15 thay vì 0.5)
+            link_colors.append("rgba(255, 127, 14, 0.15)") # Fine Light Orange
 
         # Build and style Sankey
         fig_sankey = go.Figure(data=[go.Sankey(
             node=dict(
-                pad=20, 
-                thickness=30,
+                pad=25, thickness=25,
                 line=dict(color="white", width=1.5),
                 label=node_labels,
-                color="#2C3E50" # Deep corporate blue nodes
+                color="#2C3E50" # Professional deep blue-gray nodes
             ),
             link=dict(
                 source=source, 
                 target=target, 
                 value=value, 
                 color=link_colors,
-                # THÊM DÒNG NÀY ĐỂ TẠO ĐƯỜNG VIỀN MỎNG GỌN GÀNG
+                # GIỮ LẠI: Đường viền mỏng và gọn gàng cho luồng
                 line=dict(color="gray", width=0.5) 
             )
         )])
@@ -178,7 +178,7 @@ with col_left:
             height=600, 
             # Solid black text, pure font family (Shadow removed via CSS in Section 0)
             font=dict(size=14, color="black", family="Arial, sans-serif"), 
-            margin=dict(l=10, r=150, t=40, b=20),
+            margin=dict(l=10, r=160, t=40, b=20), # r=160 provides full width for long solvent names
             plot_bgcolor='white',
             paper_bgcolor='white'
         )
