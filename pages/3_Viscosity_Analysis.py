@@ -73,107 +73,113 @@ col_left, col_right = st.columns([6, 4], gap="large")
 
 
 # ==========================================
-# SECTION 4: LEFT COLUMN - FILTERS
+# SECTION 4: LEFT COLUMN - CASCADING FILTERS
 # ==========================================
 with col_left:
     st.subheader("🌊 Material & Process Flow (Sankey)")
     
     c_f1, c_f2, c_f3 = st.columns(3)
+    
+    # 1. Vendor Filter
     with c_f1:
         selected_vendor = st.selectbox("1. Supplier (Vendor)", options=['All'] + list(df['Vendor'].unique()))
+    
+    # 2. Resin Filter (Based on Vendor)
     with c_f2:
-        resins_available = df[df['Vendor'] == selected_vendor]['Resin'].unique() if selected_vendor != 'All' else df['Resin'].unique()
-        selected_resin = st.selectbox("2. Resin Type", options=['All'] + list(resins_available))
-    with c_f3:
-        # Build the filter mask step-by-step to avoid Pandas KeyError
-        mask = pd.Series(True, index=df.index)
         if selected_vendor != 'All':
-            mask &= (df['Vendor'] == selected_vendor)
-        if selected_resin != 'All':
-            mask &= (df['Resin'] == selected_resin)
+            resins_available = df[df['Vendor'] == selected_vendor]['Resin'].unique()
+        else:
+            resins_available = df['Resin'].unique()
             
-        solvents_available = df[mask]['Solvent_Type'].unique()
+        selected_resin = st.selectbox("2. Resin Type", options=['All'] + list(resins_available))
+        
+    # 3. Solvent Filter (Based on Vendor AND Resin)
+    with c_f3:
+        mask_solvent = pd.Series(True, index=df.index)
+        
+        if selected_vendor != 'All':
+            mask_solvent &= (df['Vendor'] == selected_vendor)
+        if selected_resin != 'All':
+            mask_solvent &= (df['Resin'] == selected_resin)
+            
+        solvents_available = df[mask_solvent]['Solvent_Type'].unique()
         selected_solvent = st.selectbox("3. Solvent Type", options=['All'] + list(solvents_available))
 
+    # --- Create Filtered DataFrame based on selections ---
+    filtered_df = df.copy()
+    if selected_vendor != 'All': 
+        filtered_df = filtered_df[filtered_df['Vendor'] == selected_vendor]
+    if selected_resin != 'All': 
+        filtered_df = filtered_df[filtered_df['Resin'] == selected_resin]
+    if selected_solvent != 'All': 
+        filtered_df = filtered_df[filtered_df['Solvent_Type'] == selected_solvent]
+
 
 # ==========================================
-# SECTION 5: LEFT COLUMN - SANKEY DIAGRAM
+# SECTION 5: LEFT COLUMN - DYNAMIC SANKEY DIAGRAM
 # ==========================================
-    sankey_df = df.copy()
-    
-    # Extract unique entities
-    vendors = list(sankey_df['Vendor'].unique())
-    resins = list(sankey_df['Resin'].unique())
-    solvents = list(sankey_df['Solvent_Type'].unique())
-    
-    # Add prefixes to nodes to prevent mapping collisions
-    node_labels = [f"🏭 {v}" for v in vendors] + [f"🧪 {r}" for r in resins] + [f"💧 {s}" for s in solvents]
-    
-    # Map entity names to Sankey indices
-    vendor_idx = {v: i for i, v in enumerate(vendors)}
-    resin_idx = {r: i + len(vendors) for i, r in enumerate(resins)}
-    solvent_idx = {s: i + len(vendors) + len(resins) for i, s in enumerate(solvents)}
-    
-    source, target, value, link_colors = [], [], [], []
-    
-    # Link Group 1: Vendor -> Resin
-    v_r_group = sankey_df.groupby(['Vendor', 'Resin']).size().reset_index(name='count')
-    for _, row in v_r_group.iterrows():
-        source.append(vendor_idx[row['Vendor']])
-        target.append(resin_idx[row['Resin']])
-        value.append(row['count'])
-        if (selected_vendor in ['All', row['Vendor']]) and (selected_resin in ['All', row['Resin']]):
-            link_colors.append("rgba(31, 119, 180, 0.5)") # Highlight Blue
-        else:
-            link_colors.append("rgba(200, 200, 200, 0.2)") # Faded Gray
+    if filtered_df.empty:
+        st.info("No data available for the selected flow.")
+    else:
+        # Use filtered data so the chart shrinks to focus only on what is selected
+        sankey_df = filtered_df.copy()
+        
+        vendors = list(sankey_df['Vendor'].unique())
+        resins = list(sankey_df['Resin'].unique())
+        solvents = list(sankey_df['Solvent_Type'].unique())
+        
+        node_labels = [f"🏭 {v}" for v in vendors] + [f"🧪 {r}" for r in resins] + [f"💧 {s}" for s in solvents]
+        
+        vendor_idx = {v: i for i, v in enumerate(vendors)}
+        resin_idx = {r: i + len(vendors) for i, r in enumerate(resins)}
+        solvent_idx = {s: i + len(vendors) + len(resins) for i, s in enumerate(solvents)}
+        
+        source, target, value, link_colors = [], [], [], []
+        
+        # Link Group 1: Vendor -> Resin
+        v_r_group = sankey_df.groupby(['Vendor', 'Resin']).size().reset_index(name='count')
+        for _, row in v_r_group.iterrows():
+            source.append(vendor_idx[row['Vendor']])
+            target.append(resin_idx[row['Resin']])
+            value.append(row['count'])
+            link_colors.append("rgba(52, 152, 219, 0.4)") # Professional light blue
 
-    # Link Group 2: Resin -> Solvent
-    r_s_group = sankey_df.groupby(['Resin', 'Solvent_Type']).size().reset_index(name='count')
-    for _, row in r_s_group.iterrows():
-        source.append(resin_idx[row['Resin']])
-        target.append(solvent_idx[row['Solvent_Type']])
-        value.append(row['count'])
-        if (selected_resin in ['All', row['Resin']]) and (selected_solvent in ['All', row['Solvent_Type']]):
-            link_colors.append("rgba(255, 127, 14, 0.5)") # Highlight Orange
-        else:
-            link_colors.append("rgba(200, 200, 200, 0.2)")
+        # Link Group 2: Resin -> Solvent
+        r_s_group = sankey_df.groupby(['Resin', 'Solvent_Type']).size().reset_index(name='count')
+        for _, row in r_s_group.iterrows():
+            source.append(resin_idx[row['Resin']])
+            target.append(solvent_idx[row['Solvent_Type']])
+            value.append(row['count'])
+            link_colors.append("rgba(230, 126, 34, 0.4)") # Professional light orange
 
-    # Build and style Sankey
-    fig_sankey = go.Figure(data=[go.Sankey(
-        node=dict(
-            pad=20, 
-            thickness=30,
-            line=dict(color="white", width=1.5),
-            label=node_labels,
-            color="#2C3E50" # Deep blue-gray nodes
-        ),
-        link=dict(source=source, target=target, value=value, color=link_colors)
-    )])
-    
-    fig_sankey.update_layout(
-        height=600, 
-        font=dict(size=13, color="#111827", family="Arial, sans-serif"), 
-        margin=dict(l=10, r=150, t=40, b=20), # r=150 prevents text cutoff
-        plot_bgcolor='white',
-        paper_bgcolor='white'
-    )
-    st.plotly_chart(fig_sankey, use_container_width=True)
+        fig_sankey = go.Figure(data=[go.Sankey(
+            node=dict(
+                pad=25, 
+                thickness=25,
+                line=dict(color="white", width=1),
+                label=node_labels,
+                color="#2C3E50" 
+            ),
+            link=dict(source=source, target=target, value=value, color=link_colors)
+        )])
+        
+        fig_sankey.update_layout(
+            height=600, 
+            font=dict(size=14, color="black", family="Arial, sans-serif"), 
+            margin=dict(l=10, r=160, t=40, b=20), 
+            plot_bgcolor='white',
+            paper_bgcolor='white'
+        )
+        st.plotly_chart(fig_sankey, use_container_width=True)
 
 
 # ==========================================
 # SECTION 6: RIGHT COLUMN - DATA AGGREGATION
 # ==========================================
 with col_right:
-    # Filter dataset strictly based on selected options
-    filtered_df = df.copy()
-    if selected_vendor != 'All': filtered_df = filtered_df[filtered_df['Vendor'] == selected_vendor]
-    if selected_resin != 'All': filtered_df = filtered_df[filtered_df['Resin'] == selected_resin]
-    if selected_solvent != 'All': filtered_df = filtered_df[filtered_df['Solvent_Type'] == selected_solvent]
-
     if filtered_df.empty or len(filtered_df) < 2:
         st.info("👈 Please select a valid combination on the left (Requires at least 2 batches to analyze).")
     else:
-        # Calculate key statistics
         sample_size = len(filtered_df)
         avg_init_v = filtered_df[visc_before].mean()
         avg_fin_v = filtered_df[visc_after].mean()
@@ -235,7 +241,7 @@ with col_right:
         st.subheader("🎯 Data Dispersion & Reliability")
         st.caption("If the points cluster along a straight line, the Reference Value is highly reliable.")
         
-        # Standardize Y-axis: Solvent per 1000kg of Paint to eliminate batch size variations
+        # Standardize Y-axis: Solvent per 1000kg of Paint
         filtered_df['Solvent_per_1000kg_Paint'] = (filtered_df[solvent_weight] / filtered_df[paint_weight]) * 1000
         
         try:
@@ -256,7 +262,6 @@ with col_right:
             st.plotly_chart(fig_scatter, use_container_width=True)
             
         except Exception:
-            # Fallback if statsmodels is missing in the deployment environment
             fig_scatter = px.scatter(
                 filtered_df, 
                 x='Viscosity_Reduction', 
