@@ -68,6 +68,9 @@ if all(col in group_a.columns for col in [visc_before, visc_after, paint_weight,
     # CALCULATE STANDARDIZED REFERENCE VALUE (g/kg/s)
     # Formula: (Solvent(kg) * 1000) / (Paint(kg) * Reduction(s))
     df['Reference_Value'] = (df[solvent_weight] * 1000) / (df[paint_weight] * df['Viscosity_Reduction'])
+    
+    # CALCULATE SOLVENT RATIO (g/kg)
+    df['Solvent_Ratio_g_kg'] = (df[solvent_weight] * 1000) / df[paint_weight]
 
 else:
     st.error("⚠️ Missing required data columns (Viscosity, Paint Weight, Solvent Weight).")
@@ -81,7 +84,7 @@ col_left, col_right = st.columns([6, 4], gap="large")
 
 
 # ==========================================
-# SECTION 4: LEFT COLUMN - FILTERS & SUBSET
+# SECTION 4: LEFT COLUMN - CASCADING FILTERS
 # ==========================================
 with col_left:
     st.subheader("🌊 Material & Process Flow (Sankey)")
@@ -93,16 +96,16 @@ with col_left:
         resins_available = df[df['Vendor'] == selected_vendor]['Resin'].unique() if selected_vendor != 'All' else df['Resin'].unique()
         selected_resin = st.selectbox("2. Resin Type", options=['All'] + list(resins_available))
     with c_f3:
-        mask = pd.Series(True, index=df.index)
+        mask_solvent = pd.Series(True, index=df.index)
         if selected_vendor != 'All':
-            mask &= (df['Vendor'] == selected_vendor)
+            mask_solvent &= (df['Vendor'] == selected_vendor)
         if selected_resin != 'All':
-            mask &= (df['Resin'] == selected_resin)
+            mask_solvent &= (df['Resin'] == selected_resin)
             
-        solvents_available = df[mask]['Solvent_Type'].unique()
+        solvents_available = df[mask_solvent]['Solvent_Type'].unique()
         selected_solvent = st.selectbox("3. Solvent Type", options=['All'] + list(solvents_available))
 
-    # --- MUST FILTER DATA HERE FOR BOTH SANKEY AND METRICS ---
+    # --- FILTER DATA BASED ON DROPDOWN SELECTIONS ---
     filtered_df = df.copy()
     if selected_vendor != 'All': 
         filtered_df = filtered_df[filtered_df['Vendor'] == selected_vendor]
@@ -113,75 +116,53 @@ with col_left:
 
 
 # ==========================================
-# ==========================================
-# ==========================================
-# ==========================================
-# SECTION 5: LEFT COLUMN - DYNAMIC SANKEY DIAGRAM (SLIM & DYNAMIC HEIGHT)
+# SECTION 5: LEFT COLUMN - SANKEY DIAGRAM (SLIM & FLAT)
 # ==========================================
     if filtered_df.empty:
-        st.info("No data available for the selected flow.")
+        st.info("👈 Please select a valid combination on the left.")
     else:
-        # Use filtered data so the chart shrinks to focus only on what is selected
         sankey_df = filtered_df.copy()
         
-        # Extract unique entities from the FILTERED data
         vendors = list(sankey_df['Vendor'].unique())
         resins = list(sankey_df['Resin'].unique())
         solvents = list(sankey_df['Solvent_Type'].unique())
         
-        # Add prefixes to nodes to prevent mapping collisions
         node_labels = [f"🏭 {v}" for v in vendors] + [f"🧪 {r}" for r in resins] + [f"💧 {s}" for s in solvents]
         
-        # --- GIẢI PHÁP: TÍNH TOÁN CHIỀU CAO ĐỘNG (DYNAMIC HEIGHT) ---
-        # Tính tổng số lượng Node. Ép biểu đồ lùn xuống nếu có ít Node để dải màu không bị phình to.
-        total_nodes = len(node_labels)
-        dynamic_height = max(250, min(650, total_nodes * 40)) 
-        
-        # Map entity names to Sankey indices
         vendor_idx = {v: i for i, v in enumerate(vendors)}
         resin_idx = {r: i + len(vendors) for i, r in enumerate(resins)}
         solvent_idx = {s: i + len(vendors) + len(resins) for i, s in enumerate(solvents)}
         
         source, target, value, link_colors = [], [], [], []
         
-        # Link Group 1: Vendor -> Resin
         v_r_group = sankey_df.groupby(['Vendor', 'Resin']).size().reset_index(name='count')
         for _, row in v_r_group.iterrows():
             source.append(vendor_idx[row['Vendor']])
             target.append(resin_idx[row['Resin']])
             value.append(row['count'])
-            link_colors.append("rgba(31, 119, 180, 0.15)") # Fine Light Blue
+            link_colors.append("rgba(31, 119, 180, 0.15)") 
 
-        # Link Group 2: Resin -> Solvent
         r_s_group = sankey_df.groupby(['Resin', 'Solvent_Type']).size().reset_index(name='count')
         for _, row in r_s_group.iterrows():
             source.append(resin_idx[row['Resin']])
             target.append(solvent_idx[row['Solvent_Type']])
             value.append(row['count'])
-            link_colors.append("rgba(255, 127, 14, 0.15)") # Fine Light Orange
+            link_colors.append("rgba(255, 127, 14, 0.15)") 
 
-        # Build and style Sankey
         fig_sankey = go.Figure(data=[go.Sankey(
             node=dict(
-                pad=40,         # Tăng khoảng cách giữa các khối để ép dải màu nhỏ lại
-                thickness=15,   # Làm mỏng các cột mốc (Nodes) màu xám đen
-                line=dict(color="white", width=1),
+                pad=40, thickness=15, 
+                line=dict(color="white", width=1.5),
                 label=node_labels,
                 color="#2C3E50" 
             ),
-            link=dict(
-                source=source, 
-                target=target, 
-                value=value, 
-                color=link_colors,
-                line=dict(color="gray", width=0.5) 
-            )
+            link=dict(source=source, target=target, value=value, color=link_colors)
         )])
         
         fig_sankey.update_layout(
-            height=dynamic_height, # Áp dụng chiều cao động ở đây
-            font=dict(size=13, color="black", family="Arial, sans-serif"), 
-            margin=dict(l=10, r=160, t=30, b=20),
+            height=350, 
+            font=dict(size=13, color="#111827", family="Arial, sans-serif"), 
+            margin=dict(l=10, r=160, t=30, b=20), 
             plot_bgcolor='white',
             paper_bgcolor='white'
         )
@@ -195,12 +176,13 @@ with col_right:
     if filtered_df.empty or len(filtered_df) < 2:
         st.info("👈 Please select a valid combination on the left (Requires at least 2 batches to analyze).")
     else:
-        # Calculate key statistics
         sample_size = len(filtered_df)
+        avg_paint_w = filtered_df[paint_weight].mean()
         avg_init_v = filtered_df[visc_before].mean()
         avg_fin_v = filtered_df[visc_after].mean()
         avg_red = filtered_df['Viscosity_Reduction'].mean()
         avg_solv_add = filtered_df[solvent_weight].mean()
+        avg_solv_ratio = filtered_df['Solvent_Ratio_g_kg'].mean()
         
         ref_mean = filtered_df['Reference_Value'].mean()
         ref_median = filtered_df['Reference_Value'].median()
@@ -212,8 +194,24 @@ with col_right:
 # ==========================================
         st.subheader("📊 Historical Reference Table")
         metrics_df = pd.DataFrame({
-            "Metric": ["Sample Size (Batches)", "Avg Initial Viscosity (s)", "Avg Final Viscosity (s)", "Avg Reduction (s)", "Avg Solvent Added (kg)"],
-            "Value": [f"{sample_size}", f"{avg_init_v:.1f}", f"{avg_fin_v:.1f}", f"{avg_red:.1f}", f"{avg_solv_add:.2f}"]
+            "Metric": [
+                "Sample Size (Batches)", 
+                "Avg Paint Weight (kg)", 
+                "Avg Initial Viscosity (s)", 
+                "Avg Final Viscosity (s)", 
+                "Avg Viscosity Reduction (s)", 
+                "Avg Solvent Added (kg)",
+                "Avg Solvent Ratio (g/kg paint)" 
+            ],
+            "Value": [
+                f"{sample_size}", 
+                f"{avg_paint_w:.1f}",
+                f"{avg_init_v:.1f}", 
+                f"{avg_fin_v:.1f}", 
+                f"{avg_red:.1f}", 
+                f"{avg_solv_add:.2f}",
+                f"{avg_solv_ratio:.2f}" 
+            ]
         })
         st.dataframe(metrics_df, hide_index=True, use_container_width=True)
 
@@ -229,48 +227,70 @@ with col_right:
 
 
 # ==========================================
-# SECTION 8: RIGHT COLUMN - PREDICTION TOOL
+# SECTION 8: RIGHT COLUMN - 2-WAY PREDICTION TOOL
 # ==========================================
-        with st.expander("🛠️ PRODUCTION SOLVENT CALCULATOR", expanded=True):
-            c_p1, c_p2 = st.columns(2)
-            with c_p1:
-                input_paint = st.number_input("Paint Batch Weight (kg)", value=800.0, step=50.0)
-                input_curr_v = st.number_input("Current Viscosity (s)", value=float(int(avg_init_v)), step=1.0)
-            with c_p2:
-                input_target_v = st.number_input("Target Viscosity (s)", value=float(int(avg_fin_v)), step=1.0)
+        with st.expander("🛠️ PRODUCTION CALCULATORS", expanded=True):
+            tab1, tab2 = st.tabs(["🎯 Find Solvent Amount", "📉 Predict Viscosity Drop"])
             
-            req_reduction = input_curr_v - input_target_v
-            
-            if req_reduction <= 0:
-                st.warning("Target viscosity must be lower than current viscosity.")
-            else:
-                rec_solvent_kg = (ref_mean * input_paint * req_reduction) / 1000
-                st.success(f"""
-                ### 🎯 Recommended Solvent Amount: {rec_solvent_kg:.2f} kg
-                `Formula: {ref_mean:.2f} * {input_paint} * {req_reduction:.1f} / 1000`
-                """)
+            # Mode 1: Known Target Viscosity -> Calculate Solvent
+            with tab1:
+                c1, c2 = st.columns(2)
+                with c1:
+                    t1_paint = st.number_input("Paint Batch Weight (kg)", value=800.0, step=50.0, key='t1_p')
+                    t1_curr_v = st.number_input("Current Viscosity (s)", value=float(int(avg_init_v)), step=1.0, key='t1_cv')
+                with c2:
+                    t1_target_v = st.number_input("Target Viscosity (s)", value=float(int(avg_fin_v)), step=1.0, key='t1_tv')
+                
+                req_reduction = t1_curr_v - t1_target_v
+                
+                if req_reduction <= 0:
+                    st.warning("Target viscosity must be lower than current viscosity.")
+                else:
+                    rec_solvent_kg = (ref_mean * t1_paint * req_reduction) / 1000
+                    st.success(f"""
+                    ### 💧 Recommended Solvent: {rec_solvent_kg:.2f} kg
+                    *(Formula: {ref_mean:.2f} * {t1_paint} * {req_reduction:.1f} / 1000)*
+                    """)
+                    
+            # Mode 2: Known Solvent Added -> Predict Viscosity Drop
+            with tab2:
+                c3, c4 = st.columns(2)
+                with c3:
+                    t2_paint = st.number_input("Paint Batch Weight (kg)", value=800.0, step=50.0, key='t2_p')
+                    t2_curr_v = st.number_input("Current Viscosity (s)", value=float(int(avg_init_v)), step=1.0, key='t2_cv')
+                with c4:
+                    # Provide a realistic default solvent weight based on historical average ratio
+                    default_solv = (avg_solv_ratio * 800.0) / 1000
+                    t2_solv_added = st.number_input("Solvent Added (kg)", value=float(f"{default_solv:.1f}"), step=0.5, key='t2_s')
+                
+                if t2_solv_added > 0:
+                    # Reverse Formula: Reduction = (Solvent * 1000) / (Paint * Reference)
+                    pred_reduction = (t2_solv_added * 1000) / (t2_paint * ref_mean)
+                    pred_final_v = t2_curr_v - pred_reduction
+                    
+                    st.info(f"""
+                    ### 📉 Predicted Drop: {pred_reduction:.1f} seconds
+                    **Predicted Final Viscosity:** {pred_final_v:.1f} s
+                    """)
 
 
 # ==========================================
-# SECTION 9: RIGHT COLUMN - SCATTER PLOT
+# SECTION 9: RIGHT COLUMN - CAUSAL SCATTER PLOT
 # ==========================================
-        st.subheader("🎯 Data Dispersion & Reliability")
-        st.caption("If the points cluster along a straight line, the Reference Value is highly reliable.")
-        
-        # Standardize Y-axis: Solvent per 1000kg of Paint to eliminate batch size variations
-        filtered_df['Solvent_per_1000kg_Paint'] = (filtered_df[solvent_weight] / filtered_df[paint_weight]) * 1000
+        st.subheader("🎯 Solvent Ratio vs. Viscosity Drop")
+        st.caption("Shows the causal relationship: How many seconds dropped based on the solvent ratio added.")
         
         try:
             fig_scatter = px.scatter(
                 filtered_df,
-                x='Viscosity_Reduction',
-                y='Solvent_per_1000kg_Paint',
+                x='Solvent_Ratio_g_kg',   # X-Axis: The CAUSE (Solvent Ratio)
+                y='Viscosity_Reduction',  # Y-Axis: The EFFECT (Viscosity Drop)
                 trendline='ols',
                 labels={
-                    'Viscosity_Reduction': 'Viscosity Reduction (s)',
-                    'Solvent_per_1000kg_Paint': 'Solvent Amount / 1000kg Paint'
+                    'Solvent_Ratio_g_kg': 'Solvent Ratio (g / 1kg Paint)',
+                    'Viscosity_Reduction': 'Viscosity Reduction (seconds)'
                 },
-                color_discrete_sequence=['#2ca02c']
+                color_discrete_sequence=['#e67e22'] # Matched with Sankey orange theme
             )
             fig_scatter.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=0), plot_bgcolor='white')
             fig_scatter.update_xaxes(showline=True, linecolor='lightgray', showgrid=True, gridcolor='whitesmoke')
@@ -278,14 +298,14 @@ with col_right:
             st.plotly_chart(fig_scatter, use_container_width=True)
             
         except Exception:
-            # Fallback if statsmodels is missing in the deployment environment
             fig_scatter = px.scatter(
                 filtered_df, 
-                x='Viscosity_Reduction', 
-                y='Solvent_per_1000kg_Paint',
+                x='Solvent_Ratio_g_kg', 
+                y='Viscosity_Reduction', 
                 labels={
-                    'Viscosity_Reduction': 'Viscosity Reduction (s)',
-                    'Solvent_per_1000kg_Paint': 'Solvent Amount / 1000kg Paint'
+                    'Solvent_Ratio_g_kg': 'Solvent Ratio (g / 1kg Paint)',
+                    'Viscosity_Reduction': 'Viscosity Reduction (seconds)'
                 }
             )
+            fig_scatter.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=0), plot_bgcolor='white')
             st.plotly_chart(fig_scatter, use_container_width=True)
