@@ -1,84 +1,151 @@
-# --- 7. VENDOR & RESIN HIERARCHY (MINDMAP VIEW) ---
-st.markdown("---")
-st.subheader("🌳 Vendor-Resin Hierarchical Analysis")
-st.markdown("Khung nhìn phân nhánh chi tiết tổng lượng sơn, dung môi và **Độ nhạy (Sensitivity)**. Nhấp vào từng phần tử trên biểu đồ để phóng to (Zoom in) nhánh đó.")
+import streamlit as st
+import plotly.express as px
+import pandas as pd
 
-# 1. Bảng điều khiển bộ lọc cho Tree View
-col_t1, col_t2 = st.columns([1, 3])
-with col_t1:
-    # Cho phép chọn Vendor làm trung tâm (như Yungchi trong ảnh)
-    vendors_list = group_a['Vendor'].dropna().unique().tolist()
-    if not vendors_list:
-        vendors_list = ['Unknown']
-        
-    selected_tree_vendor = st.selectbox("🏢 Select Central Vendor", vendors_list)
+# Cấu hình trang
+st.set_page_config(page_title="Viscosity Analysis Report", page_icon="🔬", layout="wide")
 
-with col_t2:
-    st.info("💡 **Cách đọc biểu đồ:** Kích thước (độ rộng) của vòng cung thể hiện Tổng lượng sơn sử dụng. **Màu sắc** thể hiện Độ nhạy (% dung môi / 1s). Màu **Đỏ/Cam** cảnh báo các công thức tốn nhiều dung môi (ví dụ: điểm khoanh đỏ PVDF của bạn).")
+st.title("🔬 Viscosity Analysis Report")
+st.markdown("Detailed breakdown of solvent sensitivity per resin type. Each chart represents a specific resin's reaction to different solvents.")
 
-# 2. Xử lý dữ liệu cho cấu trúc cây
-tree_data = group_a[group_a['Vendor'] == selected_tree_vendor].copy()
+# 1. State Check & Data Loading
+if not st.session_state.get('raw_data_loaded', False):
+    st.warning("⚠️ No data loaded. Please upload your data file first.")
+    st.stop()
 
-# Thay thế các giá trị NaN/Null bằng chữ 'Unknown' để biểu đồ không bị lỗi đứt gãy
-tree_data['Solvent_Type'] = tree_data['Solvent_Type'].fillna('Unknown')
-tree_data['Resin'] = tree_data['Resin'].fillna('Unknown')
+group_a = st.session_state['group_a_data'].copy()
 
-if not tree_data.empty:
-    # Gom nhóm dữ liệu theo lớp: Vendor -> Resin -> Solvent
-    tree_summary = tree_data.groupby(['Vendor', 'Resin', 'Solvent_Type']).agg({
-        '塗料重量': 'sum',      # Kích thước Node
-        '添加重量': 'sum',
-        'Sensitivity': 'mean' # Màu sắc Node
-    }).reset_index()
+# Ép kiểu dữ liệu để biểu đồ không bị dàn trải (Category/String)
+group_a['Solvent_Type'] = group_a['Solvent_Type'].astype(str)
 
-    # Chỉ lấy các giá trị nhạy dương để scale màu chính xác
-    tree_summary = tree_summary[tree_summary['Sensitivity'] > 0]
+# ==========================================
+# --- BƯỚC LÀM SẠCH DỮ LIỆU (DATA CLEANING) ---
+# ==========================================
+visc_before = '黏度(秒)'     # Độ nhớt trước khi pha
+visc_after = '黏度(秒)_1'   # Độ nhớt sau khi pha
+paint_weight = '塗料重量'    # Trọng lượng sơn
+solvent_weight = '添加重量'  # Trọng lượng dung môi
 
-    if not tree_summary.empty:
-        # 3. Vẽ biểu đồ Sunburst (Đóng vai trò như Mindmap tương tác)
-        fig_tree = px.sunburst(
-            tree_summary,
-            path=['Vendor', 'Resin', 'Solvent_Type'], # Đường dẫn trung tâm -> nhánh -> lá
-            values='塗料重量', # Kích thước lát cắt tỷ lệ với lượng sơn
-            color='Sensitivity', # Màu sắc đánh giá hiệu suất
-            color_continuous_scale='RdYlGn_r', # Đảo ngược màu: Cao (tốn kém) = Đỏ, Thấp = Xanh
-            hover_data={
-                '添加重量': ':,.1f',
-                'Sensitivity': ':.2f'
-            },
-            title=f"Hierarchical Performance Mindmap - {selected_tree_vendor}"
-        )
-        
-        # Format lại hover template cho dễ đọc giống thông số trong ảnh của bạn
-        fig_tree.update_traces(
-            hovertemplate='<b>%{label}</b><br>' +
-                          'Total Paint: %{value:,.0f} kg<br>' +
-                          'Solvent Added: %{customdata[0]:,.0f} kg<br>' +
-                          'Sensitivity: <b>%{color:.2f}% per 1s</b><extra></extra>'
-        )
+# Kiểm tra xem các cột có tồn tại không trước khi làm sạch
+if all(col in group_a.columns for col in [visc_before, visc_after, paint_weight, solvent_weight]):
+    # 1. Loại bỏ các dòng bị trống (Null/NA)
+    clean_data = group_a.dropna(subset=[visc_before, visc_after]).copy()
 
-        fig_tree.update_layout(
-            height=600, 
-            margin=dict(t=40, l=0, r=0, b=0),
-            coloraxis_colorbar=dict(title="Sensitivity (%)<br><i>(Đỏ = Tốn dung môi)</i>")
-        )
+    # 2. Loại bỏ các dòng có giá trị bằng 0 (Sơn, Dung môi, Độ nhớt)
+    clean_data = clean_data[
+        (clean_data[visc_before] > 0) & 
+        (clean_data[visc_after] > 0) & 
+        (clean_data[paint_weight] > 0) & 
+        (clean_data[solvent_weight] > 0)
+    ]
 
-        st.plotly_chart(fig_tree, use_container_width=True)
-        
-        # 4. Bảng Drill-down hiển thị các điểm bất thường (như PVDF)
-        st.write("🚩 **Top High-Sensitivity Alerts (Cảnh báo tốn dung môi):**")
-        alerts = tree_summary.sort_values(by='Sensitivity', ascending=False).head(3)
-        
-        if not alerts.empty:
-            cols = st.columns(len(alerts))
-            for idx, (_, row) in enumerate(alerts.iterrows()):
-                with cols[idx]:
-                    st.error(f"""
-                    **{row['Resin']}** + **{row['Solvent_Type']}**
-                    * Paint: {row['塗料重量']:,.0f} kg
-                    * Sensitivity: **{row['Sensitivity']:.2f}% per 1s drop**
-                    """)
-    else:
-        st.warning("Không có dữ liệu Sensitivity hợp lệ để vẽ biểu đồ cho Vendor này.")
+    # 3. Loại bỏ các dòng mà Độ nhớt trước và sau GIỐNG Y HỆT NHAU
+    clean_data = clean_data[clean_data[visc_before] != clean_data[visc_after]]
+
+    group_a = clean_data.copy()
+    st.caption("🧹 **Hệ thống tự động:** Đã lọc bỏ các dữ liệu rác (Giá trị trống, bằng 0, hoặc độ nhớt không thay đổi).")
 else:
-    st.warning("Chưa có dữ liệu cho Vendor được chọn.")
+    st.warning("⚠️ Bỏ qua bước làm sạch do không tìm thấy đủ các cột: Độ nhớt, Trọng lượng sơn, Trọng lượng dung môi.")
+# ==========================================
+
+# Đảm bảo cột Vendor tồn tại (tránh lỗi nếu data thiếu)
+if 'Vendor' not in group_a.columns:
+    group_a['Vendor'] = 'Unknown'
+
+# 2. Logic: Nhóm dữ liệu 
+# Sử dụng toàn bộ dữ liệu sạch để so sánh hiệu quả giữa các loại dung môi
+summary_df = group_a.groupby(['Resin', 'Solvent_Type'])['Viscosity_Sensitivity'].agg(['mean', 'std']).reset_index()
+resins = sorted(summary_df['Resin'].unique())
+
+# 3. Định nghĩa bảng màu cố định cho từng loại dung môi
+all_solvents = sorted(group_a['Solvent_Type'].unique())
+color_map = {solvent: px.colors.qualitative.Plotly[i % len(px.colors.qualitative.Plotly)] 
+             for i, solvent in enumerate(all_solvents)}
+
+# 4. Hiển thị báo cáo dạng lưới 2 cột
+st.markdown("---")
+for i in range(0, len(resins), 2):
+    cols = st.columns(2)
+    for j in range(2):
+        if i + j < len(resins):
+            resin = resins[i + j]
+            with cols[j]:
+                st.markdown(f"#### Resin Type: {resin}")
+                
+                # --- A. BIỂU ĐỒ BAR CHART (ĐỘ NHẠY) ---
+                resin_data = summary_df[summary_df['Resin'] == resin].copy()
+                
+                fig_bar = px.bar(
+                    resin_data,
+                    x='Solvent_Type',
+                    y='mean',
+                    error_y='std',
+                    labels={'mean': 'Sensitivity (sec/1%)', 'Solvent_Type': 'Solvent'},
+                    color='Solvent_Type',
+                    color_discrete_map=color_map,
+                    title=f"Sensitivity Profile for {resin}"
+                )
+                
+                # Cấu hình chuẩn báo cáo
+                fig_bar.update_layout(
+                    plot_bgcolor='white', height=300, font=dict(size=12),
+                    margin=dict(l=40, r=40, t=40, b=30), showlegend=False
+                )
+                fig_bar.update_xaxes(type='category', showline=True, linecolor='black', linewidth=1)
+                fig_bar.update_yaxes(showgrid=True, gridcolor='lightgray', linecolor='black', linewidth=1)
+                
+                st.plotly_chart(fig_bar, use_container_width=True)
+                
+                # --- B. BẢNG DỮ LIỆU ---
+                st.dataframe(
+                    resin_data.rename(columns={'mean': 'Mean', 'std': 'Std Dev'}),
+                    use_container_width=True,
+                    height=150
+                )
+
+                # --- C. BIỂU ĐỒ SCATTER KÈM ĐƯỜNG XU HƯỚNG ---
+                st.markdown(f"**📈 Trend: Paint vs Solvent Usage ({resin})**")
+                
+                # Lọc dữ liệu thô cho loại nhựa hiện tại
+                resin_raw_data = group_a[group_a['Resin'] == resin].copy()
+                
+                if not resin_raw_data.empty and paint_weight in resin_raw_data.columns and solvent_weight in resin_raw_data.columns:
+                    try:
+                        # Dùng color & symbol gom chung vào 1 chart để không bị dính chữ trên layout hẹp
+                        fig_trend = px.scatter(
+                            resin_raw_data,
+                            x=paint_weight,
+                            y=solvent_weight,
+                            color='Solvent_Type',
+                            symbol='Vendor',
+                            trendline='ols', # Đường xu hướng tuyến tính
+                            color_discrete_map=color_map,
+                            labels={
+                                paint_weight: 'Paint Weight (kg)',
+                                solvent_weight: 'Solvent Added (kg)',
+                                'Solvent_Type': 'Solvent',
+                                'Vendor': 'Vendor'
+                            }
+                        )
+                        
+                        fig_trend.update_layout(
+                            plot_bgcolor='white', 
+                            height=350,
+                            margin=dict(l=40, r=40, t=10, b=30),
+                            legend=dict(
+                                orientation="h", # Chuyển chú thích nằm ngang bên dưới
+                                yanchor="top", y=-0.2, 
+                                xanchor="center", x=0.5
+                            )
+                        )
+                        fig_trend.update_xaxes(showline=True, linecolor='black', showgrid=True, gridcolor='lightgray')
+                        fig_trend.update_yaxes(showline=True, linecolor='black', showgrid=True, gridcolor='lightgray')
+                        
+                        st.plotly_chart(fig_trend, use_container_width=True)
+                        
+                    except Exception as e:
+                        st.error("⚠️ Lỗi vẽ xu hướng. Vui lòng cài đặt 'statsmodels' (chạy lệnh: `pip install statsmodels`).")
+                else:
+                    st.info("Không đủ dữ liệu Trọng lượng sơn/dung môi để vẽ biểu đồ.")
+                    
+    st.markdown("---") # Gạch ngang phân cách giữa các hàng Resins
