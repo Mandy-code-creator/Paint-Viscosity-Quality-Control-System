@@ -149,3 +149,34 @@ for resin in unique_resins:
 
 # --- 5. RENDER ---
 st.graphviz_chart(graph, use_container_width=True)
+try:
+    # 1. Capture Graphviz chart as PNG image
+    png_data = graph.pipe(format='png')
+    image_stream = io.BytesIO(png_data)
+    
+    # 2. Create Word Document
+    doc = Document()
+    doc.add_heading(f'Solvent Consumption & Viscosity Control: {selected_vendor}', 0)
+    
+    doc.add_paragraph('Report Level: Coil-Level Data')
+    doc.add_paragraph('Quality Filter: Grade A-B and above')
+    
+    # 3. Insert the chart image into the document
+    doc.add_picture(image_stream, width=Inches(6.5))
+    
+    # 4. Convert document to Bytes for Streamlit Download
+    doc_io = io.BytesIO()
+    doc.save(doc_io)
+    doc_io.seek(0)
+    
+    # 5. Render Download Button in UI
+    col_empty, col_btn = st.columns([4, 1])
+    with col_btn:
+        st.download_button(
+            label="📄 Download Word Report",
+            data=doc_io,
+            file_name=f"Solvent_Report_{selected_vendor}.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+except Exception as e:
+    st.caption("Please ensure 'python-docx' is installed via requirements.txt to enable Word export.")
