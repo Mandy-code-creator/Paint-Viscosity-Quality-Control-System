@@ -1,269 +1,151 @@
 import streamlit as st
 import plotly.express as px
-import plotly.graph_objects as go
 import pandas as pd
-import numpy as np
 
-# ==========================================
-# SECTION 0: PAGE CONFIGURATION
-# ==========================================
-st.set_page_config(page_title="Solvent Intelligence Dashboard", page_icon="🧠", layout="wide")
+# Cấu hình trang
+st.set_page_config(page_title="Viscosity Analysis Report", page_icon="🔬", layout="wide")
 
-st.title("🧠 Solvent Adjustment Intelligence Dashboard")
-st.markdown("Decision Support System (DSS) based on historical data. Standardized solvent usage ratio unit: **g solvent / kg paint / 1 viscosity second drop**.")
-st.markdown("---")
+st.title("🔬 Viscosity Analysis Report")
+st.markdown("Detailed breakdown of solvent sensitivity per resin type. Each chart represents a specific resin's reaction to different solvents.")
 
-
-# ==========================================
-# SECTION 1: STATE CHECK & DATA LOADING
-# ==========================================
+# 1. State Check & Data Loading
 if not st.session_state.get('raw_data_loaded', False):
-    st.warning("⚠️ No data loaded. Please upload your data file first.")
-    st.stop()
+    st.warning("⚠️ No data loaded. Please upload your data file first.")
+    st.stop()
 
 group_a = st.session_state['group_a_data'].copy()
+
+# Ép kiểu dữ liệu để biểu đồ không bị dàn trải (Category/String)
 group_a['Solvent_Type'] = group_a['Solvent_Type'].astype(str)
 
-# Ensure Vendor column exists gracefully
-if 'Vendor' not in group_a.columns:
-    group_a['Vendor'] = 'Unknown'
-
-
 # ==========================================
-# SECTION 2: PREPROCESSING & DATA CLEANING
+# --- BƯỚC LÀM SẠCH DỮ LIỆU (DATA CLEANING) ---
 # ==========================================
-visc_before = '黏度(秒)'      # Initial Viscosity
-visc_after = '黏度(秒)_1'    # Final Viscosity
-paint_weight = '塗料重量'     # Paint Weight (kg)
-solvent_weight = '添加重量'   # Solvent Weight (kg)
+visc_before = '黏度(秒)'     # Độ nhớt trước khi pha
+visc_after = '黏度(秒)_1'   # Độ nhớt sau khi pha
+paint_weight = '塗料重量'    # Trọng lượng sơn
+solvent_weight = '添加重量'  # Trọng lượng dung môi
 
+# Kiểm tra xem các cột có tồn tại không trước khi làm sạch
 if all(col in group_a.columns for col in [visc_before, visc_after, paint_weight, solvent_weight]):
-    # Drop empty rows for critical columns
-    df = group_a.dropna(subset=[visc_before, visc_after, paint_weight, solvent_weight]).copy()
-    
-    # Cast to numeric types
-    for col in [visc_before, visc_after, paint_weight, solvent_weight]:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
-    df = df.dropna(subset=[visc_before, visc_after, paint_weight, solvent_weight])
-    
-    # Calculate Viscosity Reduction
-    df['Viscosity_Reduction'] = df[visc_before] - df[visc_after]
-    
-    # DATA CLEANING: Paint > 0, Solvent > 0, and Reduction > 0
-    df = df[
-        (df[paint_weight] > 0) & 
-        (df[solvent_weight] > 0) & 
-        (df['Viscosity_Reduction'] > 0)
-    ]
-    
-    # CALCULATE STANDARDIZED REFERENCE VALUE (g/kg/s)
-    # Formula: (Solvent(kg) * 1000) / (Paint(kg) * Reduction(s))
-    df['Reference_Value'] = (df[solvent_weight] * 1000) / (df[paint_weight] * df['Viscosity_Reduction'])
+    # 1. Loại bỏ các dòng bị trống (Null/NA)
+    clean_data = group_a.dropna(subset=[visc_before, visc_after]).copy()
 
+    # 2. Loại bỏ các dòng có giá trị bằng 0 (Sơn, Dung môi, Độ nhớt)
+    clean_data = clean_data[
+        (clean_data[visc_before] > 0) & 
+        (clean_data[visc_after] > 0) & 
+        (clean_data[paint_weight] > 0) & 
+        (clean_data[solvent_weight] > 0)
+    ]
+
+    # 3. Loại bỏ các dòng mà Độ nhớt trước và sau GIỐNG Y HỆT NHAU
+    clean_data = clean_data[clean_data[visc_before] != clean_data[visc_after]]
+
+    group_a = clean_data.copy()
+    st.caption("🧹 **Hệ thống tự động:** Đã lọc bỏ các dữ liệu rác (Giá trị trống, bằng 0, hoặc độ nhớt không thay đổi).")
 else:
-    st.error("⚠️ Missing required data columns (Viscosity, Paint Weight, Solvent Weight).")
-    st.stop()
-
-
+    st.warning("⚠️ Bỏ qua bước làm sạch do không tìm thấy đủ các cột: Độ nhớt, Trọng lượng sơn, Trọng lượng dung môi.")
 # ==========================================
-# SECTION 3: MASTER UI LAYOUT DEFINITION
-# ==========================================
-# 60% Left for Visuals, 40% Right for Actionable Insights
-col_left, col_right = st.columns([6, 4], gap="large")
 
+# Đảm bảo cột Vendor tồn tại (tránh lỗi nếu data thiếu)
+if 'Vendor' not in group_a.columns:
+    group_a['Vendor'] = 'Unknown'
 
-# ==========================================
-# SECTION 4: LEFT COLUMN - FILTERS
-# ==========================================
-with col_left:
-    st.subheader("🌊 Material & Process Flow (Sankey)")
-    
-    c_f1, c_f2, c_f3 = st.columns(3)
-    with c_f1:
-        selected_vendor = st.selectbox("1. Supplier (Vendor)", options=['All'] + list(df['Vendor'].unique()))
-    with c_f2:
-        resins_available = df[df['Vendor'] == selected_vendor]['Resin'].unique() if selected_vendor != 'All' else df['Resin'].unique()
-        selected_resin = st.selectbox("2. Resin Type", options=['All'] + list(resins_available))
-    with c_f3:
-        # Build the filter mask step-by-step to avoid Pandas KeyError
-        mask = pd.Series(True, index=df.index)
-        if selected_vendor != 'All':
-            mask &= (df['Vendor'] == selected_vendor)
-        if selected_resin != 'All':
-            mask &= (df['Resin'] == selected_resin)
-            
-        solvents_available = df[mask]['Solvent_Type'].unique()
-        selected_solvent = st.selectbox("3. Solvent Type", options=['All'] + list(solvents_available))
+# 2. Logic: Nhóm dữ liệu 
+# Sử dụng toàn bộ dữ liệu sạch để so sánh hiệu quả giữa các loại dung môi
+summary_df = group_a.groupby(['Resin', 'Solvent_Type'])['Viscosity_Sensitivity'].agg(['mean', 'std']).reset_index()
+resins = sorted(summary_df['Resin'].unique())
 
+# 3. Định nghĩa bảng màu cố định cho từng loại dung môi
+all_solvents = sorted(group_a['Solvent_Type'].unique())
+color_map = {solvent: px.colors.qualitative.Plotly[i % len(px.colors.qualitative.Plotly)] 
+             for i, solvent in enumerate(all_solvents)}
 
-# ==========================================
-# SECTION 5: LEFT COLUMN - SANKEY DIAGRAM
-# ==========================================
-    sankey_df = df.copy()
-    
-    # Extract unique entities
-    vendors = list(sankey_df['Vendor'].unique())
-    resins = list(sankey_df['Resin'].unique())
-    solvents = list(sankey_df['Solvent_Type'].unique())
-    
-    # Add prefixes to nodes to prevent mapping collisions
-    node_labels = [f"🏭 {v}" for v in vendors] + [f"🧪 {r}" for r in resins] + [f"💧 {s}" for s in solvents]
-    
-    # Map entity names to Sankey indices
-    vendor_idx = {v: i for i, v in enumerate(vendors)}
-    resin_idx = {r: i + len(vendors) for i, r in enumerate(resins)}
-    solvent_idx = {s: i + len(vendors) + len(resins) for i, s in enumerate(solvents)}
-    
-    source, target, value, link_colors = [], [], [], []
-    
-    # Link Group 1: Vendor -> Resin
-    v_r_group = sankey_df.groupby(['Vendor', 'Resin']).size().reset_index(name='count')
-    for _, row in v_r_group.iterrows():
-        source.append(vendor_idx[row['Vendor']])
-        target.append(resin_idx[row['Resin']])
-        value.append(row['count'])
-        if (selected_vendor in ['All', row['Vendor']]) and (selected_resin in ['All', row['Resin']]):
-            link_colors.append("rgba(31, 119, 180, 0.5)") # Highlight Blue
-        else:
-            link_colors.append("rgba(200, 200, 200, 0.2)") # Faded Gray
+# 4. Hiển thị báo cáo dạng lưới 2 cột
+st.markdown("---")
+for i in range(0, len(resins), 2):
+    cols = st.columns(2)
+    for j in range(2):
+        if i + j < len(resins):
+            resin = resins[i + j]
+            with cols[j]:
+                st.markdown(f"#### Resin Type: {resin}")
+                
+                # --- A. BIỂU ĐỒ BAR CHART (ĐỘ NHẠY) ---
+                resin_data = summary_df[summary_df['Resin'] == resin].copy()
+                
+                fig_bar = px.bar(
+                    resin_data,
+                    x='Solvent_Type',
+                    y='mean',
+                    error_y='std',
+                    labels={'mean': 'Sensitivity (sec/1%)', 'Solvent_Type': 'Solvent'},
+                    color='Solvent_Type',
+                    color_discrete_map=color_map,
+                    title=f"Sensitivity Profile for {resin}"
+                )
+                
+                # Cấu hình chuẩn báo cáo
+                fig_bar.update_layout(
+                    plot_bgcolor='white', height=300, font=dict(size=12),
+                    margin=dict(l=40, r=40, t=40, b=30), showlegend=False
+                )
+                fig_bar.update_xaxes(type='category', showline=True, linecolor='black', linewidth=1)
+                fig_bar.update_yaxes(showgrid=True, gridcolor='lightgray', linecolor='black', linewidth=1)
+                
+                st.plotly_chart(fig_bar, use_container_width=True)
+                
+                # --- B. BẢNG DỮ LIỆU ---
+                st.dataframe(
+                    resin_data.rename(columns={'mean': 'Mean', 'std': 'Std Dev'}),
+                    use_container_width=True,
+                    height=150
+                )
 
-    # Link Group 2: Resin -> Solvent
-    r_s_group = sankey_df.groupby(['Resin', 'Solvent_Type']).size().reset_index(name='count')
-    for _, row in r_s_group.iterrows():
-        source.append(resin_idx[row['Resin']])
-        target.append(solvent_idx[row['Solvent_Type']])
-        value.append(row['count'])
-        if (selected_resin in ['All', row['Resin']]) and (selected_solvent in ['All', row['Solvent_Type']]):
-            link_colors.append("rgba(255, 127, 14, 0.5)") # Highlight Orange
-        else:
-            link_colors.append("rgba(200, 200, 200, 0.2)")
-
-    # Build and style Sankey
-    fig_sankey = go.Figure(data=[go.Sankey(
-        node=dict(
-            pad=20, 
-            thickness=30,
-            line=dict(color="white", width=1.5),
-            label=node_labels,
-            color="#2C3E50" # Deep blue-gray nodes
-        ),
-        link=dict(source=source, target=target, value=value, color=link_colors)
-    )])
-    
-    fig_sankey.update_layout(
-        height=600, 
-        font=dict(size=13, color="#111827", family="Arial, sans-serif"), 
-        margin=dict(l=10, r=150, t=40, b=20), # r=150 prevents text cutoff
-        plot_bgcolor='white',
-        paper_bgcolor='white'
-    )
-    st.plotly_chart(fig_sankey, use_container_width=True)
-
-
-# ==========================================
-# SECTION 6: RIGHT COLUMN - DATA AGGREGATION
-# ==========================================
-with col_right:
-    # Filter dataset strictly based on selected options
-    filtered_df = df.copy()
-    if selected_vendor != 'All': filtered_df = filtered_df[filtered_df['Vendor'] == selected_vendor]
-    if selected_resin != 'All': filtered_df = filtered_df[filtered_df['Resin'] == selected_resin]
-    if selected_solvent != 'All': filtered_df = filtered_df[filtered_df['Solvent_Type'] == selected_solvent]
-
-    if filtered_df.empty or len(filtered_df) < 2:
-        st.info("👈 Please select a valid combination on the left (Requires at least 2 batches to analyze).")
-    else:
-        # Calculate key statistics
-        sample_size = len(filtered_df)
-        avg_init_v = filtered_df[visc_before].mean()
-        avg_fin_v = filtered_df[visc_after].mean()
-        avg_red = filtered_df['Viscosity_Reduction'].mean()
-        avg_solv_add = filtered_df[solvent_weight].mean()
-        
-        ref_mean = filtered_df['Reference_Value'].mean()
-        ref_median = filtered_df['Reference_Value'].median()
-        ref_std = filtered_df['Reference_Value'].std()
-
-
-# ==========================================
-# SECTION 7: RIGHT COLUMN - REFERENCE TABLES
-# ==========================================
-        st.subheader("📊 Historical Reference Table")
-        metrics_df = pd.DataFrame({
-            "Metric": ["Sample Size (Batches)", "Avg Initial Viscosity (s)", "Avg Final Viscosity (s)", "Avg Reduction (s)", "Avg Solvent Added (kg)"],
-            "Value": [f"{sample_size}", f"{avg_init_v:.1f}", f"{avg_fin_v:.1f}", f"{avg_red:.1f}", f"{avg_solv_add:.2f}"]
-        })
-        st.dataframe(metrics_df, hide_index=True, use_container_width=True)
-
-        st.markdown(f"""
-        <div style="background-color: #f0f8ff; padding: 20px; border-radius: 10px; border-left: 5px solid #0066cc; margin-bottom: 20px;">
-            <h4 style="margin-top: 0; color: #0066cc;">⭐ Reference Value</h4>
-            <p style="font-size: 14px; margin-bottom: 5px;">Combination: <b>{selected_vendor} → {selected_resin} → {selected_solvent}</b></p>
-            <h1 style="margin: 0; color: #333;">{ref_mean:.2f} <span style="font-size: 18px; color: #666;">g/kg/s</span></h1>
-            <p style="font-size: 13px; color: #666; margin-top: 5px;"><i>(Median: {ref_median:.2f} | Std Dev: {ref_std:.2f})</i></p>
-            <p style="margin-bottom: 0;"><b>Meaning:</b> On average, add {ref_mean:.2f} grams of solvent per 1 kg of paint to reduce viscosity by 1 second.</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-
-# ==========================================
-# SECTION 8: RIGHT COLUMN - PREDICTION TOOL
-# ==========================================
-        with st.expander("🛠️ PRODUCTION SOLVENT CALCULATOR", expanded=True):
-            c_p1, c_p2 = st.columns(2)
-            with c_p1:
-                input_paint = st.number_input("Paint Batch Weight (kg)", value=800.0, step=50.0)
-                input_curr_v = st.number_input("Current Viscosity (s)", value=float(int(avg_init_v)), step=1.0)
-            with c_p2:
-                input_target_v = st.number_input("Target Viscosity (s)", value=float(int(avg_fin_v)), step=1.0)
-            
-            req_reduction = input_curr_v - input_target_v
-            
-            if req_reduction <= 0:
-                st.warning("Target viscosity must be lower than current viscosity.")
-            else:
-                rec_solvent_kg = (ref_mean * input_paint * req_reduction) / 1000
-                st.success(f"""
-                ### 🎯 Recommended Solvent Amount: {rec_solvent_kg:.2f} kg
-                `Formula: {ref_mean:.2f} * {input_paint} * {req_reduction:.1f} / 1000`
-                """)
-
-
-# ==========================================
-# SECTION 9: RIGHT COLUMN - SCATTER PLOT
-# ==========================================
-        st.subheader("🎯 Data Dispersion & Reliability")
-        st.caption("If the points cluster along a straight line, the Reference Value is highly reliable.")
-        
-        # Standardize Y-axis: Solvent per 1000kg of Paint to eliminate batch size variations
-        filtered_df['Solvent_per_1000kg_Paint'] = (filtered_df[solvent_weight] / filtered_df[paint_weight]) * 1000
-        
-        try:
-            fig_scatter = px.scatter(
-                filtered_df,
-                x='Viscosity_Reduction',
-                y='Solvent_per_1000kg_Paint',
-                trendline='ols',
-                labels={
-                    'Viscosity_Reduction': 'Viscosity Reduction (s)',
-                    'Solvent_per_1000kg_Paint': 'Solvent Amount / 1000kg Paint'
-                },
-                color_discrete_sequence=['#2ca02c']
-            )
-            fig_scatter.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=0), plot_bgcolor='white')
-            fig_scatter.update_xaxes(showline=True, linecolor='lightgray', showgrid=True, gridcolor='whitesmoke')
-            fig_scatter.update_yaxes(showline=True, linecolor='lightgray', showgrid=True, gridcolor='whitesmoke')
-            st.plotly_chart(fig_scatter, use_container_width=True)
-            
-        except Exception:
-            # Fallback if statsmodels is missing in the deployment environment
-            fig_scatter = px.scatter(
-                filtered_df, 
-                x='Viscosity_Reduction', 
-                y='Solvent_per_1000kg_Paint',
-                labels={
-                    'Viscosity_Reduction': 'Viscosity Reduction (s)',
-                    'Solvent_per_1000kg_Paint': 'Solvent Amount / 1000kg Paint'
-                }
-            )
-            st.plotly_chart(fig_scatter, use_container_width=True)
+                # --- C. BIỂU ĐỒ SCATTER KÈM ĐƯỜNG XU HƯỚNG ---
+                st.markdown(f"**📈 Trend: Paint vs Solvent Usage ({resin})**")
+                
+                # Lọc dữ liệu thô cho loại nhựa hiện tại
+                resin_raw_data = group_a[group_a['Resin'] == resin].copy()
+                
+                if not resin_raw_data.empty and paint_weight in resin_raw_data.columns and solvent_weight in resin_raw_data.columns:
+                    try:
+                        # Dùng color & symbol gom chung vào 1 chart để không bị dính chữ trên layout hẹp
+                        fig_trend = px.scatter(
+                            resin_raw_data,
+                            x=paint_weight,
+                            y=solvent_weight,
+                            color='Solvent_Type',
+                            symbol='Vendor',
+                            trendline='ols', # Đường xu hướng tuyến tính
+                            color_discrete_map=color_map,
+                            labels={
+                                paint_weight: 'Paint Weight (kg)',
+                                solvent_weight: 'Solvent Added (kg)',
+                                'Solvent_Type': 'Solvent',
+                                'Vendor': 'Vendor'
+                            }
+                        )
+                        
+                        fig_trend.update_layout(
+                            plot_bgcolor='white', 
+                            height=350,
+                            margin=dict(l=40, r=40, t=10, b=30),
+                            legend=dict(
+                                orientation="h", # Chuyển chú thích nằm ngang bên dưới
+                                yanchor="top", y=-0.2, 
+                                xanchor="center", x=0.5
+                            )
+                        )
+                        fig_trend.update_xaxes(showline=True, linecolor='black', showgrid=True, gridcolor='lightgray')
+                        fig_trend.update_yaxes(showline=True, linecolor='black', showgrid=True, gridcolor='lightgray')
+                        
+                        st.plotly_chart(fig_trend, use_container_width=True)
+                        
+                    except Exception as e:
+                        st.error("⚠️ Lỗi vẽ xu hướng. Vui lòng cài đặt 'statsmodels' (chạy lệnh: `pip install statsmodels`).")
+                else:
+                    st.info("Không đủ dữ liệu Trọng lượng sơn/dung môi để vẽ biểu đồ.")
+                    
+    st.markdown("---") # Gạch ngang phân cách giữa các hàng Resins
