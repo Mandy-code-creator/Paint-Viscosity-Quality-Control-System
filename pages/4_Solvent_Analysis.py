@@ -105,84 +105,204 @@ fig_ratio_bar.update_layout(yaxis={'categoryorder':'total ascending'})
 st.plotly_chart(fig_ratio_bar, use_container_width=True)
 
 # --- 5. Chart: Vendor-Resin-Solvent Hierarchy (Mind Map / Sunburst View) ---
-# --- 5. Chart: Vendor-Resin-Solvent Hierarchy (Mind Map View) ---
-st.markdown("### 3. Hierarchical Solvent Usage (Mind Map View)")
-st.info("🌳 Nhánh sơ đồ thể hiện luồng tiêu thụ từ Nhà cung cấp -> Loại Nhựa (Resin) -> Dung môi.")
+# ==================================================
+# 5. Resin-Solvent Intelligence View
+# ==================================================
 
-# Lấy dữ liệu và tính toán chỉ số (Giữ nguyên phần tính toán cũ của bạn)
+from streamlit_agraph import agraph, Node, Edge, Config
+
+st.markdown("### 3. Resin-Solvent Intelligence View")
+st.info(
+    "🎯 Relationship between Vendor → Resin → Solvent. "
+    "Each resin node displays paint usage and solvent efficiency."
+)
+
 tree_data = filtered_df.copy()
-for col in ['Vendor', 'Resin', 'Solvent_Type']:
-    if col not in tree_data.columns:
-        tree_data[col] = 'Unknown'
 
-if all(col in tree_data.columns for col in ['添加重量', '塗料重量', '黏度(秒)', '黏度(秒)_1']):
-    tree_data['Delta_V'] = tree_data['黏度(秒)'] - tree_data['黏度(秒)_1']
-    tree_data['Solvent_Ratio_Percent'] = (tree_data['添加重量'] / tree_data['塗料重量']) * 100
-    safe_delta_v = tree_data['Delta_V'].replace(0, 1)
-    tree_data['Kg_per_1s'] = tree_data['添加重量'] / safe_delta_v
-    tree_data['Pct_per_1s'] = tree_data['Solvent_Ratio_Percent'] / safe_delta_v
-else:
-    tree_data['Kg_per_1s'] = 0
-    tree_data['Pct_per_1s'] = 0
-    tree_data['塗料重量'] = 0
+required_cols = [
+    'Vendor',
+    'Resin',
+    'Solvent_Type',
+    '塗料重量',
+    '添加重量',
+    '黏度(秒)',
+    '黏度(秒)_1'
+]
 
-tree_summary = tree_data.groupby(['Vendor', 'Resin', 'Solvent_Type']).agg(
-    Total_Paint=('塗料重量', 'sum'),
-    Avg_Kg_per_1s=('Kg_per_1s', 'mean'),
-    Avg_Pct_per_1s=('Pct_per_1s', 'mean')
-).reset_index()
+if all(col in tree_data.columns for col in required_cols):
 
-tree_summary = tree_summary[tree_summary['Total_Paint'] > 0]
+    tree_data['Delta_V'] = (
+        tree_data['黏度(秒)']
+        - tree_data['黏度(秒)_1']
+    )
 
-if not tree_summary.empty:
-    # Khởi tạo Graphviz
-    graph = graphviz.Digraph(engine='dot')
-    # Thiết lập hướng từ Trái sang Phải (Left to Right)
-    graph.attr(rankdir='LR', size='10,10')
-    graph.attr('node', shape='box', style='rounded,filled', fontname='Arial')
+    tree_data = tree_data[
+        tree_data['Delta_V'] > 0
+    ]
 
-    # 1. Tạo Node Trung tâm (Vendor)
-    vendor_name = tree_summary['Vendor'].iloc[0]
-    total_vendor_paint = tree_summary['Total_Paint'].sum()
-    graph.node('root', 
-               f"<<B>{vendor_name}</B><BR/>Total Paint: {total_vendor_paint:,.0f} kg>", 
-               fillcolor='#1B3C73', fontcolor='white') # Màu xanh đậm
+    if tree_data.empty:
+        st.warning("No valid viscosity reduction records.")
+        st.stop()
 
-    # Lấy danh sách Resin
-    resins = tree_summary['Resin'].unique()
-    
-    for resin in resins:
-        # 2. Tạo các Node Resin (Nhánh cấp 1)
-        resin_data = tree_summary[tree_summary['Resin'] == resin]
-        total_resin_paint = resin_data['Total_Paint'].sum()
-        
-        resin_id = f"resin_{resin}"
-        graph.node(resin_id, 
-                   f"<<B>{resin}</B><BR/>Paint: {total_resin_paint:,.0f} kg>", 
-                   fillcolor='#9EC8B9', fontcolor='black') # Màu xanh nhạt
-        
-        # Nối Vendor -> Resin
-        graph.edge('root', resin_id)
+    tree_data['Solvent_Ratio_Pct'] = (
+        tree_data['添加重量']
+        / tree_data['塗料重量']
+    ) * 100
 
-        # 3. Tạo các Node Dung môi (Nhánh cấp 2 - giống các block thông số của bạn)
-        for _, row in resin_data.iterrows():
-            solvent = row['Solvent_Type']
-            solvent_id = f"sol_{resin}_{solvent}"
-            
-            # Khối text chi tiết thông số
-            label_html = (
-                f"<<B>{solvent}</B><BR/>"
-                f"<FONT COLOR='#D9534F'><B>{row['Avg_Pct_per_1s']:.1f}%</B> Solvent per 1 s</FONT><BR/>"
-                f"<FONT COLOR='#f0ad4e'>{row['Avg_Kg_per_1s']:.1f} kg Solvent per 1 s</FONT>>"
+    tree_data['Pct_per_1s'] = (
+        tree_data['Solvent_Ratio_Pct']
+        / tree_data['Delta_V']
+    )
+
+    summary = (
+        tree_data
+        .groupby(
+            ['Vendor', 'Resin', 'Solvent_Type']
+        )
+        .agg(
+            Paint_Weight=('塗料重量', 'sum'),
+            Solvent_Added=('添加重量', 'sum'),
+            Avg_Pct_1s=('Pct_per_1s', 'mean'),
+            Batch_Count=('Resin', 'count')
+        )
+        .reset_index()
+    )
+
+    if summary.empty:
+        st.warning("No summarized data available.")
+        st.stop()
+
+    # ====================================
+    # Vendor Node
+    # ====================================
+
+    vendor_name = summary['Vendor'].iloc[0]
+
+    total_paint = (
+        summary['Paint_Weight']
+        .sum()
+    )
+
+    total_solvent = (
+        summary['Solvent_Added']
+        .sum()
+    )
+
+    nodes = []
+    edges = []
+
+    center_label = (
+        f"{vendor_name}\n\n"
+        f"{total_paint:,.0f} kg Paint\n"
+        f"{total_solvent:,.0f} kg Solvent"
+    )
+
+    nodes.append(
+        Node(
+            id="CENTER",
+            label=center_label,
+            size=50,
+            color="#0B3B75",
+            shape="dot"
+        )
+    )
+
+    # ====================================
+    # Top Resin
+    # ====================================
+
+    resin_summary = (
+        summary.groupby('Resin')
+        .agg(
+            Paint_Weight=('Paint_Weight', 'sum')
+        )
+        .sort_values(
+            'Paint_Weight',
+            ascending=False
+        )
+        .head(8)
+    )
+
+    resin_list = resin_summary.index.tolist()
+
+    for resin in resin_list:
+
+        resin_data = summary[
+            summary['Resin'] == resin
+        ]
+
+        paint_weight = (
+            resin_data['Paint_Weight']
+            .sum()
+        )
+
+        solvent_added = (
+            resin_data['Solvent_Added']
+            .sum()
+        )
+
+        avg_pct = (
+            resin_data['Avg_Pct_1s']
+            .mean()
+        )
+
+        top_solvent = (
+            resin_data
+            .sort_values(
+                'Paint_Weight',
+                ascending=False
             )
-            
-            graph.node(solvent_id, label_html, fillcolor='#F2F2F2', fontcolor='black', color='#CCCCCC')
-            
-            # Nối Resin -> Solvent
-            graph.edge(resin_id, solvent_id)
+            .iloc[0]['Solvent_Type']
+        )
 
-    # Hiển thị biểu đồ rẽ nhánh lên Streamlit
-    st.graphviz_chart(graph, use_container_width=True)
+        resin_label = (
+            f"{resin}\n\n"
+            f"{paint_weight:,.0f} kg Paint\n"
+            f"{top_solvent}\n"
+            f"{solvent_added:,.0f} kg Solvent\n"
+            f"{avg_pct:.2f}% / 1s"
+        )
+
+        nodes.append(
+            Node(
+                id=resin,
+                label=resin_label,
+                size=30,
+                shape="ellipse",
+                color="#D9F2FF"
+            )
+        )
+
+        edges.append(
+            Edge(
+                source="CENTER",
+                target=resin,
+                width=4
+            )
+        )
+
+    # ====================================
+    # Graph Config
+    # ====================================
+
+    config = Config(
+        width="100%",
+        height=700,
+        directed=False,
+        physics=True,
+        hierarchical=False,
+        nodeHighlightBehavior=True,
+        highlightColor="#F7A7A6",
+        collapsible=False
+    )
+
+    agraph(
+        nodes=nodes,
+        edges=edges,
+        config=config
+    )
 
 else:
-    st.warning("⚠️ Không có đủ dữ liệu hợp lệ để vẽ biểu đồ.")
+    st.warning(
+        "Missing required columns for Resin-Solvent view."
+    )
