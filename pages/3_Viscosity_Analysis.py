@@ -116,18 +116,32 @@ with col_left:
 
 
 # ==========================================
-# SECTION 5: LEFT COLUMN - SANKEY DIAGRAM (SLIM & FLAT)
+# ==========================================
+# SECTION 5: LEFT COLUMN - MODERN STYLED SANKEY (DATA ON FLOW)
 # ==========================================
     if filtered_df.empty:
         st.info("👈 Please select a valid combination on the left.")
     else:
         sankey_df = filtered_df.copy()
         
+        # Extract unique entities
         vendors = list(sankey_df['Vendor'].unique())
         resins = list(sankey_df['Resin'].unique())
         solvents = list(sankey_df['Solvent_Type'].unique())
         
-        node_labels = [f"🏭 {v}" for v in vendors] + [f"🧪 {r}" for r in resins] + [f"💧 {s}" for s in solvents]
+        # --- NEW: CALCULATE DATA TO DISPLAY DIRECTLY ON NODES ---
+        # Count batches and calculate total solvent weights for rich labels
+        v_counts = sankey_df['Vendor'].value_counts()
+        r_counts = sankey_df['Resin'].value_counts()
+        s_counts = sankey_df['Solvent_Type'].value_counts()
+        s_weights = sankey_df.groupby('Solvent_Type')[solvent_weight].sum()
+        
+        # Create rich labels combining Name + Data (Batches / Weights)
+        node_labels = (
+            [f"🏭 {v} ({v_counts.get(v, 0)} batches)" for v in vendors] +
+            [f"🧪 {r} ({r_counts.get(r, 0)} batches)" for r in resins] +
+            [f"💧 {s} ({s_weights.get(s, 0):.1f} kg)" for s in solvents]
+        )
         
         vendor_idx = {v: i for i, v in enumerate(vendors)}
         resin_idx = {r: i + len(vendors) for i, r in enumerate(resins)}
@@ -135,36 +149,50 @@ with col_left:
         
         source, target, value, link_colors = [], [], [], []
         
+        # Group 1: Vendor -> Resin
         v_r_group = sankey_df.groupby(['Vendor', 'Resin']).size().reset_index(name='count')
         for _, row in v_r_group.iterrows():
             source.append(vendor_idx[row['Vendor']])
             target.append(resin_idx[row['Resin']])
             value.append(row['count'])
-            link_colors.append("rgba(31, 119, 180, 0.15)") 
+            link_colors.append("rgba(135, 186, 222, 0.4)") # Softer modern blue, slightly higher opacity for contrast
 
+        # Group 2: Resin -> Solvent
         r_s_group = sankey_df.groupby(['Resin', 'Solvent_Type']).size().reset_index(name='count')
         for _, row in r_s_group.iterrows():
             source.append(resin_idx[row['Resin']])
             target.append(solvent_idx[row['Solvent_Type']])
             value.append(row['count'])
-            link_colors.append("rgba(255, 127, 14, 0.15)") 
+            link_colors.append("rgba(252, 203, 163, 0.4)") # Softer modern orange
 
+        # Build Sankey with Modern Vibe Settings
         fig_sankey = go.Figure(data=[go.Sankey(
             node=dict(
-                pad=40, thickness=15, 
-                line=dict(color="white", width=1.5),
+                pad=40, 
+                thickness=20, # Slightly thicker to mimic the card feel
+                line=dict(color="#34495E", width=2), # Dark border to mimic the left-edge styling
                 label=node_labels,
-                color="#2C3E50" 
+                color="#FFFFFF" # White nodes to mimic the inner card
             ),
-            link=dict(source=source, target=target, value=value, color=link_colors)
+            link=dict(
+                source=source, 
+                target=target, 
+                value=value, 
+                color=link_colors
+            )
         )])
         
+        # Dynamic height to maintain aesthetics
+        total_nodes = len(node_labels)
+        dynamic_height = max(350, min(700, total_nodes * 50))
+        
         fig_sankey.update_layout(
-            height=350, 
-            font=dict(size=13, color="#111827", family="Arial, sans-serif"), 
-            margin=dict(l=10, r=160, t=30, b=20), 
-            plot_bgcolor='white',
-            paper_bgcolor='white'
+            height=dynamic_height, 
+            font=dict(size=14, color="#2C3E50", family="Segoe UI, Arial, sans-serif"), # Modern font
+            margin=dict(l=10, r=180, t=30, b=20), 
+            # Apply the light gray/blueish background from your image
+            plot_bgcolor='#F4F7F9',
+            paper_bgcolor='#F4F7F9'
         )
         st.plotly_chart(fig_sankey, use_container_width=True)
 
