@@ -61,6 +61,10 @@ if 'Vendor' not in group_a.columns:
     group_a['Vendor'] = 'Unknown'
 if 'Solvent_Type' not in group_a.columns:
     group_a['Solvent_Type'] = 'Unknown'
+# --- ADD THESE TWO LINES FOR RESIN ---
+if 'Resin' not in group_a.columns:
+    group_a['Resin'] = 'Unknown'
+# -------------------------------------
 
 vendors_list = group_a['Vendor'].dropna().unique().tolist()
 selected_vendor = st.selectbox("🏢 Central Vendor Selection:", vendors_list)
