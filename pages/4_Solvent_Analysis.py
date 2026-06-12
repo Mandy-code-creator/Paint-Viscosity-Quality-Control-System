@@ -1,6 +1,8 @@
 import streamlit as st
 import plotly.express as px
 import pandas as pd
+import graphviz
+
 
 st.set_page_config(page_title="Solvent Analysis", page_icon="💧", layout="wide")
 
@@ -86,75 +88,86 @@ fig_ratio_bar = px.bar(
 )
 fig_ratio_bar.update_layout(yaxis={'categoryorder':'total ascending'})
 st.plotly_chart(fig_ratio_bar, use_container_width=True)
+
 # --- 5. Chart: Vendor-Resin-Solvent Hierarchy (Mind Map / Sunburst View) ---
+# --- 5. Chart: Vendor-Resin-Solvent Hierarchy (Mind Map View) ---
 st.markdown("### 3. Hierarchical Solvent Usage (Mind Map View)")
-st.info("🌳 Visualizes the relationship between Vendor, Resin, and Solvent Type along with viscosity sensitivity metrics.")
+st.info("🌳 Nhánh sơ đồ thể hiện luồng tiêu thụ từ Nhà cung cấp -> Loại Nhựa (Resin) -> Dung môi.")
 
-# Lấy dữ liệu đã qua bộ lọc ở sidebar
+# Lấy dữ liệu và tính toán chỉ số (Giữ nguyên phần tính toán cũ của bạn)
 tree_data = filtered_df.copy()
-
-# Đảm bảo các cột phân tầng tồn tại (tránh lỗi KeyError)
 for col in ['Vendor', 'Resin', 'Solvent_Type']:
     if col not in tree_data.columns:
         tree_data[col] = 'Unknown'
 
-# Tính toán các chỉ số độ nhạy (Sensitivity) giống trong ảnh
 if all(col in tree_data.columns for col in ['添加重量', '塗料重量', '黏度(秒)', '黏度(秒)_1']):
-    # Mức giảm độ nhớt (Delta Viscosity)
     tree_data['Delta_V'] = tree_data['黏度(秒)'] - tree_data['黏度(秒)_1']
-    
-    # Tính % dung môi đã thêm
     tree_data['Solvent_Ratio_Percent'] = (tree_data['添加重量'] / tree_data['塗料重量']) * 100
-    
-    # Tránh lỗi chia cho 0
     safe_delta_v = tree_data['Delta_V'].replace(0, 1)
-    
-    # Tính: Số kg dung môi làm giảm 1 giây (kg/s)
     tree_data['Kg_per_1s'] = tree_data['添加重量'] / safe_delta_v
-    
-    # Tính: % dung môi làm giảm 1 giây (%/s)
     tree_data['Pct_per_1s'] = tree_data['Solvent_Ratio_Percent'] / safe_delta_v
 else:
     tree_data['Kg_per_1s'] = 0
     tree_data['Pct_per_1s'] = 0
     tree_data['塗料重量'] = 0
 
-# Gom nhóm dữ liệu theo cấu trúc: Vendor -> Resin -> Solvent
 tree_summary = tree_data.groupby(['Vendor', 'Resin', 'Solvent_Type']).agg(
     Total_Paint=('塗料重量', 'sum'),
     Avg_Kg_per_1s=('Kg_per_1s', 'mean'),
     Avg_Pct_per_1s=('Pct_per_1s', 'mean')
 ).reset_index()
 
-# Lọc bỏ các giá trị âm hoặc lỗi để biểu đồ hiển thị đúng
 tree_summary = tree_summary[tree_summary['Total_Paint'] > 0]
 
 if not tree_summary.empty:
-    # Vẽ biểu đồ Sunburst
-    fig_mindmap = px.sunburst(
-        tree_summary,
-        path=['Vendor', 'Resin', 'Solvent_Type'],
-        values='Total_Paint', # Độ lớn của khối dựa trên tổng lượng sơn
-        color='Avg_Pct_per_1s', # Màu sắc cảnh báo dựa trên độ nhạy (%)
-        color_continuous_scale='Blues', # Dùng tone xanh giống ảnh
-        title="Vendor - Resin - Solvent Hierarchy"
-    )
+    # Khởi tạo Graphviz
+    graph = graphviz.Digraph(engine='dot')
+    # Thiết lập hướng từ Trái sang Phải (Left to Right)
+    graph.attr(rankdir='LR', size='10,10')
+    graph.attr('node', shape='box', style='rounded,filled', fontname='Arial')
+
+    # 1. Tạo Node Trung tâm (Vendor)
+    vendor_name = tree_summary['Vendor'].iloc[0]
+    total_vendor_paint = tree_summary['Total_Paint'].sum()
+    graph.node('root', 
+               f"<<B>{vendor_name}</B><BR/>Total Paint: {total_vendor_paint:,.0f} kg>", 
+               fillcolor='#1B3C73', fontcolor='white') # Màu xanh đậm
+
+    # Lấy danh sách Resin
+    resins = tree_summary['Resin'].unique()
     
-    # Tùy chỉnh thông tin khi trỏ chuột (Hover) giống các block trong ảnh
-    fig_mindmap.update_traces(
-        customdata=tree_summary[['Avg_Kg_per_1s', 'Avg_Pct_per_1s']],
-        hovertemplate='<b>%{label}</b><br>' +
-                      'Total Paint: %{value:,.0f} kg<br>' +
-                      'Solvent Added: %{customdata[0]:,.1f} kg per 1 s<br>' +
-                      'Sensitivity: <b>%{customdata[1]:,.2f}% per 1 s</b><extra></extra>'
-    )
-    
-    fig_mindmap.update_layout(
-        height=600,
-        margin=dict(t=40, l=0, r=0, b=0),
-        coloraxis_colorbar=dict(title="% Solvent<br>per 1 s")
-    )
-    
-    st.plotly_chart(fig_mindmap, use_container_width=True)
+    for resin in resins:
+        # 2. Tạo các Node Resin (Nhánh cấp 1)
+        resin_data = tree_summary[tree_summary['Resin'] == resin]
+        total_resin_paint = resin_data['Total_Paint'].sum()
+        
+        resin_id = f"resin_{resin}"
+        graph.node(resin_id, 
+                   f"<<B>{resin}</B><BR/>Paint: {total_resin_paint:,.0f} kg>", 
+                   fillcolor='#9EC8B9', fontcolor='black') # Màu xanh nhạt
+        
+        # Nối Vendor -> Resin
+        graph.edge('root', resin_id)
+
+        # 3. Tạo các Node Dung môi (Nhánh cấp 2 - giống các block thông số của bạn)
+        for _, row in resin_data.iterrows():
+            solvent = row['Solvent_Type']
+            solvent_id = f"sol_{resin}_{solvent}"
+            
+            # Khối text chi tiết thông số
+            label_html = (
+                f"<<B>{solvent}</B><BR/>"
+                f"<FONT COLOR='#D9534F'><B>{row['Avg_Pct_per_1s']:.1f}%</B> Solvent per 1 s</FONT><BR/>"
+                f"<FONT COLOR='#f0ad4e'>{row['Avg_Kg_per_1s']:.1f} kg Solvent per 1 s</FONT>>"
+            )
+            
+            graph.node(solvent_id, label_html, fillcolor='#F2F2F2', fontcolor='black', color='#CCCCCC')
+            
+            # Nối Resin -> Solvent
+            graph.edge(resin_id, solvent_id)
+
+    # Hiển thị biểu đồ rẽ nhánh lên Streamlit
+    st.graphviz_chart(graph, use_container_width=True)
+
 else:
-    st.warning("⚠️ Không có đủ dữ liệu hợp lệ (trọng lượng sơn > 0) để vẽ biểu đồ phân tầng.")
+    st.warning("⚠️ Không có đủ dữ liệu hợp lệ để vẽ biểu đồ.")
