@@ -115,7 +115,8 @@ with col_left:
 # ==========================================
 # ==========================================
 # ==========================================
-# SECTION 5: LEFT COLUMN - SANKEY DIAGRAM (FINELY TUNED FOR ESTHETICS)
+# ==========================================
+# SECTION 5: LEFT COLUMN - DYNAMIC SANKEY DIAGRAM (SLIM & DYNAMIC HEIGHT)
 # ==========================================
     if filtered_df.empty:
         st.info("No data available for the selected flow.")
@@ -131,6 +132,11 @@ with col_left:
         # Add prefixes to nodes to prevent mapping collisions
         node_labels = [f"🏭 {v}" for v in vendors] + [f"🧪 {r}" for r in resins] + [f"💧 {s}" for s in solvents]
         
+        # --- GIẢI PHÁP: TÍNH TOÁN CHIỀU CAO ĐỘNG (DYNAMIC HEIGHT) ---
+        # Tính tổng số lượng Node. Ép biểu đồ lùn xuống nếu có ít Node để dải màu không bị phình to.
+        total_nodes = len(node_labels)
+        dynamic_height = max(250, min(650, total_nodes * 40)) 
+        
         # Map entity names to Sankey indices
         vendor_idx = {v: i for i, v in enumerate(vendors)}
         resin_idx = {r: i + len(vendors) for i, r in enumerate(resins)}
@@ -144,7 +150,6 @@ with col_left:
             source.append(vendor_idx[row['Vendor']])
             target.append(resin_idx[row['Resin']])
             value.append(row['count'])
-            # THAY ĐỔI: Làm màu mờ hơn rất nhiều (opacity 0.15 thay vì 0.5)
             link_colors.append("rgba(31, 119, 180, 0.15)") # Fine Light Blue
 
         # Link Group 2: Resin -> Solvent
@@ -153,32 +158,30 @@ with col_left:
             source.append(resin_idx[row['Resin']])
             target.append(solvent_idx[row['Solvent_Type']])
             value.append(row['count'])
-            # THAY ĐỔI: Làm màu mờ hơn rất nhiều (opacity 0.15 thay vì 0.5)
             link_colors.append("rgba(255, 127, 14, 0.15)") # Fine Light Orange
 
         # Build and style Sankey
         fig_sankey = go.Figure(data=[go.Sankey(
             node=dict(
-                pad=25, thickness=25,
-                line=dict(color="white", width=1.5),
+                pad=40,         # Tăng khoảng cách giữa các khối để ép dải màu nhỏ lại
+                thickness=15,   # Làm mỏng các cột mốc (Nodes) màu xám đen
+                line=dict(color="white", width=1),
                 label=node_labels,
-                color="#2C3E50" # Professional deep blue-gray nodes
+                color="#2C3E50" 
             ),
             link=dict(
                 source=source, 
                 target=target, 
                 value=value, 
                 color=link_colors,
-                # GIỮ LẠI: Đường viền mỏng và gọn gàng cho luồng
                 line=dict(color="gray", width=0.5) 
             )
         )])
         
         fig_sankey.update_layout(
-            height=600, 
-            # Solid black text, pure font family (Shadow removed via CSS in Section 0)
-            font=dict(size=14, color="black", family="Arial, sans-serif"), 
-            margin=dict(l=10, r=160, t=40, b=20), # r=160 provides full width for long solvent names
+            height=dynamic_height, # Áp dụng chiều cao động ở đây
+            font=dict(size=13, color="black", family="Arial, sans-serif"), 
+            margin=dict(l=10, r=160, t=30, b=20),
             plot_bgcolor='white',
             paper_bgcolor='white'
         )
