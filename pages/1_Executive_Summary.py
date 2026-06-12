@@ -1,435 +1,260 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
+import numpy as np
 
-# --- 1. SETUP & DATA RETRIEVAL ---
-if 'raw_data_loaded' not in st.session_state or not st.session_state['raw_data_loaded']:
-    st.warning("⚠️ Please upload data on the main page (App) first.")
+# ==========================================
+# 1. PAGE CONFIGURATION & CUSTOM CSS
+# ==========================================
+st.set_page_config(page_title="Solvent Mind Map", layout="wide", initial_sidebar_state="expanded")
+
+custom_css = """
+<style>
+    /* Hide default Streamlit elements */
+    header {visibility: hidden;}
+    #MainMenu {visibility: hidden;}
+    
+    /* App background */
+    .stApp { background-color: #F4F7F9; font-family: 'Segoe UI', sans-serif; }
+    .block-container { padding-top: 2rem; max-width: 95%; }
+    
+    /* Titles */
+    .main-title { font-size: 26px; font-weight: 800; color: #1E293B; margin-bottom: 5px; }
+    .sub-title { font-size: 14px; color: #64748B; margin-bottom: 25px; }
+    
+    /* MIND MAP STYLES */
+    .mindmap-wrapper { background: white; border-radius: 16px; border: 1px solid #E2E8F0; padding: 40px 20px; position: relative; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+    .mindmap-container { display: flex; justify-content: space-between; align-items: center; position: relative; min-height: 500px; z-index: 2;}
+    
+    /* Columns */
+    .mindmap-col { display: flex; flex-direction: column; gap: 35px; width: 30%; max-width: 320px; }
+    .mindmap-center { width: 40%; display: flex; justify-content: center; }
+    
+    /* Spoke Cards (Outer Nodes) */
+    .mm-card { background: white; border-radius: 40px; padding: 18px 25px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.08); border: 1px solid #E2E8F0; transition: transform 0.2s;}
+    .mm-card:hover { transform: translateY(-3px); }
+    .mm-card-header { font-size: 17px; font-weight: 800; color: #0F172A; display: flex; align-items: center; gap: 8px; margin-bottom: 10px;}
+    .mm-card-row { font-size: 14px; color: #475569; margin-bottom: 6px; display: flex; align-items: center; gap: 8px;}
+    .mm-highlight { font-weight: 700; color: #D97706; } 
+    
+    /* Center Hub */
+    .mm-hub { background: white; border-radius: 16px; box-shadow: 0 25px 30px -5px rgba(0,0,0,0.15); border: 2px solid #E2E8F0; width: 100%; max-width: 320px; overflow: hidden; }
+    .mm-hub-header { background: #0F172A; color: white; padding: 20px; text-align: center; font-size: 24px; font-weight: bold; letter-spacing: 0.5px;}
+    .mm-hub-body { padding: 25px; text-align: center; }
+    .mm-hub-stat { font-size: 15px; color: #334155; padding: 10px 0; border-bottom: 1px solid #F1F5F9; font-weight: 500;}
+    .mm-hub-stat:last-child { border-bottom: none; }
+</style>
+"""
+st.markdown(custom_css, unsafe_allow_html=True)
+
+# ==========================================
+# 2. DATA LOADING (STANDALONE & SESSION)
+# ==========================================
+if 'raw_data_loaded' in st.session_state and st.session_state['raw_data_loaded']:
+    group_a = st.session_state['group_a_data'].copy()
+else:
+    st.sidebar.markdown("### 📂 Data Input")
+    uploaded_file = st.sidebar.file_uploader("Upload Data (CSV/Excel)", type=["csv", "xlsx"])
+
+    if uploaded_file is not None:
+        if uploaded_file.name.endswith('.csv'):
+            group_a = pd.read_csv(uploaded_file)
+        else:
+            group_a = pd.read_excel(uploaded_file)
+        st.session_state['raw_data_loaded'] = True
+        st.session_state['group_a_data'] = group_a
+        st.rerun()
+    else:
+        st.warning("⚠️ No data loaded. Please upload your data file in the sidebar, or click below to test with sample data.")
+        if st.button("🚀 Load Sample Data for Testing"):
+            np.random.seed(42)
+            n = 1248
+            mock_data = pd.DataFrame({
+                'Vendor': np.random.choice(['Yungchi', 'CCP', 'Nan Ya', 'Atul', 'Formosa', 'Other'], n, p=[0.35, 0.25, 0.15, 0.1, 0.1, 0.05]),
+                'Resin': np.random.choice(['PE', 'EPOXY', 'PU', 'PVDF', 'SMP', 'Other'], n),
+                'Solvent_Type': np.random.choice(['5203', 'CB5203', 'ISOPHORONE', 'PMA', 'BUTYL ACETATE', 'BAC'], n),
+                '黏度(秒)': np.random.uniform(45, 55, n),
+                '黏度(秒)_1': np.random.uniform(35, 44, n),
+                '塗料重量': np.random.uniform(400, 1000, n),
+                '添加重量': np.random.uniform(5, 25, n)
+            })
+            # Giả lập Delta_V cho sample data
+            mock_data['Delta_V'] = mock_data['黏度(秒)'] - mock_data['黏度(秒)_1']
+            
+            st.session_state['raw_data_loaded'] = True
+            st.session_state['group_a_data'] = mock_data
+            st.rerun()
+        st.stop()
+
+# ==========================================
+# 3. PREPROCESSING & ERROR HANDLING
+# ==========================================
+# Tự động map tên cột để tránh KeyError
+col_mapping = {
+    'Nhà cung cấp': 'Vendor',
+    'Loại nhựa': 'Resin',
+    'Dung môi': 'Solvent_Type',
+    'Loại dung môi': 'Solvent_Type',
+    'Solvent': 'Solvent_Type'
+}
+group_a.rename(columns=col_mapping, inplace=True)
+
+# Gán giá trị mặc định nếu cột không tồn tại
+if 'Vendor' not in group_a.columns: group_a['Vendor'] = 'Unknown'
+if 'Resin' not in group_a.columns: group_a['Resin'] = 'Unknown'
+if 'Solvent_Type' not in group_a.columns: group_a['Solvent_Type'] = 'Unknown'
+
+group_a['Solvent_Type'] = group_a['Solvent_Type'].astype(str)
+
+# Map cột trọng lượng và độ nhớt
+paint_weight = '塗料重量'
+solvent_weight = '添加重量'
+visc_before = '黏度(秒)'
+visc_after = '黏度(秒)_1'
+
+# Loại bỏ các dòng thiếu dữ liệu cốt lõi
+df = group_a.dropna(subset=[paint_weight, solvent_weight]).copy()
+for col in [paint_weight, solvent_weight]:
+    df[col] = pd.to_numeric(df[col], errors='coerce')
+df = df.dropna(subset=[paint_weight, solvent_weight])
+
+# Tích hợp logic tính Delta_V từ code gốc của bạn
+if 'Delta_V' in df.columns:
+    df['Viscosity_Reduction'] = pd.to_numeric(df['Delta_V'], errors='coerce')
+elif visc_before in df.columns and visc_after in df.columns:
+    df[visc_before] = pd.to_numeric(df[visc_before], errors='coerce')
+    df[visc_after] = pd.to_numeric(df[visc_after], errors='coerce')
+    df['Viscosity_Reduction'] = df[visc_before] - df[visc_after]
+else:
+    st.error("🚨 Missing Viscosity data (Delta_V or Before/After Viscosity columns).")
     st.stop()
 
-group_a = st.session_state['group_a_data'].copy()
-rejected_data = st.session_state['rejected_data'].copy()
+# Filter valid data (Paint > 0, Solvent > 0, Reduction > 0)
+df = df[(df[paint_weight] > 0) & (df[solvent_weight] > 0) & (df['Viscosity_Reduction'] > 0)]
 
-# Global calculations for Sensitivity
-group_a['Solvent_Ratio_Percent'] = (group_a['添加重量'] / group_a['塗料重量']) * 100
-group_a['Sensitivity'] = group_a['Delta_V'] / (group_a['Solvent_Ratio_Percent'].replace(0, 1))
+# Tính toán Sensitivity (Dựa trên logic code gốc của bạn: Solvent % / Delta_V)
+df['Solvent_Ratio_Percent'] = (df[solvent_weight] / df[paint_weight]) * 100
+df['Pct_Per_Sec'] = df['Solvent_Ratio_Percent'] / df['Viscosity_Reduction']
 
-st.title("📊 Executive Summary")
-st.markdown("---")
 
-# --- 2. KPI METRICS ---
-st.subheader("💡 Key Performance Indicators")
-col1, col2, col3, col4 = st.columns(4)
+# ==========================================
+# 4. HEADER & FILTERS
+# ==========================================
+st.markdown("<div class='main-title'>SOLVENT FLOW INTELLIGENCE</div>", unsafe_allow_html=True)
+st.markdown("<div class='sub-title'>Interactive Mind Map: Supplier ➔ Resin ➔ Solvent Relationship</div>", unsafe_allow_html=True)
 
-with col1:
-    st.metric(label="Total Valid Batches", value=f"{len(group_a):,} batches")
-with col2:
-    st.metric(label="Total Paint Used", value=f"{group_a['塗料重量'].sum():,.1f} kg")
-with col3:
-    st.metric(label="Avg Solvent Ratio", value=f"{(group_a['Solvent_Ratio_Percent'].mean()):.2f} %")
-with col4:
-    st.metric(label="Data Errors (Rejected)", value=f"{len(rejected_data)} rows")
+c_filt1, c_filt2, c_filt3, c_spacer = st.columns([2, 2, 2, 4])
 
-st.markdown("---")
+with c_filt1: 
+    selected_vendor = st.selectbox("Supplier", ["All"] + list(df['Vendor'].unique()))
+with c_filt2: 
+    resins_avail = df[df['Vendor'] == selected_vendor]['Resin'].unique() if selected_vendor != 'All' else df['Resin'].unique()
+    selected_resin = st.selectbox("Resin Type", ["All"] + list(resins_avail))
+with c_filt3: 
+    mask_s = pd.Series(True, index=df.index)
+    if selected_vendor != 'All': mask_s &= (df['Vendor'] == selected_vendor)
+    if selected_resin != 'All': mask_s &= (df['Resin'] == selected_resin)
+    solvs_avail = df[mask_s]['Solvent_Type'].unique()
+    selected_solvent = st.selectbox("Solvent Type", ["All"] + list(solvs_avail))
 
-# --- 3. HEATMAP ANALYSIS (MULTI-DIMENSIONAL) ---
-st.subheader("🌡️ Process Sensitivity Heatmap")
+# Apply Filters
+filtered_df = df.copy()
+if selected_vendor != 'All': filtered_df = filtered_df[filtered_df['Vendor'] == selected_vendor]
+if selected_resin != 'All': filtered_df = filtered_df[filtered_df['Resin'] == selected_resin]
+if selected_solvent != 'All': filtered_df = filtered_df[filtered_df['Solvent_Type'] == selected_solvent]
 
-# Filters
-unique_resins = group_a['Resin'].unique()
-unique_vendors = group_a['Vendor'].unique()
+st.write("") # Spacer
 
-col_f1, col_f2 = st.columns(2)
-with col_f1:
-    selected_resin = st.selectbox("Filter Heatmap by Resin", unique_resins, index=0)
-with col_f2:
-    selected_vendors = st.multiselect("Filter Heatmap by Vendor", unique_vendors, default=unique_vendors)
-
-# Filter data
-filtered_data = group_a[
-    (group_a['Resin'] == selected_resin) & 
-    (group_a['Vendor'].isin(selected_vendors))
-].copy()
-
-if not filtered_data.empty:
-    tab_formula, tab_env = st.tabs(["🧪 Optimal Formula (Viscosity vs Solvent)", "🌤️ Environmental Impact (Temp vs Humidity)"])
-    
-    # ==========================================
-    # TAB 1: OPTIMAL FORMULA (VISCOSITY VS SOLVENT)
-    # ==========================================
-    with tab_formula:
-        # Manual Bins: Define clean, readable intervals
-        solvent_bins = [0, 2, 4, 6, 8, 10, 12, 15, 20]
-        viscosity_bins = [50, 70, 90, 110, 130, 150, 170, 190, 210, 250]
-
-        filtered_data['Solvent_Bin'] = pd.cut(filtered_data['Solvent_Ratio_Percent'], bins=solvent_bins)
-        filtered_data['Initial_V_Bin'] = pd.cut(filtered_data['黏度(秒)'], bins=viscosity_bins)
-
-        heatmap_data = filtered_data.groupby(['Initial_V_Bin', 'Solvent_Bin'], observed=False)['Sensitivity'].mean().reset_index()
-        pivot_table = heatmap_data.pivot(index='Initial_V_Bin', columns='Solvent_Bin', values='Sensitivity')
-
-        correct_x_order = [str(col) for col in pivot_table.columns]
-        correct_y_order = [str(idx) for idx in pivot_table.index]
-
-        pivot_table.index = pivot_table.index.astype(str)
-        pivot_table.columns = pivot_table.columns.astype(str)
-
-        fig_heatmap = px.imshow(
-            pivot_table, text_auto=".1f", aspect="auto", color_continuous_scale='RdYlGn',
-            labels=dict(x="Solvent Ratio (%)", y="Initial Viscosity (s)", color="Sensitivity"),
-            title=f"Efficiency based on Initial Viscosity ({selected_resin})"
-        )
-        fig_heatmap.update_xaxes(categoryorder='array', categoryarray=correct_x_order)
-        fig_heatmap.update_yaxes(categoryorder='array', categoryarray=correct_y_order)
-
-        st.plotly_chart(fig_heatmap, use_container_width=True)
-        
-        st.info("""
-        **SOP Calculation Guide:**
-        1. Measure the actual initial viscosity of the current batch.
-        2. Locate the deepest green cell (highest sensitivity) for that viscosity tier on the heatmap.
-        3. Determine the target Solvent Ratio (%) from the horizontal axis.
-        
-        **Formula:** **Required Solvent (kg) = Paint Weight (kg) × Target Solvent Ratio (%)**
-        """)
-
-        with st.expander("🧮 Quick Calculator", expanded=False):
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                paint_weight = st.number_input("1. Paint Weight (kg)", min_value=0.0, value=200.0, step=10.0)
-            with c2:
-                optimal_ratio = st.number_input("2. Target Ratio (%)", min_value=0.0, value=7.0, step=0.5)
-            with c3:
-                required_solvent = paint_weight * (optimal_ratio / 100)
-                st.success(f"**Required Solvent:**\n### {required_solvent:.2f} kg")
-
-    # ==========================================
-    # TAB 2: ENVIRONMENTAL IMPACT (TEMP VS HUMIDITY)
-    # ==========================================
-    with tab_env:
-        # Update these column names if your dataset uses different headers for temperature and humidity
-        temp_col = '溫度' 
-        hum_col = '濕度'
-        
-        if temp_col in filtered_data.columns and hum_col in filtered_data.columns:
-            temp_bins = [15, 20, 25, 30, 35, 40]
-            hum_bins = [40, 50, 60, 70, 80, 90, 100]
-
-            filtered_data['Temp_Bin'] = pd.cut(filtered_data[temp_col], bins=temp_bins)
-            filtered_data['Hum_Bin'] = pd.cut(filtered_data[hum_col], bins=hum_bins)
-
-            heatmap_env = filtered_data.groupby(['Hum_Bin', 'Temp_Bin'], observed=False)['Sensitivity'].mean().reset_index()
-            pivot_env = heatmap_env.pivot(index='Hum_Bin', columns='Temp_Bin', values='Sensitivity')
-
-            env_x_order = [str(col) for col in pivot_env.columns]
-            env_y_order = [str(idx) for idx in pivot_env.index]
-
-            pivot_env.index = pivot_env.index.astype(str)
-            pivot_env.columns = pivot_env.columns.astype(str)
-
-            fig_env = px.imshow(
-                pivot_env, text_auto=".1f", aspect="auto", color_continuous_scale='RdYlGn',
-                labels=dict(x="Temperature (°C)", y="Humidity (%)", color="Sensitivity"),
-                title=f"Environmental Impact on Solvent Efficiency ({selected_resin})"
-            )
-            fig_env.update_xaxes(categoryorder='array', categoryarray=env_x_order)
-            fig_env.update_yaxes(categoryorder='array', categoryarray=env_y_order)
-
-            st.plotly_chart(fig_env, use_container_width=True)
-            
-            st.caption("💡 **Observation:** Watch for low sensitivity (red zones) at extreme temperatures, as rapid solvent evaporation may occur before viscosity is reduced.")
-        else:
-            st.error(f"Environmental columns ('{temp_col}' or '{hum_col}') not found in the dataset. Please check your column headers.")
-
+# ==========================================
+# 5. DYNAMIC MIND MAP RENDERER
+# ==========================================
+if filtered_df.empty:
+    st.info("👈 No data available for the current selection. Please adjust your filters.")
 else:
-    st.warning("No data available for the selected filters.")
-
-st.markdown("---")
-
-# --- 4. RESIN & VENDOR PERFORMANCE ANALYSIS ---
-st.markdown("---")
-st.subheader("📋 Resin & Vendor Performance Analysis")
-
-# Sử dụng bản sao dữ liệu gốc
-matrix_df = group_a.copy()
-
-# Cấu hình cột mã sơn
-paint_code_col = '塗料代碼' 
-
-# Hàm giải mã ứng dụng (Đúng logic chuẩn)
-def get_clean_application(code_str):
-    if not isinstance(code_str, str) or len(str(code_str).strip()) < 4:
-        return 'Unknown/Other'
-    code = str(code_str).strip().upper()
-    char_4 = code[3]
-    f_map = {
-        'B': 'Anti-Bacteria', 'C': 'High-Corrosion Resistance', 'D': 'Anti-Dust', 
-        'E': 'Anti-Electrostatics', 'F': 'High Formability', 'G': 'General Usage', 
-        'H': 'Thermal Insulation', 'K': 'Anti-Stain/Grease', 'L': 'Whiteboard', 
-        'M': 'Mirror-like Paint', 'N': 'Neo Matt', 'P': 'Primer B', 
-        'R': 'Repaint System', 'S': 'Shutter', 'T': 'Texture Surface', 
-        'V': 'Variety', 'U': 'Ultra-High Formability', 'W': 'Wrinkle Paint', 'Z': 'Other'
-    }
-    return 'General Usage' if char_4.isdigit() else f_map.get(char_4, 'Unknown/Other')
-
-# Áp dụng giải mã
-if paint_code_col in matrix_df.columns:
-    matrix_df['Application'] = matrix_df[paint_code_col].apply(get_clean_application)
-else:
-    if 'Feature' in matrix_df.columns:
-        matrix_df['Application'] = matrix_df['Feature'].astype(str).apply(lambda x: x.split(' (')[0] if '(' in x else x)
-    else:
-        matrix_df['Application'] = 'Unknown/Other'
-
-# Đảm bảo có các cột cần thiết
-for col in ['Solvent_Type', '溫度', '濕度']:
-    if col not in matrix_df.columns: matrix_df[col] = 0
-
-# Perform grouping (Đã thêm 溫度 và 濕度 vào .agg)
-detailed_summary = matrix_df.groupby(['Resin', 'Vendor', 'Application', 'Solvent_Type']).agg({
-    '塗料批號': 'nunique',
-    '塗料重量': 'sum',
-    '添加重量': 'sum',
-    '黏度(秒)': 'mean',
-    '黏度(秒)_1': 'mean',
-    '溫度': 'mean',
-    '濕度': 'mean',
-    'Solvent_Ratio_Percent': 'mean',
-    'Sensitivity': 'mean'
-}).rename(columns={
-    '塗料批號': 'Batches',
-    '塗料重量': 'Total Paint (kg)',
-    '添加重量': 'Total Solvent (kg)',
-    '黏度(秒)': 'Initial V (s)',
-    '黏度(秒)_1': 'Final V (s)',
-    '溫度': 'Avg Temp (°C)',
-    '濕度': 'Avg Humidity (%)',
-    'Solvent_Ratio_Percent': 'Avg Solvent %',
-    'Sensitivity': 'Avg Sensitivity'
-})
-
-# Calculate Solvent % / 1s Drop
-detailed_summary['Solvent % / 1s Drop'] = detailed_summary['Avg Sensitivity'].apply(
-    lambda x: (1.0 / x) if x > 0 else 0
-)
-detailed_summary = detailed_summary.drop(columns=['Avg Sensitivity'])
-
-# Display
-st.dataframe(detailed_summary.style.format({
-    'Total Paint (kg)': '{:,.0f}',
-    'Total Solvent (kg)': '{:,.0f}',
-    'Initial V (s)': '{:.2f}',
-    'Final V (s)': '{:.2f}',
-    'Avg Temp (°C)': '{:.1f}',
-    'Avg Humidity (%)': '{:.1f}',
-    'Avg Solvent %': '{:.2f} %',
-    'Solvent % / 1s Drop': '{:.3f} %'
-}), use_container_width=True)
-
-st.caption("""
-**Metrics Definition:**
-* **Batches:** Number of valid mix events at the coil level.
-* **Solvent % / 1s Drop:** The average theoretical percentage of solvent required to reduce viscosity by exactly 1 second.
-* **Avg Temp/Humidity:** Average conditions per group.
-""")
-
-# --- 5. SMART RECOMMENDATION ENGINE (MULTI-FACTOR) ---
-st.markdown("---")
-st.subheader("🧠 Smart Recommendation Engine")
-st.caption("Calculates the Theoretical Value of solvent required to hit a specific target viscosity based on historical environmental data.")
-
-with st.container():
-    # User Inputs
-    col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
-    with col_m1:
-        curr_viscosity = st.number_input("Current Viscosity (s)", value=55.0, step=1.0)
-    with col_m2:
-        target_viscosity = st.number_input("Target Viscosity (s)", value=52.0, step=1.0)
-    with col_m3:
-        curr_temp = st.number_input("Temp (°C)", value=32.0, step=1.0)
-    with col_m4:
-        curr_humidity = st.number_input("Humidity (%)", value=85.0, step=5.0)
-    with col_m5:
-        coil_paint_qty = st.number_input("Coil Paint Weight (kg)", value=200.0, step=10.0)
-
-    # Logic Calculation
-    if target_viscosity >= curr_viscosity:
-        st.info("Target viscosity is higher than or equal to current viscosity. No solvent required.")
-    else:
-        viscosity_drop = curr_viscosity - target_viscosity
-        
-        # Base filter: Resin and Vendor
-        base_subset = group_a[
-            (group_a['Resin'] == selected_resin) &
-            (group_a['Vendor'].isin(selected_vendors))
-        ]
-        
-        # Define condition masks
-        visc_mask = (base_subset['黏度(秒)'] >= curr_viscosity - 15) & (base_subset['黏度(秒)'] <= curr_viscosity + 15)
-        
-        weather_mask = True
-        if '溫度' in base_subset.columns and '濕度' in base_subset.columns:
-            weather_mask = (base_subset['溫度'] >= curr_temp - 5) & (base_subset['溫度'] <= curr_temp + 5) & \
-                           (base_subset['濕度'] >= curr_humidity - 10) & (base_subset['濕度'] <= curr_humidity + 10)
-        
-        # --- FALLBACK ALGORITHM ---
-        # Attempt 1: Strict Match (Viscosity + Weather)
-        subset_strict = base_subset[visc_mask & weather_mask]
-        
-        # Attempt 2: Partial Match (Viscosity only)
-        subset_partial = base_subset[visc_mask]
-        
-        # Attempt 3: General Match (Resin/Vendor overall average)
-        subset_general = base_subset
-        
-        expected_sensitivity = 0
-        match_level = ""
-        
-        # Cascade through attempts to find valid historical data
-        if not subset_strict.empty and subset_strict['Sensitivity'].mean() > 0:
-            expected_sensitivity = subset_strict['Sensitivity'].mean()
-            match_level = "High (Matched Viscosity & Environment)"
-        elif not subset_partial.empty and subset_partial['Sensitivity'].mean() > 0:
-            expected_sensitivity = subset_partial['Sensitivity'].mean()
-            match_level = "Medium (Matched Viscosity only, ignoring environment)"
-        elif not subset_general.empty and subset_general['Sensitivity'].mean() > 0:
-            expected_sensitivity = subset_general['Sensitivity'].mean()
-            match_level = "Low (Based on overall Resin average)"
-            
-        # Final Output Generation
-        if expected_sensitivity > 0:
-            theoretical_ratio = viscosity_drop / expected_sensitivity
-            theoretical_solvent_kg = coil_paint_qty * (theoretical_ratio / 100)
-
-            st.success(f"""
-            ### 🎯 Theoretical Value to Add: {theoretical_solvent_kg:.2f} kg
-            
-            **Calculation Breakdown:**
-            * Required Viscosity Drop: **{viscosity_drop:.1f} s**
-            * Historical Sensitivity: **{expected_sensitivity:.2f} s reduction per 1% solvent**
-            * Theoretical Solvent Ratio: **{theoretical_ratio:.2f}%**
-            * Data Confidence: **{match_level}**
-            """)
-        else:
-            st.error("Unable to calculate Theoretical Value. Historical sensitivity data is invalid or missing.")
-            
-# --- 6. COMPREHENSIVE REFERENCE MATRIX (SOP LOOKUP) ---
-st.markdown("---")
-st.subheader("📚 SOP Coefficient Matrix (Coil-Level)")
-st.caption("A robust lookup table providing a standard 'Solvent Factor' for ALL resins and clean applications. Multiply this factor by your required viscosity drop to get the exact Theoretical Value of solvent.")
-
-with st.container():
-    c_ref1, c_ref2 = st.columns([1, 2])
-    with c_ref1:
-        ref_coil_weight = st.number_input("Standard Coil Paint Weight (kg)", value=200.0, step=10.0)
-
-    matrix_data = []
-    matrix_df = group_a.copy()
-
-    # Paint code column configuration
-    paint_code_col = '塗料代碼' 
+    # 1. Hub Data Aggregation
+    hub_title = selected_vendor if selected_vendor != 'All' else "All Suppliers"
+    total_paint_used = filtered_df[paint_weight].sum()
+    total_solvent_added = filtered_df[solvent_weight].sum()
     
-    def get_clean_application(code_str):
-        if not isinstance(code_str, str) or len(str(code_str).strip()) < 4:
-            return 'Unknown/Other'
-            
-        code = str(code_str).strip().upper()
-        char_4 = code[3]
+    avg_init_visc = filtered_df[visc_before].mean() if visc_before in filtered_df.columns else 0.0
+    avg_target_visc = filtered_df[visc_after].mean() if visc_after in filtered_df.columns else 0.0
+    
+    avg_pct_per_sec = filtered_df['Pct_Per_Sec'].mean()
+    if pd.isna(avg_pct_per_sec) or avg_pct_per_sec == float('inf'): avg_pct_per_sec = 0.0
+
+    # 2. Spoke Data Aggregation (Grouped by Resin)
+    spoke_data = []
+    for resin, group in filtered_df.groupby('Resin'):
+        top_solvent = group['Solvent_Type'].mode()[0] if not group['Solvent_Type'].empty else "Mixed"
+        r_paint = group[paint_weight].sum()
+        r_solvent = group[solvent_weight].sum()
+        r_pct = group['Pct_Per_Sec'].mean()
+        if pd.isna(r_pct) or r_pct == float('inf'): r_pct = 0.0
+        spoke_data.append({"resin": resin, "paint": r_paint, "solv_name": top_solvent, "solv_weight": r_solvent, "pct": r_pct})
+    
+    # Sort spokes by paint weight descending for better visualization
+    spoke_data = sorted(spoke_data, key=lambda x: x['paint'], reverse=True)
+    
+    # Split Spokes Left & Right
+    mid_idx = (len(spoke_data) + 1) // 2
+    left_spokes = spoke_data[:mid_idx]
+    right_spokes = spoke_data[mid_idx:]
+
+    # 3. HTML Builder for Spoke Cards
+    def build_spoke_card(data):
+        return f"""
+        <div class='mm-card'>
+            <div class='mm-card-header'>🧪 {data['resin']}</div>
+            <div class='mm-card-row'>⚖️ <b>{data['paint']:,.0f} kg</b> Paint, {data['solv_name']}</div>
+            <div class='mm-card-row'>💧 <b>{data['solv_weight']:,.1f} kg</b> Solvent</div>
+            <div class='mm-card-row'>📉 <span class='mm-highlight'>{data['pct']:.3f}%</span> Solvent / 1s</div>
+        </div>
+        """
+
+    left_spokes_html = "".join([build_spoke_card(d) for d in left_spokes])
+    right_spokes_html = "".join([build_spoke_card(d) for d in right_spokes])
+
+    # 4. SVG Dynamic Connections
+    svg_paths = ""
+    # Left connections
+    for i in range(len(left_spokes)):
+        y_percent = 20 + (60 / max(1, len(left_spokes) - 1)) * i if len(left_spokes) > 1 else 50
+        svg_paths += f'<path d="M 50 50 C 25 50, 25 {y_percent}, 0 {y_percent}" stroke="#3B82F6" stroke-width="4" fill="none" opacity="0.4"/>'
         
-        f_map = {
-            'B': 'Anti-Bacteria', 'C': 'High-Corrosion Resistance', 'D': 'Anti-Dust', 
-            'E': 'Anti-Electrostatics', 'F': 'High Formability', 'G': 'General Usage', 
-            'H': 'Thermal Insulation', 'K': 'Anti-Stain/Grease', 'L': 'Whiteboard', 
-            'M': 'Mirror-like Paint', 'N': 'Neo Matt', 'P': 'Primer B', 
-            'R': 'Repaint System', 'S': 'Shutter', 'T': 'Texture Surface', 
-            'V': 'Variety', 'U': 'Ultra-High Formability', 'W': 'Wrinkle Paint', 'Z': 'Other'
-        }
-        
-        if char_4.isdigit():
-            return 'General Usage'
+    # Right connections
+    for i in range(len(right_spokes)):
+        y_percent = 20 + (60 / max(1, len(right_spokes) - 1)) * i if len(right_spokes) > 1 else 50
+        svg_paths += f'<path d="M 50 50 C 75 50, 75 {y_percent}, 100 {y_percent}" stroke="#F97316" stroke-width="4" fill="none" opacity="0.4"/>'
+
+    # 5. Render Final Map
+    mindmap_html = f"""
+    <div class="mindmap-wrapper">
+        <svg style="position:absolute; top:0; left:0; width:100%; height:100%; z-index:1;" viewBox="0 0 100 100" preserveAspectRatio="none">
+            {svg_paths}
+        </svg>
+        <div class="mindmap-container">
+            <div class="mindmap-col">
+                {left_spokes_html}
+            </div>
             
-        return f_map.get(char_4, 'Unknown/Other')
-
-    if paint_code_col in matrix_df.columns:
-        matrix_df['Application'] = matrix_df[paint_code_col].apply(get_clean_application)
-    elif 'Feature' in matrix_df.columns:
-        # Strip out any legacy tail format text from the string if present
-        matrix_df['Application'] = matrix_df['Feature'].astype(str).apply(lambda x: x.split(' (')[0] if '(' in x else x)
-    else:
-        matrix_df['Application'] = 'Unknown/Other'
-
-    def generate_dynamic_bins(series):
-        if len(series) < 4:
-            return pd.cut(series, bins=1, precision=0)
-        try:
-            return pd.qcut(series, q=4, precision=0, duplicates='drop')
-        except ValueError:
-            return pd.cut(series, bins=4, precision=0)
-
-    matrix_df['Viscosity_Zone'] = matrix_df.groupby('Resin')['黏度(秒)'].transform(generate_dynamic_bins)
-
-    grouping_cols = ['Resin', 'Vendor', 'Application', 'Viscosity_Zone']
-    has_solvent_type = 'Solvent_Type' in matrix_df.columns
-    if has_solvent_type:
-        grouping_cols.insert(2, 'Solvent_Type')
-
-    target_viscosity_map = matrix_df.groupby(['Resin', 'Vendor', 'Application'])['黏度(秒)_1'].median().reset_index()
-    target_viscosity_map = target_viscosity_map.rename(columns={'黏度(秒)_1': 'Typical_Target'})
-
-    sensitivity_map = matrix_df.groupby(grouping_cols, observed=False)['Sensitivity'].mean().reset_index()
-    sensitivity_map = sensitivity_map[sensitivity_map['Sensitivity'] > 0]
-
-    sop_grouped = pd.merge(sensitivity_map, target_viscosity_map, on=['Resin', 'Vendor', 'Application'], how='inner')
-
-    for _, row in sop_grouped.iterrows():
-        sens = row['Sensitivity']
-        theo_ratio_per_sec = 1.0 / sens
-        factor_kg_per_sec = ref_coil_weight * (theo_ratio_per_sec / 100.0)
-
-        record = {
-            'Resin': row['Resin'],
-            'Vendor': row['Vendor'],
-            'Application': row['Application'],
-            'Current Viscosity Zone': str(row['Viscosity_Zone']),
-            'Typical Target (s)': round(row['Typical_Target'], 1),
-            'Sensitivity Applied (s/%)': round(sens, 2),
-            'Solvent Factor (kg / 1s drop)': round(factor_kg_per_sec, 3)
-        }
-        if has_solvent_type:
-            record['Solvent Type'] = row['Solvent_Type']
-
-        matrix_data.append(record)
-
-    df_matrix = pd.DataFrame(matrix_data)
-
-    if not df_matrix.empty:
-        cols = df_matrix.columns.tolist()
-        if has_solvent_type:
-            cols.insert(2, cols.pop(cols.index('Solvent Type')))
-        df_matrix = df_matrix[cols]
-
-        df_matrix = df_matrix.sort_values(by=['Resin', 'Vendor', 'Application', 'Current Viscosity Zone'])
-
-        st.dataframe(df_matrix.style.format({
-            'Typical Target (s)': '{:.1f}',
-            'Sensitivity Applied (s/%)': '{:.2f}',
-            'Solvent Factor (kg / 1s drop)': '{:.3f}'
-        }), use_container_width=True)
-
-        st.info("""
-        **SOP Execution Guide:**
-        1. Measure the coil's current viscosity.
-        2. Calculate the drop: `(Current Viscosity - Typical Target)`.
-        3. Match the current viscosity to the correct `Viscosity Zone` row.
-        4. **Theoretical Value (kg) = Required Drop × Solvent Factor**
-        """)
-
-        csv = df_matrix.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Download Coefficient Matrix as CSV",
-            data=csv,
-            file_name='SOP_Coefficient_Matrix_Clean.csv',
-            mime='text/csv',
-        )
-    else:
-        st.warning("Not enough valid historical data to generate the SOP Coefficient Matrix.")
+            <div class="mindmap-center">
+                <div class="mm-hub">
+                    <div class="mm-hub-header">🏭 {hub_title}</div>
+                    <div class="mm-hub-body">
+                        <div class="mm-hub-stat"><b>{total_paint_used:,.0f} kg</b> Paint Used</div>
+                        <div class="mm-hub-stat">Avg Initial Visc: <b>{avg_init_visc:.1f} s</b></div>
+                        <div class="mm-hub-stat">Avg Target Visc: <b>{avg_target_visc:.1f} s</b></div>
+                        <div class="mm-hub-stat"><b>{total_solvent_added:,.1f} kg</b> Solvent Added</div>
+                        <div class="mm-hub-stat" style="font-style:italic; color:#0F172A; font-weight:700;">
+                            {avg_pct_per_sec:.3f}% Solvent / 1s Drop
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="mindmap-col">
+                {right_spokes_html}
+            </div>
+        </div>
+    </div>
+    """
+    st.markdown(mindmap_html, unsafe_allow_html=True)
