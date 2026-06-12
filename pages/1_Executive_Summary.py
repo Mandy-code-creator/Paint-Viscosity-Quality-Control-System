@@ -86,54 +86,58 @@ else:
         st.stop()
 
 # ==========================================
-# 3. PREPROCESSING & ERROR HANDLING
 # ==========================================
-# Tự động map tên cột để tránh KeyError
+# 3. ROBUST DATA PREPROCESSING (SỬ DỤNG DANH SÁCH CỘT CỦA BẠN)
+# ==========================================
+
+# 1. Bảng ánh xạ linh hoạt (Mapping)
+# Dù bạn đặt tên cột thế nào, hệ thống cũng tự nhận diện được
 col_mapping = {
     'Nhà cung cấp': 'Vendor',
     'Loại nhựa': 'Resin',
     'Dung môi': 'Solvent_Type',
     'Loại dung môi': 'Solvent_Type',
-    'Solvent': 'Solvent_Type'
+    'Solvent': 'Solvent_Type',
+    'Mã sơn': '塗料代碼',
+    'Feature': '塗料代碼'
 }
 group_a.rename(columns=col_mapping, inplace=True)
 
-# Gán giá trị mặc định nếu cột không tồn tại
-if 'Vendor' not in group_a.columns: group_a['Vendor'] = 'Unknown'
-if 'Resin' not in group_a.columns: group_a['Resin'] = 'Unknown'
-if 'Solvent_Type' not in group_a.columns: group_a['Solvent_Type'] = 'Unknown'
+# 2. Xử lý dữ liệu an toàn
+required_cols = ['塗料重量', '添加重量', '黏度(秒)', '黏度(秒)_1']
 
-group_a['Solvent_Type'] = group_a['Solvent_Type'].astype(str)
-
-# Map cột trọng lượng và độ nhớt
-paint_weight = '塗料重量'
-solvent_weight = '添加重量'
-visc_before = '黏度(秒)'
-visc_after = '黏度(秒)_1'
-
-# Loại bỏ các dòng thiếu dữ liệu cốt lõi
-df = group_a.dropna(subset=[paint_weight, solvent_weight]).copy()
-for col in [paint_weight, solvent_weight]:
-    df[col] = pd.to_numeric(df[col], errors='coerce')
-df = df.dropna(subset=[paint_weight, solvent_weight])
-
-# Tích hợp logic tính Delta_V từ code gốc của bạn
-if 'Delta_V' in df.columns:
-    df['Viscosity_Reduction'] = pd.to_numeric(df['Delta_V'], errors='coerce')
-elif visc_before in df.columns and visc_after in df.columns:
-    df[visc_before] = pd.to_numeric(df[visc_before], errors='coerce')
-    df[visc_after] = pd.to_numeric(df[visc_after], errors='coerce')
-    df['Viscosity_Reduction'] = df[visc_before] - df[visc_after]
-else:
-    st.error("🚨 Missing Viscosity data (Delta_V or Before/After Viscosity columns).")
+# Kiểm tra nếu thiếu cột bắt buộc
+missing = [c for c in required_cols if c not in group_a.columns]
+if missing:
+    st.error(f"🚨 Missing columns: {missing}. Please check your file headers.")
     st.stop()
 
-# Filter valid data (Paint > 0, Solvent > 0, Reduction > 0)
-df = df[(df[paint_weight] > 0) & (df[solvent_weight] > 0) & (df['Viscosity_Reduction'] > 0)]
+# Chuyển đổi dữ liệu sang dạng số
+for col in required_cols:
+    group_a[col] = pd.to_numeric(group_a[col], errors='coerce')
 
-# Tính toán Sensitivity (Dựa trên logic code gốc của bạn: Solvent % / Delta_V)
-df['Solvent_Ratio_Percent'] = (df[solvent_weight] / df[paint_weight]) * 100
-df['Pct_Per_Sec'] = df['Solvent_Ratio_Percent'] / df['Viscosity_Reduction']
+# Tính toán Delta_V nếu file chưa có
+if 'Delta_V' not in group_a.columns:
+    group_a['Delta_V'] = group_a['黏度(秒)'] - group_a['黏度(秒)_1']
+
+# Lọc dữ liệu hợp lệ
+df = group_a.dropna(subset=required_cols).copy()
+df = df[(df['塗料重量'] > 0) & (df['添加重量'] > 0) & (df['Delta_V'] > 0)]
+
+# Tính Sensitivity (dựa trên logic code của bạn)
+# Tỷ lệ % dung môi
+df['Solvent_Ratio_Percent'] = (df['添加重量'] / df['塗料重量']) * 100
+# Độ nhạy (Sensitivity): Delta_V chia cho Tỷ lệ %
+df['Sensitivity'] = df['Delta_V'] / df['Solvent_Ratio_Percent'].replace(0, 1)
+
+# Gán giá trị mặc định cho cột phân loại nếu thiếu
+for col in ['Vendor', 'Resin', 'Solvent_Type']:
+    if col not in df.columns:
+        df[col] = 'Unknown'
+    df[col] = df[col].astype(str)
+
+# Lưu lại vào session để các phần sau của app sử dụng
+st.session_state['group_a_data'] = df
 
 
 # ==========================================
