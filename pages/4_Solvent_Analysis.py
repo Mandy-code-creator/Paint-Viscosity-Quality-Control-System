@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import graphviz
-
+import python-docx
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Solvent Hierarchy", page_icon="🌳", layout="wide")
 
