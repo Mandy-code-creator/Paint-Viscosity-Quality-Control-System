@@ -1,19 +1,32 @@
 import streamlit as st
-import plotly.express as px
 import pandas as pd
-import graphviz
+import numpy as np
 
-
-st.set_page_config(page_title="Solvent Analysis", page_icon="💧", layout="wide")
-
-st.title("💧 Solvent Usage & Ratio Analysis")
-st.markdown("Evaluate solvent consumption patterns, popular solvent types, and average mixing ratios across different paint configurations.")
-
-# 1. Global State Check
+# --- 1. Global State Check & MOCK DATA (Chế độ test) ---
+# Nếu đang code và chưa có dữ liệu, tự động tạo dữ liệu giả để test UI
 if not st.session_state.get('raw_data_loaded', False):
-    st.warning("⚠️ No data loaded. Please go to the Main App page and upload your data file first.")
-    st.stop()
+    st.info("🛠️ [Dev Mode] Đang sử dụng dữ liệu giả (Mock Data) để test giao diện...")
+    
+    # Tạo dữ liệu giả với các cột cần thiết
+    mock_data = pd.DataFrame({
+        'Vendor': np.random.choice(['Yungchi', 'Nippon', 'Kansai'], 100),
+        'Resin': np.random.choice(['PE', 'PU', 'PVDF', 'SMP', 'EPOXY'], 100),
+        'Feature': np.random.choice(['Top', 'Primer', 'Back'], 100),
+        'Solvent_Type': np.random.choice(['5203', 'Isophorone', '4160', 'BCS'], 100),
+        '塗料重量': np.random.randint(200, 800, 100), # Trọng lượng sơn
+        '添加重量': np.random.randint(10, 50, 100),   # Trọng lượng dung môi
+        '黏度(秒)': np.random.randint(35, 50, 100),   # Độ nhớt ban đầu
+        '黏度(秒)_1': np.random.randint(25, 30, 100), # Độ nhớt mục tiêu
+    })
+    
+    # Tính toán các cột phụ trợ
+    mock_data['Solvent_Ratio'] = mock_data['添加重量'] / mock_data['塗料重量']
+    
+    # Ép vào session_state
+    st.session_state['group_a_data'] = mock_data
+    st.session_state['raw_data_loaded'] = True
 
+# Lấy dữ liệu ra để dùng
 group_a = st.session_state['group_a_data'].copy()
 
 # 2. Sidebar Filters
