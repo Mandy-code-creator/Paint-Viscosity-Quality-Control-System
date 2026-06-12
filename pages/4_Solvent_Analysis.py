@@ -30,13 +30,13 @@ for col in ['Vendor', 'Resin', 'Solvent_Type']:
     if col not in group_a.columns:
         group_a[col] = 'Unknown'
 
-# Data Filtering (Assuming Coil level calculation based on system defaults)
+# Data Filtering
 vendor_list = sorted(group_a['Vendor'].dropna().unique().tolist())
 selected_vendor = st.sidebar.selectbox("🏭 Select Vendor:", vendor_list)
 
 filtered_df = group_a[group_a['Vendor'] == selected_vendor].copy()
 
-# Optional: Filter for Grade A-B if the column exists in your dataset
+# Filter for Grade A-B if the column exists in your dataset
 if 'Grade' in filtered_df.columns:
     filtered_df = filtered_df[filtered_df['Grade'].isin(['A', 'B', 'A-B'])]
 
@@ -72,7 +72,6 @@ if tree_summary.empty:
 
 # --- 4. RENDER GRAPHVIZ (LEFT-TO-RIGHT CLEAN LAYOUT) ---
 graph = graphviz.Digraph(engine='dot')
-# Using curved splines, optimized spacing, and transparent background
 graph.attr(rankdir='LR', splines='curved', nodesep='0.4', ranksep='1.5', bgcolor='transparent') 
 graph.attr('node', shape='none', margin='0', fontname='Arial')
 graph.attr('edge', color='#A0A0A0', penwidth='1.5', arrowsize='0.8')
@@ -83,12 +82,10 @@ total_vendor_solv = tree_summary['Total_Solvent'].sum()
 avg_delta_v = filtered_df['Delta_V'].mean() if not filtered_df.empty else 1
 reduction_pct = ((total_vendor_solv / total_vendor_paint) * 100) / avg_delta_v if total_vendor_paint > 0 else 0
 
-# Tự động tìm cột thời gian để trích xuất Data Period
 date_cols = [col for col in filtered_df.columns if 'date' in col.lower() or '日期' in col.lower() or 'time' in col.lower()]
 if date_cols:
     date_col = date_cols[0]
     try:
-        # Định dạng hiển thị thời gian (ví dụ: Jan 2026 - Apr 2026)
         min_date = pd.to_datetime(filtered_df[date_col]).min().strftime('%b %Y')
         max_date = pd.to_datetime(filtered_df[date_col]).max().strftime('%b %Y')
         date_range_str = f"{min_date} - {max_date}" if min_date != max_date else min_date
@@ -97,7 +94,7 @@ if date_cols:
 else:
     date_range_str = "All Available Data"
 
-# Cấu trúc Node trung tâm với màu Deep Sky Blue và bổ sung Data Period
+# Styled with Deep Sky Blue (#00BFFF)
 center_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="12">
     <TR><TD BGCOLOR="#00BFFF" STYLE="ROUNDED">
         <FONT COLOR="white" POINT-SIZE="20"><B>🏭 {selected_vendor}</B></FONT>
@@ -116,7 +113,6 @@ center_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="
 graph.node('Root', f'<{center_html}>')
 
 # --- 4.2 CHILD NODES (RESIN & SOLVENT FLOW) ---
-# Group by Resin first to create the middle layer
 unique_resins = tree_summary['Resin'].unique()
 
 for resin in unique_resins:
@@ -124,7 +120,6 @@ for resin in unique_resins:
     resin_data = tree_summary[tree_summary['Resin'] == resin]
     resin_paint_sum = resin_data['Total_Paint'].sum()
     
-    # Resin Node (Middle Layer)
     resin_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="8">
         <TR><TD BGCOLOR="#E6F2FF" STYLE="ROUNDED" BORDER="1" COLOR="#00BFFF">
             <FONT COLOR="#005A9E" POINT-SIZE="15"><B>🧪 {resin}</B></FONT><BR/>
@@ -134,7 +129,6 @@ for resin in unique_resins:
     graph.node(resin_id, f'<{resin_html}>')
     graph.edge('Root', resin_id)
     
-    # Solvent Nodes (Leaf Layer)
     for idx, row in resin_data.iterrows():
         solvent = row['Solvent_Type']
         leaf_id = f"leaf_{resin}_{solvent}_{idx}"
@@ -150,52 +144,25 @@ for resin in unique_resins:
         graph.node(leaf_id, f'<{leaf_html}>')
         graph.edge(resin_id, leaf_id)
 
-# --- 5. RENDER ---
-st.graphviz_chart(graph, use_container_width=True)
-try:
-    # 1. Capture Graphviz chart as PNG image
-    png_data = graph.pipe(format='png')
-    image_stream = io.BytesIO(png_data)
-    
-    # 2. Create Word Document
-    doc = Document()
-    doc.add_heading(f'Solvent Consumption & Viscosity Control: {selected_vendor}', 0)
-    
-    doc.add_paragraph('Report Level: Coil-Level Data')
-    doc.add_paragraph('Quality Filter: Grade A-B and above')
-    
-    # 3. Insert the chart image into the document
-    doc.add_picture(image_stream, width=Inches(6.5))
-    
-    # 4. Convert document to Bytes for Streamlit Download
-    doc_io = io.BytesIO()
-    doc.save(doc_io)
-    doc_io.seek(0)
-    
-    # --- 5. RENDER ---
+# --- 5. RENDER & EXPORT ---
 st.graphviz_chart(graph, use_container_width=True)
 
 try:
-    # 1. Capture Graphviz chart as PNG image
     png_data = graph.pipe(format='png')
     image_stream = io.BytesIO(png_data)
     
-    # 2. Create Word Document
     doc = Document()
     doc.add_heading(f'Solvent Consumption & Viscosity Control: {selected_vendor}', 0)
     
     doc.add_paragraph('Report Level: Coil-Level Data')
     doc.add_paragraph('Quality Filter: Grade A-B and above')
     
-    # 3. Insert the chart image into the document
     doc.add_picture(image_stream, width=Inches(6.5))
     
-    # 4. Convert document to Bytes for Streamlit Download
     doc_io = io.BytesIO()
     doc.save(doc_io)
     doc_io.seek(0)
     
-    # 5. Render Download Button in UI
     col_empty, col_btn = st.columns([4, 1])
     with col_btn:
         st.download_button(
