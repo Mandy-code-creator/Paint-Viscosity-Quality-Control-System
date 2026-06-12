@@ -4,14 +4,19 @@ import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
 
-# --- Page Configuration ---
+# ==========================================
+# SECTION 0: PAGE CONFIGURATION
+# ==========================================
 st.set_page_config(page_title="Solvent Intelligence Dashboard", page_icon="🧠", layout="wide")
 
 st.title("🧠 Solvent Adjustment Intelligence Dashboard")
 st.markdown("Decision Support System (DSS) based on historical data. Standardized solvent usage ratio unit: **g solvent / kg paint / 1 viscosity second drop**.")
 st.markdown("---")
 
-# --- 1. State Check & Data Loading ---
+
+# ==========================================
+# SECTION 1: STATE CHECK & DATA LOADING
+# ==========================================
 if not st.session_state.get('raw_data_loaded', False):
     st.warning("⚠️ No data loaded. Please upload your data file first.")
     st.stop()
@@ -19,18 +24,21 @@ if not st.session_state.get('raw_data_loaded', False):
 group_a = st.session_state['group_a_data'].copy()
 group_a['Solvent_Type'] = group_a['Solvent_Type'].astype(str)
 
-# Ensure Vendor column exists
+# Ensure Vendor column exists gracefully
 if 'Vendor' not in group_a.columns:
     group_a['Vendor'] = 'Unknown'
 
-# --- 2. Preprocessing & New Logic Calculation (g/kg/s) ---
+
+# ==========================================
+# SECTION 2: PREPROCESSING & DATA CLEANING
+# ==========================================
 visc_before = '黏度(秒)'      # Initial Viscosity
 visc_after = '黏度(秒)_1'    # Final Viscosity
 paint_weight = '塗料重量'     # Paint Weight (kg)
 solvent_weight = '添加重量'   # Solvent Weight (kg)
 
 if all(col in group_a.columns for col in [visc_before, visc_after, paint_weight, solvent_weight]):
-    # Drop empty rows
+    # Drop empty rows for critical columns
     df = group_a.dropna(subset=[visc_before, visc_after, paint_weight, solvent_weight]).copy()
     
     # Cast to numeric types
@@ -56,16 +64,20 @@ else:
     st.error("⚠️ Missing required data columns (Viscosity, Paint Weight, Solvent Weight).")
     st.stop()
 
-# --- 3. UI LAYOUT (60% Left - 40% Right) ---
-col_left, col_right = st.columns([6, 4], gap="large")
 
 # ==========================================
-# PART 1 & 2: FILTERS & SANKEY DIAGRAM (LEFT)
+# SECTION 3: MASTER UI LAYOUT DEFINITION
+# ==========================================
+# 60% Left for Visuals, 40% Right for Actionable Insights
+col_left, col_right = st.columns([6, 4], gap="large")
+
+
+# ==========================================
+# SECTION 4: LEFT COLUMN - FILTERS
 # ==========================================
 with col_left:
     st.subheader("🌊 Material & Process Flow (Sankey)")
     
-    # Filters
     c_f1, c_f2, c_f3 = st.columns(3)
     with c_f1:
         selected_vendor = st.selectbox("1. Supplier (Vendor)", options=['All'] + list(df['Vendor'].unique()))
@@ -75,7 +87,6 @@ with col_left:
     with c_f3:
         # Build the filter mask step-by-step to avoid Pandas KeyError
         mask = pd.Series(True, index=df.index)
-        
         if selected_vendor != 'All':
             mask &= (df['Vendor'] == selected_vendor)
         if selected_resin != 'All':
@@ -84,41 +95,39 @@ with col_left:
         solvents_available = df[mask]['Solvent_Type'].unique()
         selected_solvent = st.selectbox("3. Solvent Type", options=['All'] + list(solvents_available))
 
-    # --- Draw Sankey Diagram ---
+
+# ==========================================
+# SECTION 5: LEFT COLUMN - SANKEY DIAGRAM
+# ==========================================
     sankey_df = df.copy()
     
-    # Create Nodes list
+    # Extract unique entities
     vendors = list(sankey_df['Vendor'].unique())
     resins = list(sankey_df['Resin'].unique())
     solvents = list(sankey_df['Solvent_Type'].unique())
     
-    # Add prefixes to avoid overlapping node names (e.g., if Vendor and Resin have the same name)
+    # Add prefixes to nodes to prevent mapping collisions
     node_labels = [f"🏭 {v}" for v in vendors] + [f"🧪 {r}" for r in resins] + [f"💧 {s}" for s in solvents]
     
-    # Map names to Indices
+    # Map entity names to Sankey indices
     vendor_idx = {v: i for i, v in enumerate(vendors)}
     resin_idx = {r: i + len(vendors) for i, r in enumerate(resins)}
     solvent_idx = {s: i + len(vendors) + len(resins) for i, s in enumerate(solvents)}
     
-    # Create Links
-    source = []
-    target = []
-    value = []
-    link_colors = []
+    source, target, value, link_colors = [], [], [], []
     
-    # Link 1: Vendor -> Resin (Based on Batch Count)
+    # Link Group 1: Vendor -> Resin
     v_r_group = sankey_df.groupby(['Vendor', 'Resin']).size().reset_index(name='count')
     for _, row in v_r_group.iterrows():
         source.append(vendor_idx[row['Vendor']])
         target.append(resin_idx[row['Resin']])
         value.append(row['count'])
-        # Highlight link if selected in filters
         if (selected_vendor in ['All', row['Vendor']]) and (selected_resin in ['All', row['Resin']]):
             link_colors.append("rgba(31, 119, 180, 0.5)") # Highlight Blue
         else:
             link_colors.append("rgba(200, 200, 200, 0.2)") # Faded Gray
 
-    # Link 2: Resin -> Solvent
+    # Link Group 2: Resin -> Solvent
     r_s_group = sankey_df.groupby(['Resin', 'Solvent_Type']).size().reset_index(name='count')
     for _, row in r_s_group.iterrows():
         source.append(resin_idx[row['Resin']])
@@ -129,25 +138,33 @@ with col_left:
         else:
             link_colors.append("rgba(200, 200, 200, 0.2)")
 
+    # Build and style Sankey
     fig_sankey = go.Figure(data=[go.Sankey(
         node=dict(
-            pad=20, thickness=30,
-            line=dict(color="black", width=0.5),
+            pad=20, 
+            thickness=30,
+            line=dict(color="white", width=1.5),
             label=node_labels,
-            color="slategray"
+            color="#2C3E50" # Deep blue-gray nodes
         ),
-        link=dict(
-            source=source, target=target, value=value, color=link_colors
-        )
+        link=dict(source=source, target=target, value=value, color=link_colors)
     )])
-    fig_sankey.update_layout(height=600, font_size=12, margin=dict(l=0, r=0, t=30, b=0))
+    
+    fig_sankey.update_layout(
+        height=600, 
+        font=dict(size=13, color="#111827", family="Arial, sans-serif"), 
+        margin=dict(l=10, r=150, t=40, b=20), # r=150 prevents text cutoff
+        plot_bgcolor='white',
+        paper_bgcolor='white'
+    )
     st.plotly_chart(fig_sankey, use_container_width=True)
 
+
 # ==========================================
-# PART 3 & 4: REFERENCE & PREDICTION (RIGHT)
+# SECTION 6: RIGHT COLUMN - DATA AGGREGATION
 # ==========================================
 with col_right:
-    # Filter data based on selection
+    # Filter dataset strictly based on selected options
     filtered_df = df.copy()
     if selected_vendor != 'All': filtered_df = filtered_df[filtered_df['Vendor'] == selected_vendor]
     if selected_resin != 'All': filtered_df = filtered_df[filtered_df['Resin'] == selected_resin]
@@ -156,7 +173,7 @@ with col_right:
     if filtered_df.empty or len(filtered_df) < 2:
         st.info("👈 Please select a valid combination on the left (Requires at least 2 batches to analyze).")
     else:
-        # Calculate statistics
+        # Calculate key statistics
         sample_size = len(filtered_df)
         avg_init_v = filtered_df[visc_before].mean()
         avg_fin_v = filtered_df[visc_after].mean()
@@ -167,7 +184,10 @@ with col_right:
         ref_median = filtered_df['Reference_Value'].median()
         ref_std = filtered_df['Reference_Value'].std()
 
-        # --- Reference Table ---
+
+# ==========================================
+# SECTION 7: RIGHT COLUMN - REFERENCE TABLES
+# ==========================================
         st.subheader("📊 Historical Reference Table")
         metrics_df = pd.DataFrame({
             "Metric": ["Sample Size (Batches)", "Avg Initial Viscosity (s)", "Avg Final Viscosity (s)", "Avg Reduction (s)", "Avg Solvent Added (kg)"],
@@ -175,7 +195,6 @@ with col_right:
         })
         st.dataframe(metrics_df, hide_index=True, use_container_width=True)
 
-        # --- Recommendation Card ---
         st.markdown(f"""
         <div style="background-color: #f0f8ff; padding: 20px; border-radius: 10px; border-left: 5px solid #0066cc; margin-bottom: 20px;">
             <h4 style="margin-top: 0; color: #0066cc;">⭐ Reference Value</h4>
@@ -186,7 +205,10 @@ with col_right:
         </div>
         """, unsafe_allow_html=True)
 
-        # --- Prediction Tool ---
+
+# ==========================================
+# SECTION 8: RIGHT COLUMN - PREDICTION TOOL
+# ==========================================
         with st.expander("🛠️ PRODUCTION SOLVENT CALCULATOR", expanded=True):
             c_p1, c_p2 = st.columns(2)
             with c_p1:
@@ -200,19 +222,20 @@ with col_right:
             if req_reduction <= 0:
                 st.warning("Target viscosity must be lower than current viscosity.")
             else:
-                # Formula: Ref * Paint * Reduction / 1000
                 rec_solvent_kg = (ref_mean * input_paint * req_reduction) / 1000
-                
                 st.success(f"""
                 ### 🎯 Recommended Solvent Amount: {rec_solvent_kg:.2f} kg
                 `Formula: {ref_mean:.2f} * {input_paint} * {req_reduction:.1f} / 1000`
                 """)
 
-        # --- Scatter Plot (Reliability Check) ---
+
+# ==========================================
+# SECTION 9: RIGHT COLUMN - SCATTER PLOT
+# ==========================================
         st.subheader("🎯 Data Dispersion & Reliability")
         st.caption("If the points cluster along a straight line, the Reference Value is highly reliable.")
         
-        # Standardize Y-axis: Solvent per 1000kg of Paint to eliminate batch size differences
+        # Standardize Y-axis: Solvent per 1000kg of Paint to eliminate batch size variations
         filtered_df['Solvent_per_1000kg_Paint'] = (filtered_df[solvent_weight] / filtered_df[paint_weight]) * 1000
         
         try:
@@ -231,8 +254,9 @@ with col_right:
             fig_scatter.update_xaxes(showline=True, linecolor='lightgray', showgrid=True, gridcolor='whitesmoke')
             fig_scatter.update_yaxes(showline=True, linecolor='lightgray', showgrid=True, gridcolor='whitesmoke')
             st.plotly_chart(fig_scatter, use_container_width=True)
+            
         except Exception:
-            # Fallback if statsmodels is missing
+            # Fallback if statsmodels is missing in the deployment environment
             fig_scatter = px.scatter(
                 filtered_df, 
                 x='Viscosity_Reduction', 
