@@ -113,12 +113,13 @@ with col_left:
 
 
 # ==========================================
+# ==========================================
 # SECTION 5: LEFT COLUMN - SANKEY DIAGRAM
 # ==========================================
     if filtered_df.empty:
         st.info("No data available for the selected flow.")
     else:
-        # Use filtered_df so Sankey shrinks and removes irrelevant flows
+        # FIXED: Use filtered_df so Sankey shrinks and removes irrelevant flows
         sankey_df = filtered_df.copy()
         
         # Extract unique entities from the FILTERED data
@@ -142,7 +143,8 @@ with col_left:
             source.append(vendor_idx[row['Vendor']])
             target.append(resin_idx[row['Resin']])
             value.append(row['count'])
-            link_colors.append("rgba(31, 119, 180, 0.5)") # Clean Blue
+            # THAY ĐỔI: Làm màu mờ hơn (opacity 0.25 thay vì 0.5)
+            link_colors.append("rgba(31, 119, 180, 0.25)") # Clean Blue
 
         # Link Group 2: Resin -> Solvent
         r_s_group = sankey_df.groupby(['Resin', 'Solvent_Type']).size().reset_index(name='count')
@@ -150,7 +152,8 @@ with col_left:
             source.append(resin_idx[row['Resin']])
             target.append(solvent_idx[row['Solvent_Type']])
             value.append(row['count'])
-            link_colors.append("rgba(255, 127, 14, 0.5)") # Clean Orange
+            # THAY ĐỔI: Làm màu mờ hơn (opacity 0.25 thay vì 0.5)
+            link_colors.append("rgba(255, 127, 14, 0.25)") # Clean Orange
 
         # Build and style Sankey
         fig_sankey = go.Figure(data=[go.Sankey(
@@ -159,9 +162,16 @@ with col_left:
                 thickness=30,
                 line=dict(color="white", width=1.5),
                 label=node_labels,
-                color="#2C3E50" # Deep blue-gray nodes
+                color="#2C3E50" # Deep corporate blue nodes
             ),
-            link=dict(source=source, target=target, value=value, color=link_colors)
+            link=dict(
+                source=source, 
+                target=target, 
+                value=value, 
+                color=link_colors,
+                # THÊM DÒNG NÀY ĐỂ TẠO ĐƯỜNG VIỀN MỎNG GỌN GÀNG
+                line=dict(color="gray", width=0.5) 
+            )
         )])
         
         fig_sankey.update_layout(
