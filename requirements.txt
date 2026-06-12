@@ -6,3 +6,4 @@ openpyxl
 statsmodels
 graphviz
 streamlit-agraph
+python-docx
