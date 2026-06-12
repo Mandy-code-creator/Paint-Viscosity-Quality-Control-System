@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import plotly.express as px  # <-- Dòng này sẽ sửa lỗi 'px is not defined'
+import graphviz              # <-- Dòng này để lát nữa vẽ sơ đồ Mind Map
 
 # --- 1. Global State Check & MOCK DATA (Chế độ test) ---
 # Nếu đang code và chưa có dữ liệu, tự động tạo dữ liệu giả để test UI
