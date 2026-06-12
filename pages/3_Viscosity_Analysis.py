@@ -82,13 +82,51 @@ st.markdown(custom_css, unsafe_allow_html=True)
 
 
 # ==========================================
-# 2. DATA LOADING & PREPROCESSING
 # ==========================================
-if not st.session_state.get('raw_data_loaded', False):
-    st.warning("⚠️ No data loaded. Please upload your data file first.")
-    st.stop()
+# 2. DATA LOADING & PREPROCESSING (UPDATED FOR STANDALONE)
+# ==========================================
+# Kiểm tra xem dữ liệu đã có trong session_state chưa
+if st.session_state.get('raw_data_loaded', False) and 'group_a_data' in st.session_state:
+    group_a = st.session_state['group_a_data'].copy()
+else:
+    # NẾU CHƯA CÓ DỮ LIỆU: Hiện Sidebar tải file hoặc Nút tạo dữ liệu mẫu
+    st.sidebar.markdown("### 📂 Data Input")
+    uploaded_file = st.sidebar.file_uploader("Upload Data (CSV/Excel)", type=["csv", "xlsx"])
 
-group_a = st.session_state['group_a_data'].copy()
+    if uploaded_file is not None:
+        # Đọc file người dùng tải lên
+        if uploaded_file.name.endswith('.csv'):
+            group_a = pd.read_csv(uploaded_file)
+        else:
+            group_a = pd.read_excel(uploaded_file)
+        
+        # Lưu vào session để dùng cho các bước sau
+        st.session_state['raw_data_loaded'] = True
+        st.session_state['group_a_data'] = group_a
+        st.rerun() # Tải lại trang để tắt cảnh báo
+    else:
+        st.warning("⚠️ No data loaded. Please upload your data file in the sidebar, or click below to test with sample data.")
+        
+        # Nút tạo dữ liệu giả lập để xem giao diện Mind Map ngay lập tức
+        if st.button("🚀 Load Sample Data for Testing"):
+            np.random.seed(42)
+            n = 1248
+            mock_data = pd.DataFrame({
+                'Vendor': np.random.choice(['Yungchi', 'CCP', 'Nan Ya', 'Atul', 'Formosa', 'Other'], n, p=[0.35, 0.25, 0.15, 0.1, 0.1, 0.05]),
+                'Resin': np.random.choice(['PE', 'EPOXY', 'PU', 'PVDF', 'SMP', 'Other'], n),
+                'Solvent_Type': np.random.choice(['5203', 'CB5203', 'ISOPHORONE', 'PMA', 'BUTYL ACETATE', 'BAC'], n),
+                '黏度(秒)': np.random.uniform(45, 55, n),
+                '黏度(秒)_1': np.random.uniform(35, 44, n),
+                '塗料重量': np.random.uniform(400, 1000, n),
+                '添加重量': np.random.uniform(5, 25, n)
+            })
+            st.session_state['raw_data_loaded'] = True
+            st.session_state['group_a_data'] = mock_data
+            st.rerun()
+            
+        st.stop() # Dừng chạy code bên dưới nếu chưa có dữ liệu
+
+# Đảm bảo các cột dữ liệu đúng chuẩn
 group_a['Solvent_Type'] = group_a['Solvent_Type'].astype(str)
 if 'Vendor' not in group_a.columns: group_a['Vendor'] = 'Unknown'
 
@@ -111,7 +149,7 @@ if all(col in group_a.columns for col in [visc_before, visc_after, paint_weight,
     df['Solvent_Ratio_g_kg'] = (df[solvent_weight] * 1000) / df[paint_weight]
     df['Pct_Per_Sec'] = (df[solvent_weight] / df[paint_weight] * 100) / df['Viscosity_Reduction']
 else:
-    st.error("⚠️ Missing required data columns.")
+    st.error("⚠️ Missing required data columns (Viscosity, Paint Weight, Solvent Weight). Please check your Excel file.")
     st.stop()
 
 
