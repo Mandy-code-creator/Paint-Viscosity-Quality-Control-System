@@ -117,7 +117,8 @@ with col_left:
 
 # ==========================================
 # ==========================================
-# SECTION 5: LEFT COLUMN - MODERN STYLED SANKEY (DATA ON FLOW)
+# ==========================================
+# SECTION 5: LEFT COLUMN - MODERN STYLED SANKEY (FIXED OVERLAP)
 # ==========================================
     if filtered_df.empty:
         st.info("👈 Please select a valid combination on the left.")
@@ -129,18 +130,17 @@ with col_left:
         resins = list(sankey_df['Resin'].unique())
         solvents = list(sankey_df['Solvent_Type'].unique())
         
-        # --- NEW: CALCULATE DATA TO DISPLAY DIRECTLY ON NODES ---
-        # Count batches and calculate total solvent weights for rich labels
+        # Count batches and calculate total solvent weights
         v_counts = sankey_df['Vendor'].value_counts()
         r_counts = sankey_df['Resin'].value_counts()
         s_counts = sankey_df['Solvent_Type'].value_counts()
         s_weights = sankey_df.groupby('Solvent_Type')[solvent_weight].sum()
         
-        # Create rich labels combining Name + Data (Batches / Weights)
+        # SỬA LỖI ĐÈ CHỮ: Dùng <br> để ngắt thành 2 dòng, giúp label gọn gàng không vươn tới cột giữa
         node_labels = (
-            [f"🏭 {v} ({v_counts.get(v, 0)} batches)" for v in vendors] +
-            [f"🧪 {r} ({r_counts.get(r, 0)} batches)" for r in resins] +
-            [f"💧 {s} ({s_weights.get(s, 0):.1f} kg)" for s in solvents]
+            [f"🏭 {v}<br>({v_counts.get(v, 0)} batches)" for v in vendors] +
+            [f"🧪 {r}<br>({r_counts.get(r, 0)} batches)" for r in resins] +
+            [f"💧 {s}<br>({s_weights.get(s, 0):.1f} kg)" for s in solvents]
         )
         
         vendor_idx = {v: i for i, v in enumerate(vendors)}
@@ -155,7 +155,7 @@ with col_left:
             source.append(vendor_idx[row['Vendor']])
             target.append(resin_idx[row['Resin']])
             value.append(row['count'])
-            link_colors.append("rgba(135, 186, 222, 0.4)") # Softer modern blue, slightly higher opacity for contrast
+            link_colors.append("rgba(135, 186, 222, 0.4)") # Soft modern blue
 
         # Group 2: Resin -> Solvent
         r_s_group = sankey_df.groupby(['Resin', 'Solvent_Type']).size().reset_index(name='count')
@@ -163,16 +163,16 @@ with col_left:
             source.append(resin_idx[row['Resin']])
             target.append(solvent_idx[row['Solvent_Type']])
             value.append(row['count'])
-            link_colors.append("rgba(252, 203, 163, 0.4)") # Softer modern orange
+            link_colors.append("rgba(252, 203, 163, 0.4)") # Soft modern orange
 
-        # Build Sankey with Modern Vibe Settings
+        # Build Sankey with Clear Columns
         fig_sankey = go.Figure(data=[go.Sankey(
             node=dict(
                 pad=40, 
-                thickness=20, # Slightly thicker to mimic the card feel
-                line=dict(color="#34495E", width=2), # Dark border to mimic the left-edge styling
+                thickness=15, # Độ dày vừa phải để tăng không gian trống giữa 2 cột
+                line=dict(color="white", width=1), 
                 label=node_labels,
-                color="#FFFFFF" # White nodes to mimic the inner card
+                color="#2C3E50" # Đổ khối đặc màu xanh đen để xác định rõ cột thứ 3
             ),
             link=dict(
                 source=source, 
@@ -184,13 +184,12 @@ with col_left:
         
         # Dynamic height to maintain aesthetics
         total_nodes = len(node_labels)
-        dynamic_height = max(350, min(700, total_nodes * 50))
+        dynamic_height = max(380, min(750, total_nodes * 60))
         
         fig_sankey.update_layout(
             height=dynamic_height, 
-            font=dict(size=14, color="#2C3E50", family="Segoe UI, Arial, sans-serif"), # Modern font
-            margin=dict(l=10, r=180, t=30, b=20), 
-            # Apply the light gray/blueish background from your image
+            font=dict(size=13, color="#2C3E50", family="Segoe UI, Arial, sans-serif"), 
+            margin=dict(l=10, r=60, t=30, b=20), # Rút ngắn margin phải để nới rộng không gian bên trong
             plot_bgcolor='#F4F7F9',
             paper_bgcolor='#F4F7F9'
         )
