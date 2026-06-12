@@ -1,7 +1,10 @@
 import streamlit as st
 import pandas as pd
 import graphviz
-import python-docx
+import io
+from docx import Document
+from docx.shared import Inches
+
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Solvent Hierarchy", page_icon="🌳", layout="wide")
 
@@ -149,6 +152,29 @@ for resin in unique_resins:
 
 # --- 5. RENDER ---
 st.graphviz_chart(graph, use_container_width=True)
+try:
+    # 1. Capture Graphviz chart as PNG image
+    png_data = graph.pipe(format='png')
+    image_stream = io.BytesIO(png_data)
+    
+    # 2. Create Word Document
+    doc = Document()
+    doc.add_heading(f'Solvent Consumption & Viscosity Control: {selected_vendor}', 0)
+    
+    doc.add_paragraph('Report Level: Coil-Level Data')
+    doc.add_paragraph('Quality Filter: Grade A-B and above')
+    
+    # 3. Insert the chart image into the document
+    doc.add_picture(image_stream, width=Inches(6.5))
+    
+    # 4. Convert document to Bytes for Streamlit Download
+    doc_io = io.BytesIO()
+    doc.save(doc_io)
+    doc_io.seek(0)
+    
+    # --- 5. RENDER ---
+st.graphviz_chart(graph, use_container_width=True)
+
 try:
     # 1. Capture Graphviz chart as PNG image
     png_data = graph.pipe(format='png')
