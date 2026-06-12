@@ -87,55 +87,63 @@ else:
 
 # ==========================================
 # ==========================================
-# ==========================================
-# 3. SAFE DATA PREPROCESSING (LÕI XỬ LÝ DỮ LIỆU AN TOÀN)
+# 3. ROBUST COLUMN MAPPING & DATA LOADING
 # ==========================================
 
-# Danh sách ánh xạ tên cột để tránh KeyError
-col_mapping = {
-    'Nhà cung cấp': 'Vendor',
-    'Loại nhựa': 'Resin',
-    'Dung môi': 'Solvent_Type',
-    'Loại dung môi': 'Solvent_Type',
-    'Solvent': 'Solvent_Type',
-    '黏度(秒)': 'Visc_Before',
-    '黏度(秒)_1': 'Visc_After',
-    '塗料重量': 'Paint_Weight',
-    '添加重量': 'Solvent_Weight'
+# 1. Danh sách từ khóa đầy đủ (Bao gồm tiếng Việt, Tiếng Trung, Tiếng Anh)
+mapping_rules = {
+    'Vendor': ['Vendor', 'Nhà cung cấp'],
+    'Resin': ['Resin', 'Loại nhựa'],
+    'Solvent_Type': ['Solvent_Type', '稀釋劑', 'Solvent', 'Dung môi', 'Loại dung môi'],
+    '塗料代碼': ['塗料代碼', 'Feature', 'Mã sơn'],
+    'Visc_Before': ['黏度(秒)', 'Initial Viscosity', 'Độ nhớt đầu'],
+    'Visc_After': ['黏度(秒)_1', 'Final Viscosity', 'Độ nhớt sau'],
+    'Paint_Weight': ['塗料重量', 'Paint Weight', 'Trọng lượng sơn'],
+    'Solvent_Weight': ['添加重量', 'Solvent Weight', 'Lượng dung môi']
 }
 
-# Đổi tên cột tự động
-group_a.rename(columns=col_mapping, inplace=True)
+# 2. Hàm ánh xạ tự động
+def auto_map_columns(df):
+    new_cols = {}
+    for standard_name, possible_names in mapping_rules.items():
+        for col in df.columns:
+            if col in possible_names:
+                new_cols[col] = standard_name
+                break
+    return df.rename(columns=new_cols)
 
-# Kiểm tra các cột bắt buộc
-required_cols = ['Paint_Weight', 'Solvent_Weight', 'Visc_Before', 'Visc_After']
-missing = [c for c in required_cols if c not in group_a.columns]
+# Áp dụng
+group_a = auto_map_columns(group_a)
+
+# 3. Kiểm tra cột bắt buộc
+required = ['Visc_Before', 'Visc_After', 'Paint_Weight', 'Solvent_Weight']
+missing = [c for c in required if c not in group_a.columns]
 
 if missing:
-    st.error(f"🚨 Missing required columns: {missing}. Found columns: {list(group_a.columns)}")
+    st.error(f"🚨 Missing required columns: {missing}. \n\nColumns currently in file: {list(group_a.columns)}")
     st.stop()
 
-# Đảm bảo các cột phân loại tồn tại
-if 'Vendor' not in group_a.columns: group_a['Vendor'] = 'Unknown'
-if 'Resin' not in group_a.columns: group_a['Resin'] = 'Unknown'
-if 'Solvent_Type' not in group_a.columns: group_a['Solvent_Type'] = 'Unknown'
-
-# Chuyển đổi sang số an toàn
-for col in required_cols:
+# 4. Ép kiểu dữ liệu sang số (Đảm bảo không lỗi)
+for col in required:
     group_a[col] = pd.to_numeric(group_a[col], errors='coerce')
 
-# Tính Delta_V và các chỉ số (Sử dụng tên cột đã chuẩn hóa)
+# 5. Tính toán các cột hỗ trợ (Delta_V, Sensitivity)
 group_a['Delta_V'] = group_a['Visc_Before'] - group_a['Visc_After']
 
-# Lọc dữ liệu hợp lệ
-df = group_a.dropna(subset=required_cols).copy()
+# Lọc dữ liệu sạch
+df = group_a.dropna(subset=required + ['Delta_V']).copy()
 df = df[(df['Paint_Weight'] > 0) & (df['Solvent_Weight'] > 0) & (df['Delta_V'] > 0)]
 
-# Tính toán Sensitivity
+# Tính Sensitivity
 df['Solvent_Ratio_Percent'] = (df['Solvent_Weight'] / df['Paint_Weight']) * 100
 df['Sensitivity'] = df['Delta_V'] / df['Solvent_Ratio_Percent'].replace(0, 1)
 
-# Cập nhật session state để các phần sau của App sử dụng df mới này
+# Gán giá trị mặc định nếu thiếu cột phân loại
+for col in ['Vendor', 'Resin', 'Solvent_Type']:
+    if col not in df.columns: df[col] = 'Unknown'
+    df[col] = df[col].astype(str)
+
+# Lưu vào session
 st.session_state['group_a_data'] = df
 
 
