@@ -57,15 +57,19 @@ st.plotly_chart(fig_regression, use_container_width=True)
 st.markdown("---")
 st.subheader("📚 SOP Matrix: Resin – Vendor – Solvent")
 
-summary_matrix = group_a.groupby(['Resin', 'Vendor', 'Solvent_Type']).agg({
-    '塗料批號': 'nunique',
-    '塗料重量': 'sum',
-    '添加重量': 'sum',
-    '黏度(秒)': 'mean',
-    '黏度(秒)_1': 'mean',
-    'Solvent_Ratio_Percent': 'mean',
-    'Sensitivity': 'mean'
-}).rename(columns={
+available_cols = group_a.columns
+agg_dict = {}
+if '塗料批號' in available_cols: agg_dict['塗料批號'] = 'nunique'
+if '塗料重量' in available_cols: agg_dict['塗料重量'] = 'sum'
+if '添加重量' in available_cols: agg_dict['添加重量'] = 'sum'
+if '黏度(秒)' in available_cols: agg_dict['黏度(秒)'] = 'mean'
+if '黏度(秒)_1' in available_cols: agg_dict['黏度(秒)_1'] = 'mean'
+if 'Solvent_Ratio_Percent' in available_cols: agg_dict['Solvent_Ratio_Percent'] = 'mean'
+if 'Sensitivity' in available_cols: agg_dict['Sensitivity'] = 'mean'
+
+summary_matrix = group_a.groupby(['Resin','Vendor','Solvent_Type']).agg(agg_dict)
+
+summary_matrix = summary_matrix.rename(columns={
     '塗料批號': 'Batches',
     '塗料重量': 'Total Paint (kg)',
     '添加重量': 'Total Solvent (kg)',
@@ -75,20 +79,14 @@ summary_matrix = group_a.groupby(['Resin', 'Vendor', 'Solvent_Type']).agg({
     'Sensitivity': 'Avg Sensitivity'
 })
 
-summary_matrix['Solvent Factor (kg/1s drop)'] = summary_matrix.apply(
-    lambda row: (row['Total Paint (kg)'] * (1.0 / row['Avg Sensitivity']) / 100) if row['Avg Sensitivity'] > 0 else 0,
-    axis=1
-)
+if 'Avg Sensitivity' in summary_matrix.columns:
+    summary_matrix['Solvent Factor (kg/1s drop)'] = summary_matrix.apply(
+        lambda row: (row['Total Paint (kg)'] * (1.0 / row['Avg Sensitivity']) / 100)
+        if row['Avg Sensitivity'] > 0 else 0,
+        axis=1
+    )
 
-st.dataframe(summary_matrix.style.format({
-    'Total Paint (kg)': '{:,.0f}',
-    'Total Solvent (kg)': '{:,.0f}',
-    'Initial V (s)': '{:.2f}',
-    'Final V (s)': '{:.2f}',
-    'Avg Solvent %': '{:.2f} %',
-    'Avg Sensitivity': '{:.2f}',
-    'Solvent Factor (kg/1s drop)': '{:.3f}'
-}), use_container_width=True)
+st.dataframe(summary_matrix, use_container_width=True)
 
 # --- 6. Biểu đồ 3: Xu hướng dung môi – resin – vendor ---
 st.markdown("---")
