@@ -57,14 +57,14 @@ filtered_df['Solvent_Ratio_Percent'] = (filtered_df['添加重量'] / filtered_d
 filtered_df['Kg_per_1s'] = filtered_df['添加重量'] / filtered_df['Delta_V']
 filtered_df['Pct_per_1s'] = filtered_df['Solvent_Ratio_Percent'] / filtered_df['Delta_V']
 
-# ĐÃ THÊM: Tính trung bình độ nhớt trước và sau cho mỗi nhóm Resin-Solvent
+# Tính tổng Paint, Solvent và trung bình độ nhớt trước/sau cho mỗi nhóm Resin-Solvent
 tree_summary = filtered_df.groupby(['Resin', 'Solvent_Type']).agg(
     Total_Paint=('塗料重量', 'sum'),
     Total_Solvent=('添加重量', 'sum'),
     Avg_Kg_per_1s=('Kg_per_1s', 'mean'),
     Avg_Pct_per_1s=('Pct_per_1s', 'mean'),
-    Avg_Visc_Before=('黏度(秒)', 'mean'),     # Tính trung bình độ nhớt trước
-    Avg_Visc_After=('黏度(秒)_1', 'mean')      # Tính trung bình độ nhớt sau
+    Avg_Visc_Before=('黏度(秒)', 'mean'),
+    Avg_Visc_After=('黏度(秒)_1', 'mean')
 ).reset_index()
 
 tree_summary = tree_summary[tree_summary['Total_Paint'] > 0].sort_values(by='Total_Paint', ascending=False)
@@ -75,6 +75,7 @@ if tree_summary.empty:
 
 # --- 4. RENDER GRAPHVIZ (LEFT-TO-RIGHT CLEAN LAYOUT) ---
 graph = graphviz.Digraph(engine='dot')
+# KHÔNG CÓ dpi='300' ở đây giúp web hiển thị mượt mà, không bị mất hình
 graph.attr(rankdir='LR', splines='curved', nodesep='0.4', ranksep='1.5', bgcolor='transparent') 
 graph.attr('node', shape='none', margin='0', fontname='Arial')
 graph.attr('edge', color='#A0A0A0', penwidth='1.5', arrowsize='0.8')
@@ -97,11 +98,12 @@ if date_cols:
 else:
     date_range_str = "All Available Data"
 
-center_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="12">
-    <TR><TD BGCOLOR="#00BFFF" STYLE="ROUNDED">
+# ĐÃ SỬA: CELLPADDING="8" và ALIGN="CENTER" giúp ô gọn gàng, cân đối
+center_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="8">
+    <TR><TD BGCOLOR="#00BFFF" STYLE="ROUNDED" ALIGN="CENTER">
         <FONT COLOR="white" POINT-SIZE="20"><B>VENDOR: {selected_vendor}</B></FONT>
     </TD></TR>
-    <TR><TD BGCOLOR="#F8F9FA" STYLE="ROUNDED">
+    <TR><TD BGCOLOR="#F8F9FA" STYLE="ROUNDED" ALIGN="CENTER">
         <FONT POINT-SIZE="13" COLOR="#333333">
         Data Period: <B>{date_range_str}</B><BR/><BR/>
         <B>{total_vendor_paint:,.0f} kg</B> Paint Used<BR/>
@@ -109,7 +111,7 @@ center_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="
         <B>{total_vendor_solv:,.0f} kg</B> Solvent Added<BR/>
         </FONT>
         <FONT COLOR="#D9534F" POINT-SIZE="14"><B>{reduction_pct:.2f}% / 1s Reduction</B></FONT>
-    </TD></TR>
+    </TR></TD>
 </TABLE>'''
 
 graph.node('Root', f'<{center_html}>')
@@ -124,8 +126,9 @@ for resin in unique_resins:
     resin_paint_sum = resin_data['Total_Paint'].sum()
     resin_solvent_sum = resin_data['Total_Solvent'].sum()
     
-    resin_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="8">
-        <TR><TD BGCOLOR="#E6F2FF" STYLE="ROUNDED" BORDER="1" COLOR="#00BFFF">
+    # ĐÃ SỬA: CELLPADDING="5" và ALIGN="CENTER" để bóp gọn khung nhánh 2
+    resin_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5">
+        <TR><TD BGCOLOR="#E6F2FF" STYLE="ROUNDED" BORDER="1" COLOR="#00BFFF" ALIGN="CENTER">
             <FONT COLOR="#005A9E" POINT-SIZE="15"><B>RESIN: {resin}</B></FONT><BR/>
             <FONT COLOR="#555555" POINT-SIZE="11">{resin_paint_sum:,.0f} kg Paint</FONT><BR/>
             <FONT COLOR="#D9534F" POINT-SIZE="11">{resin_solvent_sum:,.0f} kg Solvent</FONT>
@@ -138,9 +141,9 @@ for resin in unique_resins:
         solvent = row['Solvent_Type']
         leaf_id = f"leaf_{resin}_{solvent}_{idx}"
         
-        # ĐÃ THÊM: Hiển thị độ nhớt Trước (Visc Before) và Sau (Visc After) bằng chữ màu xám nhỏ nhắn
-        leaf_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="6">
-            <TR><TD ALIGN="LEFT" BGCOLOR="white" STYLE="ROUNDED" BORDER="1" COLOR="#CCCCCC">
+        # ĐÃ SỬA: CELLPADDING="4" và ALIGN="CENTER" để ôm sát nội dung nhánh cuối
+        leaf_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4">
+            <TR><TD ALIGN="CENTER" BGCOLOR="white" STYLE="ROUNDED" BORDER="1" COLOR="#CCCCCC">
                 <B><FONT COLOR="#333333">SOLVENT: {solvent}</FONT></B><BR/>
                 <FONT COLOR="#888888" POINT-SIZE="10">Visc Before: {row['Avg_Visc_Before']:.1f} s</FONT><BR/>
                 <FONT COLOR="#888888" POINT-SIZE="10">Visc After: {row['Avg_Visc_After']:.1f} s</FONT><BR/>
@@ -153,9 +156,11 @@ for resin in unique_resins:
         graph.edge(resin_id, leaf_id)
 
 # --- 5. RENDER & EXPORT ---
+# 5.1 Hiển thị biểu đồ vector mượt mà trên trình duyệt web
 st.graphviz_chart(graph, use_container_width=True)
 
 try:
+    # 5.2 CHỈ BƠM DPI CAO VÀO PHÚT CHÓT KHI XUẤT ẢNH PNG CHO FILE WORD
     graph.attr(dpi='300') 
     
     png_data = graph.pipe(format='png')
@@ -165,18 +170,22 @@ try:
         
     image_stream = io.BytesIO(png_data)
     
+    # Khởi tạo file Word
     doc = Document()
     doc.add_heading(f'Solvent Consumption & Viscosity Control: {selected_vendor}', 0)
     
     doc.add_paragraph('Report Level: Coil-Level Data')
     doc.add_paragraph('Quality Filter: Grade A-B and above')
     
+    # Chèn ảnh chất lượng cao vào file Word
     doc.add_picture(image_stream, width=Inches(6.5))
     
+    # Lưu kết quả vào bộ nhớ đệm
     doc_io = io.BytesIO()
     doc.save(doc_io)
     doc_io.seek(0)
     
+    # Tạo nút tải xuống báo cáo Word
     col_empty, col_btn = st.columns([4, 1])
     with col_btn:
         st.download_button(
@@ -187,5 +196,6 @@ try:
         )
 
 except Exception as e:
+    # Hiện lỗi thực sự giúp kiểm soát hệ thống dễ dàng
     st.error(f"Đã xảy ra lỗi khi tạo file Word: {e}")
     st.exception(e)
