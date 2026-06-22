@@ -57,11 +57,14 @@ filtered_df['Solvent_Ratio_Percent'] = (filtered_df['添加重量'] / filtered_d
 filtered_df['Kg_per_1s'] = filtered_df['添加重量'] / filtered_df['Delta_V']
 filtered_df['Pct_per_1s'] = filtered_df['Solvent_Ratio_Percent'] / filtered_df['Delta_V']
 
+# ĐÃ THÊM: Tính trung bình độ nhớt trước và sau cho mỗi nhóm Resin-Solvent
 tree_summary = filtered_df.groupby(['Resin', 'Solvent_Type']).agg(
     Total_Paint=('塗料重量', 'sum'),
     Total_Solvent=('添加重量', 'sum'),
     Avg_Kg_per_1s=('Kg_per_1s', 'mean'),
-    Avg_Pct_per_1s=('Pct_per_1s', 'mean')
+    Avg_Pct_per_1s=('Pct_per_1s', 'mean'),
+    Avg_Visc_Before=('黏度(秒)', 'mean'),     # Tính trung bình độ nhớt trước
+    Avg_Visc_After=('黏度(秒)_1', 'mean')      # Tính trung bình độ nhớt sau
 ).reset_index()
 
 tree_summary = tree_summary[tree_summary['Total_Paint'] > 0].sort_values(by='Total_Paint', ascending=False)
@@ -72,7 +75,6 @@ if tree_summary.empty:
 
 # --- 4. RENDER GRAPHVIZ (LEFT-TO-RIGHT CLEAN LAYOUT) ---
 graph = graphviz.Digraph(engine='dot')
-# KHÔNG CÓ dpi='300' Ở ĐÂY ĐỂ WEB HIỂN THỊ BÌNH THƯỜNG
 graph.attr(rankdir='LR', splines='curved', nodesep='0.4', ranksep='1.5', bgcolor='transparent') 
 graph.attr('node', shape='none', margin='0', fontname='Arial')
 graph.attr('edge', color='#A0A0A0', penwidth='1.5', arrowsize='0.8')
@@ -95,7 +97,6 @@ if date_cols:
 else:
     date_range_str = "All Available Data"
 
-# ĐÃ THAY THẾ EMOJI BẰNG CHỮ ĐỂ TRÁNH LỖI FONT KHI XUẤT WORD
 center_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="12">
     <TR><TD BGCOLOR="#00BFFF" STYLE="ROUNDED">
         <FONT COLOR="white" POINT-SIZE="20"><B>VENDOR: {selected_vendor}</B></FONT>
@@ -120,11 +121,9 @@ for resin in unique_resins:
     resin_id = f"resin_{resin}"
     resin_data = tree_summary[tree_summary['Resin'] == resin]
     
-    # Tính tổng Paint và tổng Solvent cho từng Resin
     resin_paint_sum = resin_data['Total_Paint'].sum()
-    resin_solvent_sum = resin_data['Total_Solvent'].sum() # <-- DÒNG MỚI THÊM
+    resin_solvent_sum = resin_data['Total_Solvent'].sum()
     
-    # Cập nhật giao diện node RESIN (Thêm dòng hiển thị kg Solvent)
     resin_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="8">
         <TR><TD BGCOLOR="#E6F2FF" STYLE="ROUNDED" BORDER="1" COLOR="#00BFFF">
             <FONT COLOR="#005A9E" POINT-SIZE="15"><B>RESIN: {resin}</B></FONT><BR/>
@@ -139,9 +138,12 @@ for resin in unique_resins:
         solvent = row['Solvent_Type']
         leaf_id = f"leaf_{resin}_{solvent}_{idx}"
         
+        # ĐÃ THÊM: Hiển thị độ nhớt Trước (Visc Before) và Sau (Visc After) bằng chữ màu xám nhỏ nhắn
         leaf_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="6">
             <TR><TD ALIGN="LEFT" BGCOLOR="white" STYLE="ROUNDED" BORDER="1" COLOR="#CCCCCC">
                 <B><FONT COLOR="#333333">SOLVENT: {solvent}</FONT></B><BR/>
+                <FONT COLOR="#888888" POINT-SIZE="10">Visc Before: {row['Avg_Visc_Before']:.1f} s</FONT><BR/>
+                <FONT COLOR="#888888" POINT-SIZE="10">Visc After: {row['Avg_Visc_After']:.1f} s</FONT><BR/>
                 <FONT COLOR="#00BFFF">{row['Avg_Kg_per_1s']:,.2f} kg / 1s</FONT><BR/>
                 <FONT COLOR="#D9534F">{row['Avg_Pct_per_1s']:.2f}% / 1s</FONT>
             </TD></TR>
@@ -151,14 +153,11 @@ for resin in unique_resins:
         graph.edge(resin_id, leaf_id)
 
 # --- 5. RENDER & EXPORT ---
-# 5.1 Hiển thị trên giao diện Streamlit (định dạng SVG mặc định nhẹ, vừa vặn, không bị lỗi khoảng trắng)
 st.graphviz_chart(graph, use_container_width=True)
 
 try:
-    # 5.2 BƠM ĐỘ PHÂN GIẢI CAO (DPI 300) VÀO TRƯỚC KHI XUẤT ẢNH PNG CHO WORD ĐỂ ẢNH SẮC NÉT
     graph.attr(dpi='300') 
     
-    # Tạo dữ liệu ảnh từ Graphviz
     png_data = graph.pipe(format='png')
     if not png_data:
         st.error("Lỗi: Không tạo được dữ liệu ảnh từ Graphviz.")
@@ -166,22 +165,18 @@ try:
         
     image_stream = io.BytesIO(png_data)
     
-    # Tạo file Word
     doc = Document()
     doc.add_heading(f'Solvent Consumption & Viscosity Control: {selected_vendor}', 0)
     
     doc.add_paragraph('Report Level: Coil-Level Data')
     doc.add_paragraph('Quality Filter: Grade A-B and above')
     
-    # Thêm ảnh vào Word
     doc.add_picture(image_stream, width=Inches(6.5))
     
-    # Lưu vào buffer
     doc_io = io.BytesIO()
     doc.save(doc_io)
     doc_io.seek(0)
     
-    # Hiển thị nút tải xuống
     col_empty, col_btn = st.columns([4, 1])
     with col_btn:
         st.download_button(
