@@ -75,7 +75,7 @@ if tree_summary.empty:
 
 # --- 4. RENDER GRAPHVIZ (LEFT-TO-RIGHT CLEAN LAYOUT) ---
 graph = graphviz.Digraph(engine='dot')
-# KHÔNG CÓ dpi='300' ở đây giúp web hiển thị mượt mà, không bị mất hình
+# KHÔNG CÓ dpi='300' ở đây giúp web hiển thị mượt mà
 graph.attr(rankdir='LR', splines='curved', nodesep='0.4', ranksep='1.5', bgcolor='transparent') 
 graph.attr('node', shape='none', margin='0', fontname='Arial')
 graph.attr('edge', color='#A0A0A0', penwidth='1.5', arrowsize='0.8')
@@ -98,7 +98,7 @@ if date_cols:
 else:
     date_range_str = "All Available Data"
 
-# ĐÃ SỬA: CELLPADDING="8" và ALIGN="CENTER" giúp ô gọn gàng, cân đối
+# ĐÃ SỬA LỖI ĐÓNG THẺ HTML (</TD></TR>)
 center_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="8">
     <TR><TD BGCOLOR="#00BFFF" STYLE="ROUNDED" ALIGN="CENTER">
         <FONT COLOR="white" POINT-SIZE="20"><B>VENDOR: {selected_vendor}</B></FONT>
@@ -111,7 +111,7 @@ center_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="
         <B>{total_vendor_solv:,.0f} kg</B> Solvent Added<BR/>
         </FONT>
         <FONT COLOR="#D9534F" POINT-SIZE="14"><B>{reduction_pct:.2f}% / 1s Reduction</B></FONT>
-    </TR></TD>
+    </TD></TR>
 </TABLE>'''
 
 graph.node('Root', f'<{center_html}>')
@@ -126,7 +126,6 @@ for resin in unique_resins:
     resin_paint_sum = resin_data['Total_Paint'].sum()
     resin_solvent_sum = resin_data['Total_Solvent'].sum()
     
-    # ĐÃ SỬA: CELLPADDING="5" và ALIGN="CENTER" để bóp gọn khung nhánh 2
     resin_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5">
         <TR><TD BGCOLOR="#E6F2FF" STYLE="ROUNDED" BORDER="1" COLOR="#00BFFF" ALIGN="CENTER">
             <FONT COLOR="#005A9E" POINT-SIZE="15"><B>RESIN: {resin}</B></FONT><BR/>
@@ -141,7 +140,6 @@ for resin in unique_resins:
         solvent = row['Solvent_Type']
         leaf_id = f"leaf_{resin}_{solvent}_{idx}"
         
-        # ĐÃ SỬA: CELLPADDING="4" và ALIGN="CENTER" để ôm sát nội dung nhánh cuối
         leaf_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4">
             <TR><TD ALIGN="CENTER" BGCOLOR="white" STYLE="ROUNDED" BORDER="1" COLOR="#CCCCCC">
                 <B><FONT COLOR="#333333">SOLVENT: {solvent}</FONT></B><BR/>
@@ -156,11 +154,9 @@ for resin in unique_resins:
         graph.edge(resin_id, leaf_id)
 
 # --- 5. RENDER & EXPORT ---
-# 5.1 Hiển thị biểu đồ vector mượt mà trên trình duyệt web
 st.graphviz_chart(graph, use_container_width=True)
 
 try:
-    # 5.2 CHỈ BƠM DPI CAO VÀO PHÚT CHÓT KHI XUẤT ẢNH PNG CHO FILE WORD
     graph.attr(dpi='300') 
     
     png_data = graph.pipe(format='png')
@@ -170,22 +166,18 @@ try:
         
     image_stream = io.BytesIO(png_data)
     
-    # Khởi tạo file Word
     doc = Document()
     doc.add_heading(f'Solvent Consumption & Viscosity Control: {selected_vendor}', 0)
     
     doc.add_paragraph('Report Level: Coil-Level Data')
     doc.add_paragraph('Quality Filter: Grade A-B and above')
     
-    # Chèn ảnh chất lượng cao vào file Word
     doc.add_picture(image_stream, width=Inches(6.5))
     
-    # Lưu kết quả vào bộ nhớ đệm
     doc_io = io.BytesIO()
     doc.save(doc_io)
     doc_io.seek(0)
     
-    # Tạo nút tải xuống báo cáo Word
     col_empty, col_btn = st.columns([4, 1])
     with col_btn:
         st.download_button(
@@ -196,6 +188,5 @@ try:
         )
 
 except Exception as e:
-    # Hiện lỗi thực sự giúp kiểm soát hệ thống dễ dàng
     st.error(f"Đã xảy ra lỗi khi tạo file Word: {e}")
     st.exception(e)
