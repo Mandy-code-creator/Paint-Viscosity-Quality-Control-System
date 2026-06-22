@@ -25,18 +25,15 @@ if group_a.empty:
 # --- 2. SIDEBAR FILTERS ---
 st.sidebar.header("🔍 Hierarchy Filters")
 
-# Ensure columns exist safely
 for col in ['Vendor', 'Resin', 'Solvent_Type']:
     if col not in group_a.columns:
         group_a[col] = 'Unknown'
 
-# Data Filtering
 vendor_list = sorted(group_a['Vendor'].dropna().unique().tolist())
 selected_vendor = st.sidebar.selectbox("Select Vendor:", vendor_list)
 
 filtered_df = group_a[group_a['Vendor'] == selected_vendor].copy()
 
-# Filter for Grade A-B if the column exists in your dataset
 if 'Grade' in filtered_df.columns:
     filtered_df = filtered_df[filtered_df['Grade'].isin(['A', 'B', 'A-B'])]
 
@@ -57,7 +54,6 @@ filtered_df['Solvent_Ratio_Percent'] = (filtered_df['添加重量'] / filtered_d
 filtered_df['Kg_per_1s'] = filtered_df['添加重量'] / filtered_df['Delta_V']
 filtered_df['Pct_per_1s'] = filtered_df['Solvent_Ratio_Percent'] / filtered_df['Delta_V']
 
-# Tính tổng Paint, Solvent và trung bình độ nhớt trước/sau cho mỗi nhóm Resin-Solvent
 tree_summary = filtered_df.groupby(['Resin', 'Solvent_Type']).agg(
     Total_Paint=('塗料重量', 'sum'),
     Total_Solvent=('添加重量', 'sum'),
@@ -75,9 +71,11 @@ if tree_summary.empty:
 
 # --- 4. RENDER GRAPHVIZ (LEFT-TO-RIGHT CLEAN LAYOUT) ---
 graph = graphviz.Digraph(engine='dot')
-# KHÔNG CÓ dpi='300' ở đây giúp web hiển thị mượt mà
-graph.attr(rankdir='LR', splines='curved', nodesep='0.4', ranksep='1.5', bgcolor='transparent') 
-graph.attr('node', shape='none', margin='0', fontname='Arial')
+# Thu gọn khoảng cách các nhánh (nodesep, ranksep) để sơ đồ khít hơn
+graph.attr(rankdir='LR', splines='curved', nodesep='0.2', ranksep='1.0', bgcolor='transparent') 
+
+# ĐÃ FIX: Thêm width='0', height='0' để XÓA BỎ kích thước tối thiểu mặc định, ép node bọc chặt lấy chữ
+graph.attr('node', shape='none', margin='0', width='0', height='0', fontname='Arial')
 graph.attr('edge', color='#A0A0A0', penwidth='1.5', arrowsize='0.8')
 
 # --- 4.1 ROOT NODE (VENDOR) ---
@@ -98,19 +96,19 @@ if date_cols:
 else:
     date_range_str = "All Available Data"
 
-# ĐÃ SỬA LỖI ĐÓNG THẺ HTML (</TD></TR>)
-center_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="8">
+# ĐÃ FIX: Rút gọn text (Visc Reduction thay vì Avg Viscosity Reduction) để khung không bị giãn ngang
+center_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4">
     <TR><TD BGCOLOR="#00BFFF" STYLE="ROUNDED" ALIGN="CENTER">
-        <FONT COLOR="white" POINT-SIZE="20"><B>VENDOR: {selected_vendor}</B></FONT>
+        <FONT COLOR="white" POINT-SIZE="18"><B>VENDOR: {selected_vendor}</B></FONT>
     </TD></TR>
     <TR><TD BGCOLOR="#F8F9FA" STYLE="ROUNDED" ALIGN="CENTER">
-        <FONT POINT-SIZE="13" COLOR="#333333">
-        Data Period: <B>{date_range_str}</B><BR/><BR/>
+        <FONT POINT-SIZE="12" COLOR="#333333">
+        Period: <B>{date_range_str}</B><BR/>
         <B>{total_vendor_paint:,.0f} kg</B> Paint Used<BR/>
-        Avg Viscosity Reduction: <B>{avg_delta_v:.1f} s</B><BR/>
+        Visc Reduction: <B>{avg_delta_v:.1f} s</B><BR/>
         <B>{total_vendor_solv:,.0f} kg</B> Solvent Added<BR/>
         </FONT>
-        <FONT COLOR="#D9534F" POINT-SIZE="14"><B>{reduction_pct:.2f}% / 1s Reduction</B></FONT>
+        <FONT COLOR="#D9534F" POINT-SIZE="13"><B>{reduction_pct:.2f}% / 1s Red.</B></FONT>
     </TD></TR>
 </TABLE>'''
 
@@ -126,9 +124,10 @@ for resin in unique_resins:
     resin_paint_sum = resin_data['Total_Paint'].sum()
     resin_solvent_sum = resin_data['Total_Solvent'].sum()
     
-    resin_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5">
+    # ĐÃ FIX: CELLPADDING="2" (Rất nhỏ để ôm sát)
+    resin_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="2">
         <TR><TD BGCOLOR="#E6F2FF" STYLE="ROUNDED" BORDER="1" COLOR="#00BFFF" ALIGN="CENTER">
-            <FONT COLOR="#005A9E" POINT-SIZE="15"><B>RESIN: {resin}</B></FONT><BR/>
+            <FONT COLOR="#005A9E" POINT-SIZE="14"><B>RESIN: {resin}</B></FONT><BR/>
             <FONT COLOR="#555555" POINT-SIZE="11">{resin_paint_sum:,.0f} kg Paint</FONT><BR/>
             <FONT COLOR="#D9534F" POINT-SIZE="11">{resin_solvent_sum:,.0f} kg Solvent</FONT>
         </TD></TR>
@@ -140,7 +139,8 @@ for resin in unique_resins:
         solvent = row['Solvent_Type']
         leaf_id = f"leaf_{resin}_{solvent}_{idx}"
         
-        leaf_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4">
+        # ĐÃ FIX: CELLPADDING="2" (Rất nhỏ để ôm sát)
+        leaf_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="2">
             <TR><TD ALIGN="CENTER" BGCOLOR="white" STYLE="ROUNDED" BORDER="1" COLOR="#CCCCCC">
                 <B><FONT COLOR="#333333">SOLVENT: {solvent}</FONT></B><BR/>
                 <FONT COLOR="#888888" POINT-SIZE="10">Visc Before: {row['Avg_Visc_Before']:.1f} s</FONT><BR/>
@@ -154,7 +154,8 @@ for resin in unique_resins:
         graph.edge(resin_id, leaf_id)
 
 # --- 5. RENDER & EXPORT ---
-st.graphviz_chart(graph, use_container_width=True)
+# ĐÃ FIX: use_container_width=False -> Ngăn chặn Streamlit kéo giãn bức ảnh ra toàn màn hình
+st.graphviz_chart(graph, use_container_width=False)
 
 try:
     graph.attr(dpi='300') 
@@ -168,10 +169,8 @@ try:
     
     doc = Document()
     doc.add_heading(f'Solvent Consumption & Viscosity Control: {selected_vendor}', 0)
-    
     doc.add_paragraph('Report Level: Coil-Level Data')
     doc.add_paragraph('Quality Filter: Grade A-B and above')
-    
     doc.add_picture(image_stream, width=Inches(6.5))
     
     doc_io = io.BytesIO()
