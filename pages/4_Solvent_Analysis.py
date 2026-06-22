@@ -148,21 +148,30 @@ for resin in unique_resins:
 st.graphviz_chart(graph, use_container_width=True)
 
 try:
+    # 1. Tạo dữ liệu ảnh từ Graphviz
     png_data = graph.pipe(format='png')
+    if not png_data:
+        st.error("Lỗi: Không tạo được dữ liệu ảnh từ Graphviz.")
+        st.stop()
+        
     image_stream = io.BytesIO(png_data)
     
+    # 2. Tạo file Word
     doc = Document()
     doc.add_heading(f'Solvent Consumption & Viscosity Control: {selected_vendor}', 0)
     
     doc.add_paragraph('Report Level: Coil-Level Data')
     doc.add_paragraph('Quality Filter: Grade A-B and above')
     
+    # Thêm ảnh
     doc.add_picture(image_stream, width=Inches(6.5))
     
+    # Lưu vào buffer
     doc_io = io.BytesIO()
     doc.save(doc_io)
     doc_io.seek(0)
     
+    # 3. Hiển thị nút tải xuống
     col_empty, col_btn = st.columns([4, 1])
     with col_btn:
         st.download_button(
@@ -171,5 +180,8 @@ try:
             file_name=f"Solvent_Report_{selected_vendor}.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
+
 except Exception as e:
-    st.caption("Please ensure 'python-docx' is installed via requirements.txt to enable Word export.")
+    # Hiển thị lỗi thực sự lên UI để dễ debug
+    st.error(f"Đã xảy ra lỗi khi tạo file Word: {e}")
+    st.exception(e)
