@@ -71,3 +71,39 @@ for i in range(0, len(resins), 2):
                     use_container_width=True,
                     height=150
                 )
+# --- 5. Biểu đồ hồi quy so sánh nhiều resin ---
+st.markdown("---")
+st.subheader("📈 Comparative Regression: Solvent vs. Viscosity")
+
+# Chuẩn bị dữ liệu giả lập hoặc thực tế
+regression_df = group_a.copy()
+regression_df['Solvent_Ratio_Percent'] = (regression_df['添加重量'] / regression_df['塗料重量']) * 100
+
+# Vẽ scatter + trendline cho từng resin
+fig_regression = px.scatter(
+    regression_df,
+    x='Solvent_Ratio_Percent',
+    y='黏度(秒)',
+    color='Resin',
+    trendline='ols',
+    labels={'Solvent_Ratio_Percent': 'Solvent Added (%)', '黏度(秒)': 'Viscosity (s)'},
+    title="Solvent Added vs. Viscosity Reduction (Multi-Resin Comparison)"
+)
+
+fig_regression.update_layout(
+    plot_bgcolor='white',
+    font=dict(size=12),
+    margin=dict(l=40, r=40, t=60, b=40),
+    legend_title_text='Resin Type'
+)
+fig_regression.update_xaxes(showline=True, linecolor='black', linewidth=1)
+fig_regression.update_yaxes(showgrid=True, gridcolor='lightgray', linecolor='black', linewidth=1)
+
+st.plotly_chart(fig_regression, use_container_width=True)
+
+st.caption("""
+💡 **Interpretation:**
+Each color represents a resin type. The slope of each trendline shows how quickly viscosity decreases as solvent increases.
+* Steeper slope → higher solvent sensitivity.
+* Flatter slope → lower solvent efficiency.
+""")
