@@ -88,18 +88,25 @@ if 'Avg Sensitivity' in summary_matrix.columns:
 
 st.dataframe(summary_matrix, use_container_width=True)
 
-# --- 6. Biểu đồ 3: Line chart Initial vs Final Viscosity ---
+# --- 6. Biểu đồ 3: Line chart trung bình Initial vs Final Viscosity ---
 st.markdown("---")
-st.subheader("📊 Line Chart: Initial vs Final Viscosity vs Solvent Ratio")
+st.subheader("📊 Line Chart: Average Initial vs Final Viscosity vs Solvent Ratio")
 
-line_df = filtered_df.copy()
+# Gom nhóm để tránh nhiều đường chồng lên nhau
+line_summary = filtered_df.groupby(['Resin','Vendor','Solvent_Type']).agg({
+    'Solvent_Ratio_Percent':'mean',
+    '黏度(秒)':'mean',
+    '黏度(秒)_1':'mean'
+}).reset_index()
 
 fig_line = px.line(
-    line_df,
+    line_summary,
     x='Solvent_Ratio_Percent',
-    y=['黏度(秒)', '黏度(秒)_1'],   # Độ nhớt trước và sau
-    labels={'value': 'Viscosity (s)', 'variable': 'Stage'},
-    title="Initial vs Final Viscosity by Solvent Ratio"
+    y=['黏度(秒)', '黏度(秒)_1'],
+    color='Vendor',
+    facet_col='Resin',
+    labels={'value':'Viscosity (s)', 'variable':'Stage'},
+    title="Average Initial vs Final Viscosity by Solvent Ratio"
 )
 
 fig_line.update_layout(
@@ -117,5 +124,5 @@ st.caption("""
 💡 **Interpretation:**
 - Biểu đồ 1: Scatter + trendline → so sánh hiệu quả dung môi theo vendor.
 - Biểu đồ 2: Ma trận SOP → bảng chuẩn để tính lượng dung môi cần thêm.
-- Biểu đồ 3: Line chart → hiển thị trực tiếp độ nhớt ban đầu và sau khi thêm dung môi theo % dung môi.
+- Biểu đồ 3: Line chart trung bình → hiển thị rõ xu hướng độ nhớt ban đầu và sau khi thêm dung môi theo % dung môi, gọn gàng hơn.
 """)
