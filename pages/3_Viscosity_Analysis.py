@@ -37,20 +37,19 @@ filtered_df = group_a[
     (group_a['Solvent_Type'].isin(selected_solvents))
 ].copy()
 
-# Tính % dung môi thêm
 filtered_df['Solvent_Ratio_Percent'] = (filtered_df['添加重量'] / filtered_df['塗料重量']) * 100
 
 # --- 5. Biểu đồ hồi quy ---
 st.markdown("---")
-st.subheader("📈 Comparative Regression: Solvent vs. Viscosity")
+st.subheader("📈 Comparative Regression: Solvent vs. Viscosity (Color by Solvent)")
 
 fig_regression = px.scatter(
     filtered_df,
     x='Solvent_Ratio_Percent',
     y='黏度(秒)',
-    color='Resin',
-    symbol='Solvent_Type',
-    facet_col='Vendor',
+    color='Solvent_Type',       # Màu theo dung môi
+    symbol='Resin',             # Ký hiệu theo resin
+    facet_col='Vendor',         # Phân cột theo Vendor
     trendline='ols',
     labels={'Solvent_Ratio_Percent': 'Solvent Added (%)', '黏度(秒)': 'Viscosity (s)'},
     title="Solvent Added vs. Viscosity Reduction (Multi-Filter Comparison)"
@@ -60,7 +59,7 @@ fig_regression.update_layout(
     plot_bgcolor='white',
     font=dict(size=12),
     margin=dict(l=40, r=40, t=60, b=40),
-    legend_title_text='Resin Type'
+    legend_title_text='Solvent Type'
 )
 fig_regression.update_xaxes(showline=True, linecolor='black', linewidth=1)
 fig_regression.update_yaxes(showgrid=True, gridcolor='lightgray', linecolor='black', linewidth=1)
@@ -69,8 +68,8 @@ st.plotly_chart(fig_regression, use_container_width=True)
 
 st.caption("""
 💡 **Interpretation:**
-- Mỗi màu = Resin khác nhau.
-- Mỗi ký hiệu = loại dung môi.
+- Mỗi màu = loại dung môi.
+- Mỗi ký hiệu = loại resin.
 - Mỗi cột (facet) = Vendor khác nhau.
 Độ dốc trendline cho thấy mức độ nhạy dung môi:
 * Steeper slope → dung môi hiệu quả, giảm độ nhớt nhanh.
