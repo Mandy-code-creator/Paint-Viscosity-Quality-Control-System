@@ -72,7 +72,8 @@ if tree_summary.empty:
 
 # --- 4. RENDER GRAPHVIZ (LEFT-TO-RIGHT CLEAN LAYOUT) ---
 graph = graphviz.Digraph(engine='dot')
-graph.attr(rankdir='LR', splines='curved', nodesep='0.4', ranksep='1.5', bgcolor='transparent') 
+# Thêm dpi='300' để ảnh sắc nét chuẩn in ấn
+graph.attr(rankdir='LR', splines='curved', nodesep='0.4', ranksep='1.5', bgcolor='transparent', dpi='300') 
 graph.attr('node', shape='none', margin='0', fontname='Arial')
 graph.attr('edge', color='#A0A0A0', penwidth='1.5', arrowsize='0.8')
 
