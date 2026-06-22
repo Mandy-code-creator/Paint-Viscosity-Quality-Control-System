@@ -5,7 +5,7 @@ import pandas as pd
 # --- 1. Cấu hình trang ---
 st.set_page_config(page_title="Viscosity & SOP Report", page_icon="📊", layout="wide")
 st.title("📊 Viscosity & SOP Analysis Dashboard")
-st.markdown("Comparative regression, SOP matrix, and trendline visualization for Resin – Vendor – Solvent.")
+st.markdown("Comparative regression, SOP matrix, and line chart visualization for Resin – Vendor – Solvent.")
 
 # --- 2. Kiểm tra dữ liệu ---
 if not st.session_state.get('raw_data_loaded', False):
@@ -43,9 +43,9 @@ fig_regression = px.scatter(
     filtered_df,
     x='Solvent_Ratio_Percent',
     y='黏度(秒)',
-    color='Solvent_Type',       # Màu theo dung môi
-    symbol='Resin',             # Ký hiệu theo resin
-    facet_col='Vendor',         # Phân cột theo Vendor
+    color='Solvent_Type',
+    symbol='Resin',
+    facet_col='Vendor',
     trendline='ols',
     labels={'Solvent_Ratio_Percent': 'Solvent Added (%)', '黏度(秒)': 'Viscosity (s)'},
     title="Solvent Added vs. Viscosity Reduction (Multi-Filter Comparison)"
@@ -88,27 +88,34 @@ if 'Avg Sensitivity' in summary_matrix.columns:
 
 st.dataframe(summary_matrix, use_container_width=True)
 
-# --- 6. Biểu đồ 3: Xu hướng dung môi – resin – vendor ---
+# --- 6. Biểu đồ 3: Line chart Initial vs Final Viscosity ---
 st.markdown("---")
-st.subheader("📊 Trendline: Solvent vs. Viscosity by Resin – Vendor – Solvent")
+st.subheader("📊 Line Chart: Initial vs Final Viscosity vs Solvent Ratio")
 
-fig_trend = px.scatter(
-    filtered_df,
+line_df = filtered_df.copy()
+
+fig_line = px.line(
+    line_df,
     x='Solvent_Ratio_Percent',
-    y='黏度(秒)',
-    color='Solvent_Type',
-    symbol='Resin',
-    facet_col='Vendor',
-    trendline='ols',
-    labels={'Solvent_Ratio_Percent': 'Solvent Added (%)', '黏度(秒)': 'Viscosity (s)'},
-    title="Trendline Comparison (Resin – Vendor – Solvent)"
+    y=['黏度(秒)', '黏度(秒)_1'],   # Độ nhớt trước và sau
+    labels={'value': 'Viscosity (s)', 'variable': 'Stage'},
+    title="Initial vs Final Viscosity by Solvent Ratio"
 )
-fig_trend.update_layout(plot_bgcolor='white', font=dict(size=12), margin=dict(l=40, r=40, t=60, b=40))
-st.plotly_chart(fig_trend, use_container_width=True)
+
+fig_line.update_layout(
+    plot_bgcolor='white',
+    font=dict(size=12),
+    margin=dict(l=40, r=40, t=60, b=40),
+    legend_title_text='Stage'
+)
+fig_line.update_xaxes(showline=True, linecolor='black', linewidth=1)
+fig_line.update_yaxes(showgrid=True, gridcolor='lightgray', linecolor='black', linewidth=1)
+
+st.plotly_chart(fig_line, use_container_width=True)
 
 st.caption("""
 💡 **Interpretation:**
-- Biểu đồ 1: So sánh hồi quy nhiều nhóm → độ dốc trendline cho thấy hiệu quả dung môi.
+- Biểu đồ 1: Scatter + trendline → so sánh hiệu quả dung môi theo vendor.
 - Biểu đồ 2: Ma trận SOP → bảng chuẩn để tính lượng dung môi cần thêm.
-- Biểu đồ 3: Xu hướng trực quan → nhìn rõ dung môi nào giảm độ nhớt nhanh, dung môi nào kém hiệu quả.
+- Biểu đồ 3: Line chart → hiển thị trực tiếp độ nhớt ban đầu và sau khi thêm dung môi theo % dung môi.
 """)
