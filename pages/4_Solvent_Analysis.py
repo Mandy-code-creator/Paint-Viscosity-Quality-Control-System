@@ -32,7 +32,7 @@ for col in ['Vendor', 'Resin', 'Solvent_Type']:
 
 # Data Filtering
 vendor_list = sorted(group_a['Vendor'].dropna().unique().tolist())
-selected_vendor = st.sidebar.selectbox("🏭 Select Vendor:", vendor_list)
+selected_vendor = st.sidebar.selectbox("Select Vendor:", vendor_list)
 
 filtered_df = group_a[group_a['Vendor'] == selected_vendor].copy()
 
@@ -72,8 +72,8 @@ if tree_summary.empty:
 
 # --- 4. RENDER GRAPHVIZ (LEFT-TO-RIGHT CLEAN LAYOUT) ---
 graph = graphviz.Digraph(engine='dot')
-# Thêm dpi='300' để ảnh sắc nét chuẩn in ấn
-graph.attr(rankdir='LR', splines='curved', nodesep='0.4', ranksep='1.5', bgcolor='transparent', dpi='300') 
+# KHÔNG CÓ dpi='300' Ở ĐÂY ĐỂ WEB HIỂN THỊ BÌNH THƯỜNG
+graph.attr(rankdir='LR', splines='curved', nodesep='0.4', ranksep='1.5', bgcolor='transparent') 
 graph.attr('node', shape='none', margin='0', fontname='Arial')
 graph.attr('edge', color='#A0A0A0', penwidth='1.5', arrowsize='0.8')
 
@@ -95,10 +95,10 @@ if date_cols:
 else:
     date_range_str = "All Available Data"
 
-# Styled with Deep Sky Blue (#00BFFF)
+# ĐÃ THAY THẾ EMOJI BẰNG CHỮ ĐỂ TRÁNH LỖI FONT KHI XUẤT WORD
 center_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="12">
     <TR><TD BGCOLOR="#00BFFF" STYLE="ROUNDED">
-        <FONT COLOR="white" POINT-SIZE="20"><B>🏭 {selected_vendor}</B></FONT>
+        <FONT COLOR="white" POINT-SIZE="20"><B>VENDOR: {selected_vendor}</B></FONT>
     </TD></TR>
     <TR><TD BGCOLOR="#F8F9FA" STYLE="ROUNDED">
         <FONT POINT-SIZE="13" COLOR="#333333">
@@ -123,7 +123,7 @@ for resin in unique_resins:
     
     resin_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="8">
         <TR><TD BGCOLOR="#E6F2FF" STYLE="ROUNDED" BORDER="1" COLOR="#00BFFF">
-            <FONT COLOR="#005A9E" POINT-SIZE="15"><B>🧪 {resin}</B></FONT><BR/>
+            <FONT COLOR="#005A9E" POINT-SIZE="15"><B>RESIN: {resin}</B></FONT><BR/>
             <FONT COLOR="#555555" POINT-SIZE="11">{resin_paint_sum:,.0f} kg Paint</FONT>
         </TD></TR>
     </TABLE>'''
@@ -136,7 +136,7 @@ for resin in unique_resins:
         
         leaf_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="6">
             <TR><TD ALIGN="LEFT" BGCOLOR="white" STYLE="ROUNDED" BORDER="1" COLOR="#CCCCCC">
-                <B><FONT COLOR="#333333">💧 {solvent}</FONT></B><BR/>
+                <B><FONT COLOR="#333333">SOLVENT: {solvent}</FONT></B><BR/>
                 <FONT COLOR="#00BFFF">{row['Avg_Kg_per_1s']:,.2f} kg / 1s</FONT><BR/>
                 <FONT COLOR="#D9534F">{row['Avg_Pct_per_1s']:.2f}% / 1s</FONT>
             </TD></TR>
@@ -146,10 +146,14 @@ for resin in unique_resins:
         graph.edge(resin_id, leaf_id)
 
 # --- 5. RENDER & EXPORT ---
+# 5.1 Hiển thị trên giao diện Streamlit (định dạng SVG mặc định nhẹ, vừa vặn, không bị lỗi khoảng trắng)
 st.graphviz_chart(graph, use_container_width=True)
 
 try:
-    # 1. Tạo dữ liệu ảnh từ Graphviz
+    # 5.2 BƠM ĐỘ PHÂN GIẢI CAO (DPI 300) VÀO TRƯỚC KHI XUẤT ẢNH PNG CHO WORD ĐỂ ẢNH SẮC NÉT
+    graph.attr(dpi='300') 
+    
+    # Tạo dữ liệu ảnh từ Graphviz
     png_data = graph.pipe(format='png')
     if not png_data:
         st.error("Lỗi: Không tạo được dữ liệu ảnh từ Graphviz.")
@@ -157,14 +161,14 @@ try:
         
     image_stream = io.BytesIO(png_data)
     
-    # 2. Tạo file Word
+    # Tạo file Word
     doc = Document()
     doc.add_heading(f'Solvent Consumption & Viscosity Control: {selected_vendor}', 0)
     
     doc.add_paragraph('Report Level: Coil-Level Data')
     doc.add_paragraph('Quality Filter: Grade A-B and above')
     
-    # Thêm ảnh
+    # Thêm ảnh vào Word
     doc.add_picture(image_stream, width=Inches(6.5))
     
     # Lưu vào buffer
@@ -172,7 +176,7 @@ try:
     doc.save(doc_io)
     doc_io.seek(0)
     
-    # 3. Hiển thị nút tải xuống
+    # Hiển thị nút tải xuống
     col_empty, col_btn = st.columns([4, 1])
     with col_btn:
         st.download_button(
@@ -183,6 +187,5 @@ try:
         )
 
 except Exception as e:
-    # Hiển thị lỗi thực sự lên UI để dễ debug
     st.error(f"Đã xảy ra lỗi khi tạo file Word: {e}")
     st.exception(e)
