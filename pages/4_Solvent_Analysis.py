@@ -119,12 +119,17 @@ unique_resins = tree_summary['Resin'].unique()
 for resin in unique_resins:
     resin_id = f"resin_{resin}"
     resin_data = tree_summary[tree_summary['Resin'] == resin]
-    resin_paint_sum = resin_data['Total_Paint'].sum()
     
+    # Tính tổng Paint và tổng Solvent cho từng Resin
+    resin_paint_sum = resin_data['Total_Paint'].sum()
+    resin_solvent_sum = resin_data['Total_Solvent'].sum() # <-- DÒNG MỚI THÊM
+    
+    # Cập nhật giao diện node RESIN (Thêm dòng hiển thị kg Solvent)
     resin_html = f'''<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="8">
         <TR><TD BGCOLOR="#E6F2FF" STYLE="ROUNDED" BORDER="1" COLOR="#00BFFF">
             <FONT COLOR="#005A9E" POINT-SIZE="15"><B>RESIN: {resin}</B></FONT><BR/>
-            <FONT COLOR="#555555" POINT-SIZE="11">{resin_paint_sum:,.0f} kg Paint</FONT>
+            <FONT COLOR="#555555" POINT-SIZE="11">{resin_paint_sum:,.0f} kg Paint</FONT><BR/>
+            <FONT COLOR="#D9534F" POINT-SIZE="11">{resin_solvent_sum:,.0f} kg Solvent</FONT>
         </TD></TR>
     </TABLE>'''
     graph.node(resin_id, f'<{resin_html}>')
