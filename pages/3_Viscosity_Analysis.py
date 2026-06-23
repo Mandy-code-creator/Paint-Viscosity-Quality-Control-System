@@ -84,6 +84,10 @@ if 'Sensitivity' in group_a.columns:
 # Execute data aggregation
 summary_matrix = group_a.groupby(['Resin','Vendor','Solvent_Type']).agg(**agg_funcs).reset_index()
 
+# ĐÃ TÍCH HỢP: Lọc bỏ tạm thời các dữ liệu có ít hơn 10 batches
+if 'Batches' in summary_matrix.columns:
+    summary_matrix = summary_matrix[summary_matrix['Batches'] >= 10].reset_index(drop=True)
+
 # Calculate technical standard based on solvent sensitivity
 if 'Avg Sensitivity' in summary_matrix.columns and 'Total Paint (kg)' in summary_matrix.columns:
     summary_matrix['Solvent Factor (kg/1s drop)'] = summary_matrix.apply(
@@ -122,6 +126,7 @@ st.warning("""
 💡 **SOP Technical Guidelines for Saturation Management:**
 - **Non-Linear Law:** As the current viscosity approaches the `Viscosity Floor (s)`, the marginal dilution efficiency drops sharply. Adding more solvent will barely reduce the viscosity seconds.
 - **Saturation Boundary:** Operators must never be allowed to add solvent exceeding the percentage specified in the `Max Solvent Limit % ⚠️` column to prevent destroying the core resin chemical bonds.
+- **Data Reliability:** Rows with fewer than 10 historical batches are automatically excluded from this matrix to ensure statistical significance.
 """)
 
 
@@ -159,6 +164,6 @@ st.plotly_chart(fig_line, use_container_width=True)
 st.caption("""
 💡 **Interpretation:**
 - **Chart 1:** Scatter + trendline → Compares solvent efficiency across different vendors.
-- **Chart 2:** SOP Matrix → Standard reference table integrating safe saturation boundaries based on batch percentage.
+- **Chart 2:** SOP Matrix → Standard reference table integrating safe saturation boundaries based on batch percentage (Only groups with 10+ batches are shown).
 - **Chart 3:** Average Line Chart → Illustrates the non-linear slope of initial and final viscosity during dilution.
 """)
