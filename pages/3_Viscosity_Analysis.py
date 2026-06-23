@@ -105,8 +105,6 @@ st.dataframe(
 
 st.info("⚠️ **Lưu ý SOP:** `Viscosity Floor` là ngưỡng độ nhớt bão hòa (không thể giảm thêm). Không khuyến nghị thêm dung môi vượt quá `Max Solvent Limit %` để tránh phá vỡ cấu trúc sơn.")
 
-st.info("⚠️ **Lưu ý SOP:** `Viscosity Floor` là ngưỡng độ nhớt bão hòa (không thể giảm thêm). Không khuyến nghị thêm dung môi vượt quá `Max Solvent Limit %` để tránh phá vỡ cấu trúc sơn.")
-
 # --- 6. Biểu đồ 3: Line chart trung bình Initial vs Final Viscosity ---
 st.markdown("---")
 st.subheader("📊 Line Chart: Average Initial vs Final Viscosity vs Solvent Ratio")
