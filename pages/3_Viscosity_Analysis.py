@@ -1,11 +1,12 @@
 import streamlit as st
 import plotly.express as px
 import pandas as pd
+import numpy as np
 
 # --- 1. PAGE CONFIGURATION ---
 st.set_page_config(page_title="Viscosity & SOP Report", page_icon="📊", layout="wide")
 st.title("📊 Viscosity & SOP Analysis Dashboard")
-st.markdown("Comparative regression, SOP matrix, and line chart visualization for Resin – Vendor – Solvent.")
+st.markdown("Production-driven regression, dynamic recommendation engine, and diminishing return monitoring.")
 
 # --- 2. DATA VALIDATION ---
 if not st.session_state.get('raw_data_loaded', False):
@@ -15,10 +16,14 @@ if not st.session_state.get('raw_data_loaded', False):
 group_a = st.session_state['group_a_data'].copy()
 group_a['Solvent_Type'] = group_a['Solvent_Type'].astype(str)
 
-# Calculate solvent ratio percentage based on batch weight (Prevents scaling issues due to batch sizes)
+# STEP 1: Data Normalization (Solvent Ratio & Viscosity Reduction)
 group_a['Solvent_Ratio_Percent'] = (group_a['添加重量'] / group_a['塗料重量'].replace(0, 1)) * 100
+group_a['Viscosity_Reduction'] = group_a['黏度(秒)'] - group_a['黏度(秒)_1']
 
-# --- 3. INTERACTIVE FILTERS ---
+# Calculate Historical Efficiency per batch (seconds dropped per 1% solvent)
+group_a['Historical_Efficiency'] = group_a['Viscosity_Reduction'] / group_a['Solvent_Ratio_Percent'].replace(0, np.nan)
+
+# --- 3. INTERACTIVE GLOBAL FILTERS ---
 unique_resins = sorted(group_a['Resin'].unique())
 unique_vendors = sorted(group_a['Vendor'].unique())
 unique_solvents = sorted(group_a['Solvent_Type'].unique())
@@ -37,9 +42,120 @@ filtered_df = group_a[
     (group_a['Solvent_Type'].isin(selected_solvents))
 ].copy()
 
-# --- 4. CHART 1: MULTI-GROUP COMPARATIVE REGRESSION ---
+
+# --- 4. MODULE 1 & 2: DYNAMIC RECOMMENDATION ENGINE & EFFICIENCY MONITOR ---
 st.markdown("---")
-st.subheader("📈 Comparative Regression: Solvent vs. Viscosity")
+st.subheader("💡 Dynamic Recommendation Engine & Efficiency Monitor")
+
+# Filter combinations that strictly have >= 10 batches to ensure statistical reliability
+valid_groups = group_a.groupby(['Resin', 'Vendor', 'Solvent_Type']).filter(lambda x: x['塗料批號'].nunique() >= 10)
+if valid_groups.empty:
+    st.info("No groups found with 10+ historical batches to run the recommendation engine.")
+else:
+    # Dropdowns for specific batch execution
+    col_e1, col_e2, col_e3 = st.columns(3)
+    with col_e1:
+        engine_resin = st.selectbox("Execution Resin:", valid_groups['Resin'].unique())
+    with col_e2:
+        engine_vendor = st.selectbox("Execution Vendor:", valid_groups[valid_groups['Resin'] == engine_resin]['Vendor'].unique())
+    with col_e3:
+        engine_solvent = st.selectbox("Execution Solvent Type:", valid_groups[(valid_groups['Resin'] == engine_resin) & (valid_groups['Vendor'] == engine_vendor)]['Solvent_Type'].unique())
+
+    # Get baseline historical metrics for the selected group
+    group_data = valid_groups[
+        (valid_groups['Resin'] == engine_resin) & 
+        (group_data_vendor := valid_groups['Vendor'] == engine_vendor) & 
+        (valid_groups['Solvent_Type'] == engine_solvent)
+    ]
+    
+    # STEP 3: Establish baseline efficiency curve reference
+    baseline_efficiency = group_data['Historical_Efficiency'].median()
+    max_safe_ratio = group_data['Solvent_Ratio_Percent'].quantile(0.95)
+    viscosity_floor = group_data['黏度(秒)_1'].min()
+
+    # Operator Live Inputs
+    st.markdown("#### **Operator Input Panel**")
+    col_i1, col_i2, col_i3, col_i4 = st.columns(4)
+    with col_i1:
+        paint_weight = st.number_input("Paint Weight (kg):", min_value=1.0, value=120.0, step=10.0)
+    with col_i2:
+        current_visc = st.number_input("Current Viscosity (s):", min_value=1.0, value=58.0, step=1.0)
+    with col_i3:
+        target_visc = st.number_input("Target Viscosity (s):", min_value=1.0, value=50.0, step=1.0)
+    with col_i4:
+        st.metric(label="Target Reduction (Delta V)", value=f"{current_visc - target_visc:.1f} s")
+
+    # STEP 5: Recommendation Engine Calculations
+    delta_v_target = current_visc - target_visc
+    
+    if delta_v_target <= 0:
+        st.success("✅ Target viscosity is already achieved or higher than current viscosity. No solvent needed.")
+    elif target_visc < viscosity_floor:
+        st.error(f"❌ Critical Warning: Target viscosity ({target_visc}s) is below the historical Viscosity Floor ({viscosity_floor:.1f}s) for this system. Production cannot proceed safely.")
+    else:
+        # Calculate expected ratio using baseline efficiency
+        predicted_ratio_needed = delta_v_target / baseline_efficiency
+        recommended_solvent_kg = (paint_weight * predicted_ratio_needed) / 100
+
+        # STEP 4: Diminishing Return Zone Verification
+        # Evaluate how far the predicted ratio goes against historical bounds
+        yellow_threshold_ratio = max_safe_ratio * 0.75
+        
+        st.markdown("#### **System Output Recommendation**")
+        
+        if predicted_ratio_needed <= yellow_threshold_ratio:
+            # Green Zone: Normal High-Efficiency Zone
+            st.success(f"**Recommended Solvent Weight:** {recommended_solvent_kg:.2f} kg")
+            st.markdown(f"ℹ️ **Status:** `Optimal Efficiency Zone`. Expected Solvent Ratio: **{predicted_ratio_needed:.2f}%** (Within safe historical baseline).")
+            
+        elif predicted_ratio_needed <= max_safe_ratio:
+            # Yellow Zone: Diminishing Return Zone (Efficiency dropped to ~50% of peak capability)
+            st.warning(f"⚠️ **Recommended Solvent Weight:** {recommended_solvent_kg:.2f} kg")
+            st.markdown(f"⚠️ **Status:** `Diminishing Return Zone (Yellow Alert)`. Expected Solvent Ratio will reach **{predicted_ratio_needed:.2f}%**. Dilution efficiency is dropping; monitor closely.")
+            
+        else:
+            # Red Zone: Critical Diminishing Return / Saturation Overload (<30% expected efficiency)
+            st.error(f"🚨 **Critical Alert: Recommended Solvent Weight Cap:** {recommended_solvent_kg:.2f} kg")
+            st.markdown(f"🚨 **Status:** `Critical Diminishing Return Zone (Red Alert)`. Expected Solvent Ratio: **{predicted_ratio_needed:.2f}%** exceeds the safe threshold (**{max_safe_ratio:.2f}%**). Adding more solvent will damage film properties without dropping viscosity.")
+
+
+# --- 5. CHART 2: HISTORICAL SOP MATRIX REFERENCE ---
+st.markdown("---")
+st.subheader("📚 SOP Reference Matrix (Only Groups with 10+ Batches)")
+
+# Build static matrix summary for reference
+agg_funcs = {
+    'Batches': pd.NamedAgg(column='塗料批號', aggfunc='nunique'),
+    'Total Paint (kg)': pd.NamedAgg(column='塗料重量', aggfunc='sum'),
+    'Total Solvent (kg)': pd.NamedAgg(column='添加重量', aggfunc='sum'),
+    'Avg Initial V (s)': pd.NamedAgg(column='黏度(秒)', aggfunc='mean'),
+    'Avg Final V (s)': pd.NamedAgg(column='黏度(秒)_1', aggfunc='mean'),
+    'Viscosity Floor (s) ⚠️': pd.NamedAgg(column='黏度(秒)_1', aggfunc='min'),
+    'Baseline Efficiency (s/%)': pd.NamedAgg(column='Historical_Efficiency', aggfunc='median'),
+    'Max Safe Solvent Limit %': pd.NamedAgg(column='Solvent_Ratio_Percent', aggfunc=lambda x: x.quantile(0.95))
+}
+
+summary_matrix = group_a.groupby(['Resin','Vendor','Solvent_Type']).agg(**agg_funcs).reset_index()
+summary_matrix = summary_matrix[summary_matrix['Batches'] >= 10].reset_index(drop=True)
+
+st.dataframe(
+    summary_matrix,
+    column_config={
+        "Total Paint (kg)": st.column_config.NumberColumn(format="%d"),
+        "Total Solvent (kg)": st.column_config.NumberColumn(format="%d"),
+        "Avg Initial V (s)": st.column_config.NumberColumn(format="%.1f"),
+        "Avg Final V (s)": st.column_config.NumberColumn(format="%.1f"),
+        "Viscosity Floor (s) ⚠️": st.column_config.NumberColumn(format="%.1f", help="Absolute lowest recorded viscosity in history."),
+        "Baseline Efficiency (s/%)": st.column_config.NumberColumn(format="%.2f", help="Median viscosity seconds dropped per 1% of solvent added."),
+        "Max Safe Solvent Limit %": st.column_config.ProgressColumn(format="%.2f%%", min_value=0, max_value=30)
+    },
+    use_container_width=True
+)
+
+
+# --- 6. CHART 3: MULTI-GROUP COMPARATIVE REGRESSION VIZ ---
+st.markdown("---")
+st.subheader("📈 Visual Distribution: Solvent Ratio vs. Viscosity")
 
 fig_regression = px.scatter(
     filtered_df,
@@ -50,120 +166,7 @@ fig_regression = px.scatter(
     facet_col='Vendor',
     trendline='ols',
     labels={'Solvent_Ratio_Percent': 'Solvent Added (%)', '黏度(秒)': 'Viscosity (s)'},
-    title="Solvent Added vs. Viscosity Reduction (Multi-Filter Comparison)"
+    title="Historical Scatter Distribution Analysis"
 )
-fig_regression.update_layout(plot_bgcolor='white', font=dict(size=12), margin=dict(l=40, r=40, t=60, b=40))
+fig_regression.update_layout(plot_bgcolor='white', font=dict(size=12))
 st.plotly_chart(fig_regression, use_container_width=True)
-
-
-# --- 5. CHART 2: SOP MATRIX (With Saturation Logic & Outlier Filtering) ---
-st.markdown("---")
-st.subheader("📚 SOP Matrix: Resin – Vendor – Solvent (Saturation-Aware)")
-
-# Build dynamic aggregation dictionary based on available columns
-agg_funcs = {}
-if '塗料批號' in group_a.columns: 
-    agg_funcs['Batches'] = pd.NamedAgg(column='塗料批號', aggfunc='nunique')
-if '塗料重量' in group_a.columns: 
-    agg_funcs['Total Paint (kg)'] = pd.NamedAgg(column='塗料重量', aggfunc='sum')
-if '添加重量' in group_a.columns: 
-    agg_funcs['Total Solvent (kg)'] = pd.NamedAgg(column='添加重量', aggfunc='sum')
-if '黏度(秒)' in group_a.columns: 
-    agg_funcs['Avg Initial V (s)'] = pd.NamedAgg(column='黏度(秒)', aggfunc='mean')
-if '黏度(秒)_1' in group_a.columns: 
-    agg_funcs['Avg Final V (s)'] = pd.NamedAgg(column='黏度(秒)_1', aggfunc='mean')
-    # NON-LINEAR LAW: Identify the absolute lowest physical viscosity floor ever recorded
-    agg_funcs['Viscosity Floor (s) ⚠️'] = pd.NamedAgg(column='黏度(秒)_1', aggfunc='min')
-if 'Solvent_Ratio_Percent' in group_a.columns:
-    agg_funcs['Avg Solvent %'] = pd.NamedAgg(column='Solvent_Ratio_Percent', aggfunc='mean')
-    # SAFETY LOGIC: Use 95th Percentile instead of Max to eliminate past human operational errors
-    agg_funcs['Max Solvent Limit % ⚠️'] = pd.NamedAgg(column='Solvent_Ratio_Percent', aggfunc=lambda x: x.quantile(0.95))
-if 'Sensitivity' in group_a.columns:
-    agg_funcs['Avg Sensitivity'] = pd.NamedAgg(column='Sensitivity', aggfunc='mean')
-
-# Execute data aggregation
-summary_matrix = group_a.groupby(['Resin','Vendor','Solvent_Type']).agg(**agg_funcs).reset_index()
-
-# ĐÃ TÍCH HỢP: Lọc bỏ tạm thời các dữ liệu có ít hơn 10 batches
-if 'Batches' in summary_matrix.columns:
-    summary_matrix = summary_matrix[summary_matrix['Batches'] >= 10].reset_index(drop=True)
-
-# Calculate technical standard based on solvent sensitivity
-if 'Avg Sensitivity' in summary_matrix.columns and 'Total Paint (kg)' in summary_matrix.columns:
-    summary_matrix['Solvent Factor (kg/1s drop)'] = summary_matrix.apply(
-        lambda row: (row['Total Paint (kg)'] * (1.0 / row['Avg Sensitivity']) / 100)
-        if row['Avg Sensitivity'] > 0 else 0,
-        axis=1
-    )
-
-# Render dataframe with Streamlit advanced Column Configuration (Zero Matplotlib Dependency)
-st.dataframe(
-    summary_matrix,
-    column_config={
-        "Total Paint (kg)": st.column_config.NumberColumn(format="%d"),
-        "Total Solvent (kg)": st.column_config.NumberColumn(format="%d"),
-        "Avg Initial V (s)": st.column_config.NumberColumn(format="%.1f"),
-        "Avg Final V (s)": st.column_config.NumberColumn(format="%.1f"),
-        "Viscosity Floor (s) ⚠️": st.column_config.NumberColumn(
-            format="%.1f", 
-            help="The lowest viscosity ever recorded (Non-linear saturation floor). Viscosity cannot drop below this level."
-        ),
-        "Avg Solvent %": st.column_config.NumberColumn(format="%.2f%%"),
-        "Max Solvent Limit % ⚠️": st.column_config.ProgressColumn(
-            label="Max Solvent Limit % ⚠️",
-            format="%.2f%%",
-            min_value=0,
-            max_value=30,
-            help="The practical safe solvent addition ceiling (Filtered out the top 5% anomalies/historical over-addition errors)."
-        ),
-        "Avg Sensitivity": st.column_config.NumberColumn(format="%.3f"),
-        "Solvent Factor (kg/1s drop)": st.column_config.NumberColumn(format="%.3f")
-    },
-    use_container_width=True
-)
-
-st.warning("""
-💡 **SOP Technical Guidelines for Saturation Management:**
-- **Non-Linear Law:** As the current viscosity approaches the `Viscosity Floor (s)`, the marginal dilution efficiency drops sharply. Adding more solvent will barely reduce the viscosity seconds.
-- **Saturation Boundary:** Operators must never be allowed to add solvent exceeding the percentage specified in the `Max Solvent Limit % ⚠️` column to prevent destroying the core resin chemical bonds.
-- **Data Reliability:** Rows with fewer than 10 historical batches are automatically excluded from this matrix to ensure statistical significance.
-""")
-
-
-# --- 6. CHART 3: LINE CHART (Average Initial vs Final Viscosity) ---
-st.markdown("---")
-st.subheader("📊 Line Chart: Average Initial vs Final Viscosity vs Solvent Ratio")
-
-line_summary = filtered_df.groupby(['Resin','Vendor','Solvent_Type']).agg({
-    'Solvent_Ratio_Percent':'mean',
-    '黏度(秒)':'mean',
-    '黏度(秒)_1':'mean'
-}).reset_index()
-
-fig_line = px.line(
-    line_summary,
-    x='Solvent_Ratio_Percent',
-    y=['黏度(秒)', '黏度(秒)_1'],
-    color='Vendor',
-    facet_col='Resin',
-    labels={'value':'Viscosity (s)', 'variable':'Stage'},
-    title="Average Initial vs Final Viscosity by Solvent Ratio"
-)
-
-fig_line.update_layout(
-    plot_bgcolor='white',
-    font=dict(size=12),
-    margin=dict(l=40, r=40, t=60, b=40),
-    legend_title_text='Stage'
-)
-fig_line.update_xaxes(showline=True, linecolor='black', linewidth=1)
-fig_line.update_yaxes(showgrid=True, gridcolor='lightgray', linecolor='black', linewidth=1)
-
-st.plotly_chart(fig_line, use_container_width=True)
-
-st.caption("""
-💡 **Interpretation:**
-- **Chart 1:** Scatter + trendline → Compares solvent efficiency across different vendors.
-- **Chart 2:** SOP Matrix → Standard reference table integrating safe saturation boundaries based on batch percentage (Only groups with 10+ batches are shown).
-- **Chart 3:** Average Line Chart → Illustrates the non-linear slope of initial and final viscosity during dilution.
-""")
