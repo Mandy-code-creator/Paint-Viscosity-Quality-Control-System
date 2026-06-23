@@ -128,11 +128,30 @@ else:
 
 # --- 5. BIỂU ĐỒ XU HƯỚNG PHI TUYẾN TÍNH (DỮ LIỆU ĐỐI CHIẾU TRƯỚC/SAU) ---
 st.markdown("---")
-st.subheader("📈 Non-linear Distribution Analysis: Initial vs. Final Viscosity Trends")
-st.markdown("*This interactive plot visualizes how Initial Viscosity (Before) and Final Viscosity (After) respond to the Solvent Ratio %. Notice the flattening of the curve at higher ratios (Diminishing Return).*")
+st.subheader("📈 Viscosity Drop Analysis: Batch-by-Batch Tracking")
+st.markdown("*This interactive plot tracks the exact viscosity drop for each batch. The vertical dotted lines connect the Initial Viscosity (Orange) to its Final Viscosity (Blue) after adding the specified Solvent Ratio.*")
 
 if not filtered_df.empty:
     fig_trend = go.Figure()
+
+    # THỦ THUẬT 1: Vẽ các đường thẳng dọc nét đứt nối từng mẻ (Cam rớt xuống Xanh)
+    x_lines = []
+    y_lines = []
+    for _, row in filtered_df.iterrows():
+        # Kiểm tra để tránh lỗi nếu có dữ liệu trống
+        if pd.notna(row['Solvent_Ratio_Percent']) and pd.notna(row['黏度(秒)']) and pd.notna(row['黏度(秒)_1']):
+            x_lines.extend([row['Solvent_Ratio_Percent'], row['Solvent_Ratio_Percent'], None])
+            y_lines.extend([row['黏度(秒)'], row['黏度(秒)_1'], None])
+
+    fig_trend.add_trace(go.Scatter(
+        x=x_lines,
+        y=y_lines,
+        mode='lines',
+        name='Viscosity Drop (Delta V)',
+        line=dict(color='gray', width=1, dash='dot'),
+        hoverinfo='skip', # Ẩn tooltip của đường kẻ này cho đỡ rối
+        showlegend=True
+    ))
 
     # 1. Vẽ các điểm dữ liệu "Độ nhớt TRƯỚC khi thêm dung môi" (Màu Cam)
     fig_trend.add_trace(go.Scatter(
@@ -140,8 +159,8 @@ if not filtered_df.empty:
         y=filtered_df['黏度(秒)'],
         mode='markers',
         name='Initial Viscosity (Before)',
-        marker=dict(color='#ED7D31', size=6, opacity=0.6),
-        hovertemplate='Solvent: %{x:.2f}%<br>Initial Visc: %{y:.1f}s<extra></extra>'
+        marker=dict(color='#ED7D31', size=7, opacity=0.9, line=dict(width=1, color='white')),
+        hovertemplate='Initial: %{y:.1f}s<extra></extra>'
     ))
 
     # 2. Vẽ các điểm dữ liệu "Độ nhớt SAU khi thêm dung môi" (Màu Xanh Dương)
@@ -150,11 +169,11 @@ if not filtered_df.empty:
         y=filtered_df['黏度(秒)_1'],
         mode='markers',
         name='Final Viscosity (After)',
-        marker=dict(color='#4472C4', size=6, opacity=0.6),
-        hovertemplate='Solvent: %{x:.2f}%<br>Final Visc: %{y:.1f}s<extra></extra>'
+        marker=dict(color='#4472C4', size=7, opacity=0.9, line=dict(width=1, color='white')),
+        hovertemplate='Final: %{y:.1f}s<extra></extra>'
     ))
 
-    # 3. Tính toán và vẽ Đường xu hướng Phi tuyến tính (Đường cong đa thức bậc 2)
+    # 3. Tính toán và vẽ Đường xu hướng Phi tuyến tính
     sorted_df = filtered_df.dropna(subset=['Solvent_Ratio_Percent', '黏度(秒)_1']).sort_values(by='Solvent_Ratio_Percent')
     
     if len(sorted_df) > 5:
@@ -165,12 +184,12 @@ if not filtered_df.empty:
             x=sorted_df['Solvent_Ratio_Percent'],
             y=poly_curve,
             mode='lines',
-            name='Non-linear Dilution Trend (After)',
+            name='Non-linear Trend (After)',
             line=dict(color='#C00000', width=3, dash='dash'),
             hoverinfo='skip'
         ))
 
-    # Cấu hình Layout nền trắng, lưới xám nhạt rõ ràng
+    # Cấu hình Layout
     fig_trend.update_layout(
         plot_bgcolor='white',
         xaxis=dict(
@@ -188,8 +207,11 @@ if not filtered_df.empty:
             linewidth=1
         ),
         margin=dict(l=50, r=50, t=40, b=50),
-        legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01, bgcolor="rgba(255,255,255,0.8)"),
-        hovermode='closest'
+        # Di chuyển chú thích sang góc phải để tránh che mất các điểm dữ liệu
+        legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99, bgcolor="rgba(255,255,255,0.9)"),
+        
+        # THỦ THUẬT 2: Gộp chung hộp thoại Hover
+        hovermode='x unified' 
     )
     
     st.plotly_chart(fig_trend, use_container_width=True)
