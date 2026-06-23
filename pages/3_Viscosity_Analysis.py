@@ -128,17 +128,16 @@ else:
 
 # --- 5. BIỂU ĐỒ XU HƯỚNG PHI TUYẾN TÍNH (DỮ LIỆU ĐỐI CHIẾU TRƯỚC/SAU) ---
 st.markdown("---")
-st.subheader("📈 Viscosity Drop Analysis: Batch-by-Batch Tracking")
+st.subheader("📈 Non-linear Distribution Analysis: Initial vs. Final Viscosity Trends")
 st.markdown("*This interactive plot tracks the exact viscosity drop for each batch. The vertical dotted lines connect the Initial Viscosity (Orange) to its Final Viscosity (Blue) after adding the specified Solvent Ratio.*")
 
 if not filtered_df.empty:
     fig_trend = go.Figure()
 
-    # THỦ THUẬT 1: Vẽ các đường thẳng dọc nét đứt nối từng mẻ (Cam rớt xuống Xanh)
+    # Vẽ các đường thẳng dọc nét đứt nối từng mẻ (Cam rớt xuống Xanh)
     x_lines = []
     y_lines = []
     for _, row in filtered_df.iterrows():
-        # Kiểm tra để tránh lỗi nếu có dữ liệu trống
         if pd.notna(row['Solvent_Ratio_Percent']) and pd.notna(row['黏度(秒)']) and pd.notna(row['黏度(秒)_1']):
             x_lines.extend([row['Solvent_Ratio_Percent'], row['Solvent_Ratio_Percent'], None])
             y_lines.extend([row['黏度(秒)'], row['黏度(秒)_1'], None])
@@ -149,7 +148,7 @@ if not filtered_df.empty:
         mode='lines',
         name='Viscosity Drop (Delta V)',
         line=dict(color='gray', width=1, dash='dot'),
-        hoverinfo='skip', # Ẩn tooltip của đường kẻ này cho đỡ rối
+        hoverinfo='skip',
         showlegend=True
     ))
 
@@ -160,7 +159,7 @@ if not filtered_df.empty:
         mode='markers',
         name='Initial Viscosity (Before)',
         marker=dict(color='#ED7D31', size=7, opacity=0.9, line=dict(width=1, color='white')),
-        hovertemplate='Initial: %{y:.1f}s<extra></extra>'
+        hovertemplate='Ratio: %{x:.2f}%<br>Initial: %{y:.1f}s<extra></extra>'
     ))
 
     # 2. Vẽ các điểm dữ liệu "Độ nhớt SAU khi thêm dung môi" (Màu Xanh Dương)
@@ -170,7 +169,7 @@ if not filtered_df.empty:
         mode='markers',
         name='Final Viscosity (After)',
         marker=dict(color='#4472C4', size=7, opacity=0.9, line=dict(width=1, color='white')),
-        hovertemplate='Final: %{y:.1f}s<extra></extra>'
+        hovertemplate='Ratio: %{x:.2f}%<br>Final: %{y:.1f}s<extra></extra>'
     ))
 
     # 3. Tính toán và vẽ Đường xu hướng Phi tuyến tính
@@ -189,7 +188,7 @@ if not filtered_df.empty:
             hoverinfo='skip'
         ))
 
-    # Cấu hình Layout
+    # ĐÃ SỬA LỖI HIỂN THỊ CỦA BIỂU ĐỒ
     fig_trend.update_layout(
         plot_bgcolor='white',
         xaxis=dict(
@@ -206,12 +205,20 @@ if not filtered_df.empty:
             linecolor='black',
             linewidth=1
         ),
-        margin=dict(l=50, r=50, t=40, b=50),
-        # Di chuyển chú thích sang góc phải để tránh che mất các điểm dữ liệu
-        legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99, bgcolor="rgba(255,255,255,0.9)"),
+        margin=dict(l=50, r=50, t=60, b=50), # Tăng lề trên (t=60) để lấy chỗ cho legend
         
-        # THỦ THUẬT 2: Gộp chung hộp thoại Hover
-        hovermode='x unified' 
+        # 1. Đưa Chú thích (Legend) lên nóc và dàn ngang để KHÔNG CHE mất dữ liệu
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="center",
+            x=0.5,
+            bgcolor="rgba(255,255,255,0)"
+        ),
+        
+        # 2. Đổi về chế độ 'closest' để Rà chuột chính xác từng điểm mẻ sơn
+        hovermode='closest' 
     )
     
     st.plotly_chart(fig_trend, use_container_width=True)
@@ -229,7 +236,7 @@ agg_funcs = {
     'Total Solvent (kg)': pd.NamedAgg(column='添加重量', aggfunc='sum'),
     'Avg Initial V (s)': pd.NamedAgg(column='黏度(秒)', aggfunc='mean'),
     'Avg Final V (s)': pd.NamedAgg(column='黏度(秒)_1', aggfunc='mean'),
-    'Viscosity Floor (s) ⚠️': pd.NamedAgg(column='黏度(秒)_1', aggfunc='min'), # Đã sửa lỗi font tiếng Việt tại đây
+    'Viscosity Floor (s) ⚠️': pd.NamedAgg(column='黏度(秒)_1', aggfunc='min'),
     'Baseline Efficiency (s/%)': pd.NamedAgg(column='Historical_Efficiency', aggfunc='median'),
     'Max Historical Ratio %': pd.NamedAgg(column='Solvent_Ratio_Percent', aggfunc='max')
 }
