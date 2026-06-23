@@ -79,14 +79,15 @@ else:
         if pd.isna(baseline_efficiency) or baseline_efficiency <= 0:
             baseline_efficiency = 5.0  # Fallback safe default
 
-        # --- NEW SUB-SECTION: FORMULA DISPLAY PANEL ---
-        with st.expander("📐 Technical Formulation & Logic Reference"):
-            st.markdown("##### **1. Solvent Blending Ratio**")
+        # --- TECHNICAL FORMULA DISPLAY PANEL ---
+        with st.expander("📐 Technical Formulation & Logic Reference (Click to Expand)"):
+            st.markdown("##### **1. Solvent Blending Ratio Formula**")
             st.latex(r"Solvent\ Ratio\ (\%) = \frac{Solvent\ Weight\ (kg)}{Paint\ Weight\ (kg)} \times 100")
             
-            st.markdown("##### **2. Viscosity Dilution Efficiency (Historical)**")
+            st.markdown("##### **2. Viscosity Dilution Efficiency (Historical Baseline)**")
             st.latex(r"Efficiency\ (s/\%) = \frac{Initial\ Viscosity\ (s) - Final\ Viscosity\ (s)}{Solvent\ Ratio\ (\%)}^{}")
-            st.markdown(f"ℹ️ *Current system historical baseline efficiency:* **`{baseline_efficiency:.2f} seconds drop per 1% solvent`**")
+            st.markdown(f"ℹ️ *Selected System Median Baseline Efficiency:* **`{baseline_efficiency:.2f} seconds drop per 1% solvent added`**")
+            st.markdown(f"ℹ️ *Selected System Absolute Viscosity Floor:* **`{viscosity_floor:.1f} seconds`** (Physical Saturation Boundary)")
             
             st.markdown("##### **3. Recommended Solvent Weight Estimation**")
             st.latex(r"Target\ Drop\ (\Delta V) = Current\ Viscosity - Target\ Viscosity")
@@ -111,13 +112,14 @@ else:
         if delta_v_target <= 0:
             st.success("✅ **Result:** Current viscosity meets or exceeds target. No solvent addition required.")
         elif target_visc < viscosity_floor:
-            st.error(f"🚨 **Critical Danger:** Requested target ({target_visc}s) is lower than the historical Viscosity Floor ({viscosity_floor:.1f}s). Solvent addition aborted to prevent film damage.")
+            st.error(f"🚨 **CRITICAL DANGER (ABORTED):** Requested target ({target_visc}s) is lower than the historical Viscosity Floor ({viscosity_floor:.1f}s). Solvent addition aborted to prevent permanent paint film damage.")
         else:
             # MODULE 1: Predict Solvent Addition Weight
             predicted_ratio_needed = delta_v_target / baseline_efficiency
             recommended_solvent_kg = (paint_weight * predicted_ratio_needed) / 100
 
             # MODULE 2: Efficiency Monitor & Diminishing Return Zone Analysis
+            # Thresholds: 70% of max historical ratio is optimal, 90% is diminishing return zone
             yellow_threshold = max_historical_ratio * 0.70
             red_threshold = max_historical_ratio * 0.90
 
@@ -131,7 +133,7 @@ else:
             elif predicted_ratio_needed <= red_threshold:
                 st.warning(f"### ⚠️ **Recommended Solvent to Add:** `{recommended_solvent_kg:.2f} kg`")
                 st.markdown(f"""
-                - **Expected Solvent Ratio:** `{predicted_ratio_needed:.2f}%`
+                - **Expected Solvent Ratio:** `{predicted_ratio_needed:.2f}%` (Approaching yellow threshold of `{yellow_threshold:.2f}%`)
                 - **Efficiency Status:** `Diminishing Return Zone (Yellow Alert)`
                 - **Notice:** The calculated solvent ratio is approaching historical limits. Viscosity reduction efficiency may start dropping. Monitor the blend closely.
                 """)
@@ -140,7 +142,7 @@ else:
                 st.markdown(f"""
                 - **Expected Solvent Ratio:** `{predicted_ratio_needed:.2f}%` (Historical Max Limit is `{max_historical_ratio:.2f}%`)
                 - **Efficiency Status:** `Severe Diminishing Return Zone (Red Alert)`
-                - **Danger:** Adding this amount enters a critical saturation level where dilution efficiency drops below 30%. Additional solvent will weaken core resin bonding without providing significant viscosity reduction.
+                - **Danger:** Adding this amount enters a critical saturation level where dilution efficiency drops significantly. Additional solvent will weaken core resin bonding without providing significant viscosity reduction.
                 """)
     else:
         st.info("No data available for the selected combination.")
