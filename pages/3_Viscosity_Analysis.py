@@ -3,6 +3,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
+from plotly.subplots import make_subplots
 
 # --- 1. PAGE CONFIGURATION ---
 st.set_page_config(page_title="Viscosity & SOP Report", page_icon="📊", layout="wide")
@@ -122,66 +123,18 @@ else:
         st.info("No data available for the selected combination.")
 
 
-# --- 5. BIỂU ĐỒ XU HƯỚNG PHI TUYẾN TÍNH (NÂNG CẤP PHÂN TÁCH FACET Ô THEO VENDOR & RESIN) ---
+# --- 5. BIỂU ĐỒ XU HƯỚNG PHI TUYẾN TÍNH (PHÂN TÁCH Ô MATRIX THEO VENDOR & RESIN) ---
 st.markdown("---")
 st.subheader("📈 Multi-Vendor Trend Analysis: Viscosity Behavior Matrix")
 st.markdown("*The charts are automatically broken down into columns by **Vendor** and rows by **Resin**. Colors distinguish different **Solvent Types** and their respective Before/After stages.*")
 
 if not filtered_df.empty:
-    # Sử dụng Plotly Express để tự động tạo hệ thống lưới Facet ô lưới thông minh
-    # Tạo bảng dữ liệu tạm để chuẩn hóa nhãn hiển thị cho Legend không bị chồng lấn
-    df_plot = filtered_df.copy()
-    
-    # Định dạng bảng màu động chuẩn quốc tế cho các loại dung môi
-    unique_solvents_in_df = df_plot['Solvent_Type'].unique()
-    color_palette = px.colors.qualitative.Bold
-    
-    fig_matrix = px.scatter(
-        df_plot,
-        x='Solvent_Ratio_Percent',
-        y='黏度(秒)',
-        facet_col='Vendor',  # Tách biểu đồ thành các cột dựa trên Nhà cung ứng độc lập
-        facet_row='Resin',   # Tách biểu đồ thành các hàng dựa trên hệ Nhựa độc lập
-        color='Solvent_Type',
-        color_discrete_sequence=color_palette,
-        labels={'Solvent_Ratio_Percent': 'Solvent Blending Ratio (%)', '黏度(秒)': 'Viscosity (seconds)'},
-    )
-
-    # Thêm các cấu trúc đường nối dọc và điểm Sau (After) vào từng ô tương ứng
-    # Duyệt qua từng ô subplot để cấu hình chi tiết
-    for vendor in df_plot['Vendor'].unique():
-        for resin in df_plot['Resin'].unique():
-            sub_df = df_plot[(df_plot['Vendor'] == vendor) & (df_plot['Resin'] == resin)]
-            if sub_df.empty:
-                continue
-                
-            # Tìm tọa độ ô lưới trong đồ thị Plotly
-            # (Plotly sắp xếp index hàng cột tự động dựa trên vị trí xuất hiện)
-            
-            # Tính toán đường nối dọc cho từng mẻ trong ô này
-            x_lines = []
-            y_lines = []
-            for _, row in sub_df.iterrows():
-                if pd.notna(row['Solvent_Ratio_Percent']) and pd.notna(row['黏度(秒)']) and pd.notna(row['黏度(秒)_1']):
-                    x_lines.extend([row['Solvent_Ratio_Percent'], row['Solvent_Ratio_Percent'], None])
-                    y_lines.extend([row['黏度(秒)'], row['黏度(秒)_1'], None])
-            
-            # Thêm đường nét đứt vào ô lưới tương ứng thông qua đồ thị gốc
-            # Để vẽ chính xác vào từng ô Facet, cách tốt nhất là dùng go.Scatter bổ sung và cập nhật thông số hoành độ
-            
-    # Để giữ nguyên tính năng kết nối dây dọc chéo điểm Cam-Xanh siêu việt của lượt trước, 
-    # chúng ta sẽ xây dựng trực tiếp bằng go.Figure với vòng lặp phân nhóm Vendor-Resin rõ ràng:
-    fig_trend = go.Figure()
-    
-    # Thiết lập bảng màu cố định cho các loại dung môi để đồng bộ màu sắc Trước/Sau
-    solvent_colors = {sol: color_palette[i % len(color_palette)] for i, sol in enumerate(unique_solvents)}
-    
-    # Tạo sơ đồ layout chia cột và hàng thủ công để kiểm soát 100% đường kẻ nối dọc từng mẻ sơn
     unique_v = sorted(filtered_df['Vendor'].unique())
     unique_r = sorted(filtered_df['Resin'].unique())
+    unique_solvents_in_df = filtered_df['Solvent_Type'].unique()
+    color_palette = px.colors.qualitative.Bold
+    solvent_colors = {sol: color_palette[i % len(color_palette)] for i, sol in enumerate(unique_solvents_in_df)}
     
-    # Thiết lập lưới Subplots dựa trên số lượng Vendor và Resin thực tế đang chọn
-    from plotly.subplots import make_subplots
     fig_trend = make_subplots(
         rows=len(unique_r), 
         cols=len(unique_v),
@@ -192,7 +145,6 @@ if not filtered_df.empty:
         horizontal_spacing=0.04
     )
     
-    # Đổ dữ liệu mẻ sơn vào từng ô tương ứng
     for r_idx, resin in enumerate(unique_r):
         for v_idx, vendor in enumerate(unique_v):
             sub_df = filtered_df[(filtered_df['Resin'] == resin) & (filtered_df['Vendor'] == vendor)]
@@ -202,7 +154,7 @@ if not filtered_df.empty:
             row_num = r_idx + 1
             col_num = v_idx + 1
             
-            # 1. Vẽ các đường kẻ dọc nối Before-After cho từng mẻ
+            # 1. Vẽ đường nối dọc cho từng mẻ
             x_lines = []
             y_lines = []
             for _, row in sub_df.iterrows():
@@ -216,21 +168,25 @@ if not filtered_df.empty:
                 hoverinfo='skip', showlegend=False
             ), row=row_num, col=col_num)
             
-            # Phân tách theo từng loại dung môi trong ô này
+            # 2. Vẽ điểm Trước / Sau phân biệt theo loại dung môi
             for solvent in sub_df['Solvent_Type'].unique():
                 sol_df = sub_df[sub_df['Solvent_Type'] == solvent]
                 sol_color = solvent_colors[solvent]
                 
-                # Chỉ hiển thị legend 1 lần duy nhất cho mỗi loại dung môi để tránh lặp bảng chú thích
                 show_leg = True if (r_idx == 0 and v_idx == 0) else False
                 
-                # 2. Điểm TRƯỚC khi châm (Ký hiệu hình tròn rỗng hoặc chấm nhạt)
+                # ĐÃ FIX LỖI Ở ĐÂY: Thêm line=dict(...) đúng chuẩn Plotly
                 fig_trend.add_trace(go.Scatter(
                     x=sol_df['Solvent_Ratio_Percent'], y=sol_df['黏度(秒)'],
                     mode='markers',
                     name=f"Solvent {solvent} (Before)" if show_leg else "",
                     legendgroup=f"sol_{solvent}_bef",
-                    marker=dict(color=sol_color, size=6, symbol='circle-open', width=1.5),
+                    marker=dict(
+                        color=sol_color, 
+                        size=6, 
+                        symbol='circle-open', 
+                        line=dict(width=1.5, color=sol_color)
+                    ),
                     customdata=sol_df[['黏度(秒)_1', 'Viscosity_Reduction', 'Vendor', 'Resin', 'Solvent_Type']].values,
                     hovertemplate='<b>%{customdata[2]} | %{customdata[3]} | Solvent: %{customdata[4]}</b><br>' +
                                   'Solvent Ratio: %{x:.2f}%<br>' +
@@ -240,7 +196,6 @@ if not filtered_df.empty:
                     showlegend=show_leg
                 ), row=row_num, col=col_num)
                 
-                # 3. Điểm SAU khi châm (Ký hiệu hình tròn đặc, màu đậm hơn)
                 fig_trend.add_trace(go.Scatter(
                     x=sol_df['Solvent_Ratio_Percent'], y=sol_df['黏度(秒)_1'],
                     mode='markers',
@@ -256,10 +211,10 @@ if not filtered_df.empty:
                     showlegend=show_leg
                 ), row=row_num, col=col_num)
 
-    # Cấu hình Layout tổng thể cho hệ thống ma trận ô
+    # Cấu hình Layout tổng thể
     fig_trend.update_layout(
         plot_bgcolor='white',
-        height=350 * len(unique_r) if len(unique_r) > 1 else 450, # Tự động giãn chiều cao theo số hàng Resin
+        height=350 * len(unique_r) if len(unique_r) > 1 else 450,
         margin=dict(l=60, r=50, t=80, b=60),
         legend=dict(
             orientation="h",
@@ -270,10 +225,9 @@ if not filtered_df.empty:
         hovermode='closest'
     )
     
-    # Đồng bộ hiển thị trục lưới xám cho tất cả các ô con
     fig_trend.update_xaxes(title_text='Solvent Blending Ratio (%)', showgrid=True, gridcolor='#EAEAEA', linecolor='black', row=len(unique_r), col='all')
     fig_trend.update_yaxes(title_text='Viscosity (seconds)', showgrid=True, gridcolor='#EAEAEA', linecolor='black', col=1, row='all')
-    fig_trend.update_annotations(font_size=12, font_color='black') # Định dạng tiêu đề của từng ô con rõ nét
+    fig_trend.update_annotations(font_size=12, font_color='black')
     
     st.plotly_chart(fig_trend, use_container_width=True)
 else:
@@ -289,7 +243,7 @@ agg_funcs = {
     'Total Paint (kg)': pd.NamedAgg(column='塗料重量', aggfunc='sum'),
     'Total Solvent (kg)': pd.NamedAgg(column='添加重量', aggfunc='sum'),
     'Avg Initial V (s)': pd.NamedAgg(column='黏度(秒)', aggfunc='mean'),
-    'Avg Final V (s)': pd.NamedAgg(column='黏 độ(秒)_1', aggfunc='mean'),
+    'Avg Final V (s)': pd.NamedAgg(column='黏度(秒)_1', aggfunc='mean'),
     'Viscosity Floor (s) ⚠️': pd.NamedAgg(column='黏度(秒)_1', aggfunc='min'),
     'Baseline Efficiency (s/%)': pd.NamedAgg(column='Historical_Efficiency', aggfunc='median'),
     'Max Historical Ratio %': pd.NamedAgg(column='Solvent_Ratio_Percent', aggfunc='max')
