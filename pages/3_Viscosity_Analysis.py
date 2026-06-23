@@ -1,12 +1,13 @@
 import streamlit as st
 import plotly.express as px
+import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
 
 # --- 1. PAGE CONFIGURATION ---
 st.set_page_config(page_title="Viscosity & SOP Report", page_icon="📊", layout="wide")
 st.title("📊 Viscosity & SOP Analysis Dashboard")
-st.markdown("Production-driven regression, dynamic recommendation engine, and optimized workshop SOP matrix.")
+st.markdown("Production-driven regression, dynamic recommendation engine, and diminishing return monitoring.")
 
 # --- 2. DATA VALIDATION ---
 if not st.session_state.get('raw_data_loaded', False):
@@ -43,7 +44,7 @@ filtered_df = group_a[
 ].copy()
 
 
-# --- 4. PRODUCTION ENGINE & OPTIMIZED WORKSHOP SOP MATRIX ---
+# --- 4. PRODUCTION ENGINE ---
 st.markdown("---")
 st.header("⚙️ Live Production Calculation & Efficiency Monitor")
 
@@ -121,75 +122,82 @@ else:
             else:
                 st.error(f"### 🚨 **CRITICAL CAP:** `{recommended_solvent_kg:.2f} kg` (Severe Diminishing Return Zone)")
 
-        # --- ĐÃ TỐI ƯU HÓA TOÀN DIỆN: XUẤT BẢNG SOP CAO CẤP CHO NHÀ XƯỞNG ---
-        st.markdown("---")
-        st.header("📋 Standard SOP Reference Matrix for Workshop Layout")
-        st.markdown(f"**Target System:** Resin: `{engine_resin}` | Vendor: `{engine_vendor}` | Solvent: `{engine_solvent}`")
-        st.markdown("*This matrix provides clean, pre-calculated numerical values (in kg) for workshop operators. Visual risk boundaries are mapped natively using cell colors.*")
-
-        # Define standard workshop baselines for table generation
-        standard_paint_weights = [50, 100, 150, 200, 250, 300, 400, 500]  # Rows (kg)
-        standard_delta_v = [2, 4, 6, 8, 10, 12]  # Columns (seconds drop)
-
-        sop_data = []
-        for w in standard_paint_weights:
-            row_dict = {"Paint Weight (kg)": f"{w} kg"}
-            for dv in standard_delta_v:
-                ratio_needed = dv / baseline_efficiency
-                solvent_kg = (w * ratio_needed) / 100
-                row_dict[f"Drop {dv}s"] = float(solvent_kg) # Giữ giá trị số thuần túy để format sạch vẽ màu
-            sop_data.append(row_dict)
-
-        sop_df = pd.DataFrame(sop_data)
-        
-        # Hàm nội bộ áp dụng ma trận màu sắc Pastel chuyên nghiệp (Không lỗi phụ thuộc thư viện)
-        def style_sop_matrix(df):
-            styles = pd.DataFrame('', index=df.index, columns=df.columns)
-            for col in df.columns:
-                if col == 'Paint Weight (kg)':
-                    continue
-                try:
-                    dv = float(col.replace('Drop ', '').replace('s', ''))
-                except:
-                    continue
-                for idx in df.index:
-                    try:
-                        w_val = float(str(df.loc[idx, 'Paint Weight (kg)']).replace(' kg', ''))
-                        ratio = dv / baseline_efficiency
-                        if ratio > max_historical_ratio * 0.90:
-                            styles.loc[idx, col] = 'background-color: #FCE4D6; color: #C00000; font-weight: bold;' # Soft Light Red
-                        elif ratio > max_historical_ratio * 0.70:
-                            styles.loc[idx, col] = 'background-color: #FFF2CC; color: #7F6000;' # Soft Light Yellow
-                        else:
-                            styles.loc[idx, col] = 'background-color: #E2F0D9; color: #385723;' # Soft Light Green
-                    except:
-                        pass
-            return styles
-
-        # Áp dụng bộ định dạng số hiển thị đuôi "kg" đồng bộ
-        formatter = {col: "{:.2f} kg" for col in sop_df.columns if col != 'Paint Weight (kg)'}
-        
-        # Xuất bảng SOP tối ưu hóa lên giao diện
-        st.dataframe(
-            sop_df.style.apply(style_sop_matrix, axis=None).format(formatter),
-            use_container_width=True,
-            hide_index=True
-        )
-        
-        st.markdown("""
-        <div style="background-color: #F8F9FA; padding: 12px; border-left: 4px solid #00BFFF; border-radius: 4px;">
-            <span style="font-weight: bold; color: #333333;">🎨 Color Coding Guide for Operators on the Shop Floor:</span><br/>
-            🟢 <b>Soft Green Cells:</b> Optimal Zone. High dilution performance. Safe to proceed.<br/>
-            🟡 <b>Soft Yellow Cells:</b> Diminishing Return Zone. Efficiency is dropping. <b>Action:</b> Add 80% of the target weight first, mix, and re-test.<br/>
-            🔴 <b>Soft Red Cells:</b> Severe Risk Zone. Saturation overload. <b>Action:</b> Do NOT add this volume. Stop and consult the quality supervisor.
-        </div>
-        """, unsafe_allow_html=True)
-
     else:
         st.info("No data available for the selected combination.")
 
 
-# --- 5. HISTORICAL BACKGROUND REFERENCE MATRIX ---
+# --- 5. BIỂU ĐỒ XU HƯỚNG PHI TUYẾN TÍNH (DỮ LIỆU ĐỐI CHIẾU TRƯỚC/SAU) ---
+st.markdown("---")
+st.subheader("📈 Non-linear Distribution Analysis: Initial vs. Final Viscosity Trends")
+st.markdown("*This interactive plot visualizes how Initial Viscosity (Before) and Final Viscosity (After) respond to the Solvent Ratio %. Notice the flattening of the curve at higher ratios (Diminishing Return).*")
+
+if not filtered_df.empty:
+    fig_trend = go.Figure()
+
+    # 1. Vẽ các điểm dữ liệu "Độ nhớt TRƯỚC khi thêm dung môi" (Màu Cam)
+    fig_trend.add_trace(go.Scatter(
+        x=filtered_df['Solvent_Ratio_Percent'],
+        y=filtered_df['黏度(秒)'],
+        mode='markers',
+        name='Initial Viscosity (Before)',
+        marker=dict(color='#ED7D31', size=6, opacity=0.6),
+        hovertemplate='Solvent: %{x:.2f}%<br>Initial Visc: %{y:.1f}s<extra></extra>'
+    ))
+
+    # 2. Vẽ các điểm dữ liệu "Độ nhớt SAU khi thêm dung môi" (Màu Xanh Dương)
+    fig_trend.add_trace(go.Scatter(
+        x=filtered_df['Solvent_Ratio_Percent'],
+        y=filtered_df['黏度(秒)_1'],
+        mode='markers',
+        name='Final Viscosity (After)',
+        marker=dict(color='#4472C4', size=6, opacity=0.6),
+        hovertemplate='Solvent: %{x:.2f}%<br>Final Visc: %{y:.1f}s<extra></extra>'
+    ))
+
+    # 3. Tính toán và vẽ Đường xu hướng Phi tuyến tính (Đường cong đa thức bậc 2)
+    sorted_df = filtered_df.dropna(subset=['Solvent_Ratio_Percent', '黏度(秒)_1']).sort_values(by='Solvent_Ratio_Percent')
+    
+    if len(sorted_df) > 5:
+        poly_fit = np.polyfit(sorted_df['Solvent_Ratio_Percent'], sorted_df['黏度(秒)_1'], 2)
+        poly_curve = np.polyval(poly_fit, sorted_df['Solvent_Ratio_Percent'])
+        
+        fig_trend.add_trace(go.Scatter(
+            x=sorted_df['Solvent_Ratio_Percent'],
+            y=poly_curve,
+            mode='lines',
+            name='Non-linear Dilution Trend (After)',
+            line=dict(color='#C00000', width=3, dash='dash'),
+            hoverinfo='skip'
+        ))
+
+    # Cấu hình Layout nền trắng, lưới xám nhạt rõ ràng
+    fig_trend.update_layout(
+        plot_bgcolor='white',
+        xaxis=dict(
+            title='Solvent Blending Ratio (%)',
+            showgrid=True,
+            gridcolor='#EAEAEA',
+            linecolor='black',
+            linewidth=1
+        ),
+        yaxis=dict(
+            title='Viscosity (seconds)',
+            showgrid=True,
+            gridcolor='#EAEAEA',
+            linecolor='black',
+            linewidth=1
+        ),
+        margin=dict(l=50, r=50, t=40, b=50),
+        legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01, bgcolor="rgba(255,255,255,0.8)"),
+        hovermode='closest'
+    )
+    
+    st.plotly_chart(fig_trend, use_container_width=True)
+else:
+    st.info("No filtered data available to generate the trend visualization.")
+
+
+# --- 6. GLOBAL HISTORICAL REFERENCE MATRIX (BACKGROUND) ---
 st.markdown("---")
 st.subheader("📚 Global Historical Performance Reference (All Systems)")
 
@@ -199,7 +207,7 @@ agg_funcs = {
     'Total Solvent (kg)': pd.NamedAgg(column='添加重量', aggfunc='sum'),
     'Avg Initial V (s)': pd.NamedAgg(column='黏度(秒)', aggfunc='mean'),
     'Avg Final V (s)': pd.NamedAgg(column='黏度(秒)_1', aggfunc='mean'),
-    'Viscosity Floor (s) ⚠️': pd.NamedAgg(column='黏度(秒)_1', aggfunc='min'),
+    'Viscosity Floor (s) ⚠️': pd.NamedAgg(column='黏度(秒)_1', aggfunc='min'), # Đã sửa lỗi font tiếng Việt tại đây
     'Baseline Efficiency (s/%)': pd.NamedAgg(column='Historical_Efficiency', aggfunc='median'),
     'Max Historical Ratio %': pd.NamedAgg(column='Solvent_Ratio_Percent', aggfunc='max')
 }
