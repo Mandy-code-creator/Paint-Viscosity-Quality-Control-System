@@ -87,7 +87,7 @@ if 'Avg Sensitivity' in summary_matrix.columns:
         axis=1
     )
 
-# Format lại giao diện hiển thị cho đẹp
+# Format lại giao diện hiển thị (Đã bỏ background_gradient để không cần matplotlib)
 st.dataframe(
     summary_matrix.style.format({
         'Total Paint (kg)': '{:,.0f}',
@@ -99,10 +99,11 @@ st.dataframe(
         'Max Solvent Limit % ⚠️': '{:.2f}%',
         'Avg Sensitivity': '{:.3f}',
         'Solvent Factor (kg/1s drop)': '{:.3f}'
-    }).background_gradient(subset=['Max Solvent Limit % ⚠️'], cmap='Oranges')
-      .background_gradient(subset=['Viscosity Floor (s) ⚠️'], cmap='Blues_r'),
+    }),
     use_container_width=True
 )
+
+st.info("⚠️ **Lưu ý SOP:** `Viscosity Floor` là ngưỡng độ nhớt bão hòa (không thể giảm thêm). Không khuyến nghị thêm dung môi vượt quá `Max Solvent Limit %` để tránh phá vỡ cấu trúc sơn.")
 
 st.info("⚠️ **Lưu ý SOP:** `Viscosity Floor` là ngưỡng độ nhớt bão hòa (không thể giảm thêm). Không khuyến nghị thêm dung môi vượt quá `Max Solvent Limit %` để tránh phá vỡ cấu trúc sơn.")
 
