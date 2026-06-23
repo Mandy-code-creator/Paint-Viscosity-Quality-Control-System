@@ -6,7 +6,7 @@ import numpy as np
 # --- 1. PAGE CONFIGURATION ---
 st.set_page_config(page_title="Viscosity & SOP Report", page_icon="📊", layout="wide")
 st.title("📊 Viscosity & SOP Analysis Dashboard")
-st.markdown("Production-driven regression, dynamic recommendation engine, and workshop SOP generation.")
+st.markdown("Production-driven regression, dynamic recommendation engine, and optimized workshop SOP matrix.")
 
 # --- 2. DATA VALIDATION ---
 if not st.session_state.get('raw_data_loaded', False):
@@ -20,7 +20,7 @@ group_a['Solvent_Type'] = group_a['Solvent_Type'].astype(str)
 group_a['Solvent_Ratio_Percent'] = (group_a['添加重量'] / group_a['塗料重量'].replace(0, 1)) * 100
 group_a['Viscosity_Reduction'] = group_a['黏度(秒)'] - group_a['黏度(秒)_1']
 
-# Step 3: Calculate Historical Efficiency per batch (seconds dropped per 1% solvent)
+# Step 2: Calculate Historical Efficiency per batch (seconds dropped per 1% solvent)
 group_a['Historical_Efficiency'] = group_a['Viscosity_Reduction'] / group_a['Solvent_Ratio_Percent'].replace(0, np.nan)
 
 # --- 3. INTERACTIVE GLOBAL FILTERS ---
@@ -43,7 +43,7 @@ filtered_df = group_a[
 ].copy()
 
 
-# --- 4. PRODUCTION ENGINE & WORKSHOP SOP GENERATOR ---
+# --- 4. PRODUCTION ENGINE & OPTIMIZED WORKSHOP SOP MATRIX ---
 st.markdown("---")
 st.header("⚙️ Live Production Calculation & Efficiency Monitor")
 
@@ -76,8 +76,11 @@ else:
         max_historical_ratio = group_data['Solvent_Ratio_Percent'].max()
         viscosity_floor = group_data['黏度(秒)_1'].min()
 
+        # Fallback safe defaults if data is missing or corrupted
         if pd.isna(baseline_efficiency) or baseline_efficiency <= 0:
-            baseline_efficiency = 5.0  # Fallback safe default
+            baseline_efficiency = 5.0  
+        if pd.isna(max_historical_ratio) or max_historical_ratio <= 0:
+            max_historical_ratio = 10.0
 
         # --- TECHNICAL FORMULA DISPLAY PANEL ---
         with st.expander("📐 Technical Formulation & Logic Reference"):
@@ -118,46 +121,69 @@ else:
             else:
                 st.error(f"### 🚨 **CRITICAL CAP:** `{recommended_solvent_kg:.2f} kg` (Severe Diminishing Return Zone)")
 
-        # --- ĐÃ TÍCH HỢP: TỰ ĐỘNG XUẤT BẢNG SOP ĐẶT TẠI NHÀ XƯỞNG ---
+        # --- ĐÃ TỐI ƯU HÓA TOÀN DIỆN: XUẤT BẢNG SOP CAO CẤP CHO NHÀ XƯỞNG ---
         st.markdown("---")
         st.header("📋 Standard SOP Reference Matrix for Workshop Layout")
         st.markdown(f"**Target System:** Resin: `{engine_resin}` | Vendor: `{engine_vendor}` | Solvent: `{engine_solvent}`")
-        st.markdown("*This matrix provides pre-calculated solvent addition targets (in kg) based on standard paint weights and required viscosity drops ($\Delta V$). Print this table for workshop operators.*")
+        st.markdown("*This matrix provides clean, pre-calculated numerical values (in kg) for workshop operators. Visual risk boundaries are mapped natively using cell colors.*")
 
         # Define standard workshop baselines for table generation
         standard_paint_weights = [50, 100, 150, 200, 250, 300, 400, 500]  # Rows (kg)
         standard_delta_v = [2, 4, 6, 8, 10, 12]  # Columns (seconds drop)
 
-        # Build the matrix using the historical baseline efficiency
         sop_data = []
         for w in standard_paint_weights:
             row_dict = {"Paint Weight (kg)": f"{w} kg"}
             for dv in standard_delta_v:
-                # Calculate required ratio for this specific Delta V
                 ratio_needed = dv / baseline_efficiency
                 solvent_kg = (w * ratio_needed) / 100
-                
-                # Apply Diminishing Return threshold coloring logic
-                if ratio_needed > max_historical_ratio * 0.90:
-                    # Over-saturation: block or flag as dangerous
-                    row_dict[f"Drop {dv}s"] = f"{solvent_kg:.2f} kg 🚨 (HIGH RISK)"
-                elif ratio_needed > max_historical_ratio * 0.70:
-                    row_dict[f"Drop {dv}s"] = f"{solvent_kg:.2f} kg ⚠️"
-                else:
-                    row_dict[f"Drop {dv}s"] = f"{solvent_kg:.2f} kg"
+                row_dict[f"Drop {dv}s"] = float(solvent_kg) # Giữ giá trị số thuần túy để format sạch vẽ màu
             sop_data.append(row_dict)
 
         sop_df = pd.DataFrame(sop_data)
         
-        # Display the workshop lookup table cleanly
-        st.dataframe(sop_df, use_container_width=True, hide_index=True)
-        st.info("""
-        📌 **How Workers Use This Table at the Shop Floor:**
-        1. Look at the left column to find the closest **Paint Weight** currently in the tank.
-        2. Look at the top row to find the **Required Viscosity Drop (Delta V)** (Current Viscosity minus Target Viscosity).
-        3. The intersecting cell tells you exactly how many **kg of solvent** to weigh and add.
-        4. Cells marked with `⚠️` or `🚨` mean the mix is reaching the **Diminishing Return Zone**. Add 80% first, stir well, and re-test.
-        """)
+        # Hàm nội bộ áp dụng ma trận màu sắc Pastel chuyên nghiệp (Không lỗi phụ thuộc thư viện)
+        def style_sop_matrix(df):
+            styles = pd.DataFrame('', index=df.index, columns=df.columns)
+            for col in df.columns:
+                if col == 'Paint Weight (kg)':
+                    continue
+                try:
+                    dv = float(col.replace('Drop ', '').replace('s', ''))
+                except:
+                    continue
+                for idx in df.index:
+                    try:
+                        w_val = float(str(df.loc[idx, 'Paint Weight (kg)']).replace(' kg', ''))
+                        ratio = dv / baseline_efficiency
+                        if ratio > max_historical_ratio * 0.90:
+                            styles.loc[idx, col] = 'background-color: #FCE4D6; color: #C00000; font-weight: bold;' # Soft Light Red
+                        elif ratio > max_historical_ratio * 0.70:
+                            styles.loc[idx, col] = 'background-color: #FFF2CC; color: #7F6000;' # Soft Light Yellow
+                        else:
+                            styles.loc[idx, col] = 'background-color: #E2F0D9; color: #385723;' # Soft Light Green
+                    except:
+                        pass
+            return styles
+
+        # Áp dụng bộ định dạng số hiển thị đuôi "kg" đồng bộ
+        formatter = {col: "{:.2f} kg" for col in sop_df.columns if col != 'Paint Weight (kg)'}
+        
+        # Xuất bảng SOP tối ưu hóa lên giao diện
+        st.dataframe(
+            sop_df.style.apply(style_sop_matrix, axis=None).format(formatter),
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        st.markdown("""
+        <div style="background-color: #F8F9FA; padding: 12px; border-left: 4px solid #00BFFF; border-radius: 4px;">
+            <span style="font-weight: bold; color: #333333;">🎨 Color Coding Guide for Operators on the Shop Floor:</span><br/>
+            🟢 <b>Soft Green Cells:</b> Optimal Zone. High dilution performance. Safe to proceed.<br/>
+            🟡 <b>Soft Yellow Cells:</b> Diminishing Return Zone. Efficiency is dropping. <b>Action:</b> Add 80% of the target weight first, mix, and re-test.<br/>
+            🔴 <b>Soft Red Cells:</b> Severe Risk Zone. Saturation overload. <b>Action:</b> Do NOT add this volume. Stop and consult the quality supervisor.
+        </div>
+        """, unsafe_allow_html=True)
 
     else:
         st.info("No data available for the selected combination.")
