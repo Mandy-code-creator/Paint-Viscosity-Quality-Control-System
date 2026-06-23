@@ -6,7 +6,7 @@ import numpy as np
 # --- 1. PAGE CONFIGURATION ---
 st.set_page_config(page_title="Viscosity & SOP Report", page_icon="📊", layout="wide")
 st.title("📊 Viscosity & SOP Analysis Dashboard")
-st.markdown("Production-driven regression, dynamic recommendation engine, and diminishing return monitoring.")
+st.markdown("Production-driven regression, dynamic recommendation engine, and workshop SOP generation.")
 
 # --- 2. DATA VALIDATION ---
 if not st.session_state.get('raw_data_loaded', False):
@@ -43,7 +43,7 @@ filtered_df = group_a[
 ].copy()
 
 
-# --- 4. PRODUCTION ENGINE (MODULE 1: RECOMMENDATION & MODULE 2: EFFICIENCY MONITOR) ---
+# --- 4. PRODUCTION ENGINE & WORKSHOP SOP GENERATOR ---
 st.markdown("---")
 st.header("⚙️ Live Production Calculation & Efficiency Monitor")
 
@@ -80,21 +80,14 @@ else:
             baseline_efficiency = 5.0  # Fallback safe default
 
         # --- TECHNICAL FORMULA DISPLAY PANEL ---
-        with st.expander("📐 Technical Formulation & Logic Reference (Click to Expand)"):
+        with st.expander("📐 Technical Formulation & Logic Reference"):
             st.markdown("##### **1. Solvent Blending Ratio Formula**")
             st.latex(r"Solvent\ Ratio\ (\%) = \frac{Solvent\ Weight\ (kg)}{Paint\ Weight\ (kg)} \times 100")
-            
-            st.markdown("##### **2. Viscosity Dilution Efficiency (Historical Baseline)**")
-            st.latex(r"Efficiency\ (s/\%) = \frac{Initial\ Viscosity\ (s) - Final\ Viscosity\ (s)}{Solvent\ Ratio\ (\%)}^{}")
-            st.markdown(f"ℹ️ *Selected System Median Baseline Efficiency:* **`{baseline_efficiency:.2f} seconds drop per 1% solvent added`**")
-            st.markdown(f"ℹ️ *Selected System Absolute Viscosity Floor:* **`{viscosity_floor:.1f} seconds`** (Physical Saturation Boundary)")
-            
-            st.markdown("##### **3. Recommended Solvent Weight Estimation**")
-            st.latex(r"Target\ Drop\ (\Delta V) = Current\ Viscosity - Target\ Viscosity")
-            st.latex(r"Required\ Solvent\ Weight\ (kg) = \frac{Paint\ Weight\ (kg) \times \left( \frac{\Delta V}{Baseline\ Efficiency} \right)}{100}")
+            st.markdown(r"##### **2. Recommended Solvent Weight Estimation**")
+            st.latex(r"Required\ Solvent\ Weight\ (kg) = \frac{Paint\ Weight\ (kg) \times \left( \frac{\Delta V\ (Required\ Drop)}{Baseline\ Efficiency} \right)}{100}")
 
         # Operator Live Inputs
-        st.markdown("### **Step 2: Input Current Tank Conditions**")
+        st.markdown("### **Step 2: Input Current Tank Conditions (Dynamic Calc)**")
         col_i1, col_i2, col_i3, col_i4 = st.columns(4)
         with col_i1:
             paint_weight = st.number_input("Paint Weight (kg):", min_value=1.0, value=120.0, step=10.0)
@@ -107,52 +100,73 @@ else:
             st.metric(label="Required Viscosity Drop (Delta V)", value=f"{delta_v_target:.1f} s")
 
         # EXECUTION CALCULATION
-        st.markdown("### **Step 3: Optimization Results & Safety Verification**")
-        
+        st.markdown("### **Step 3: Dynamic Calculation Output**")
         if delta_v_target <= 0:
             st.success("✅ **Result:** Current viscosity meets or exceeds target. No solvent addition required.")
         elif target_visc < viscosity_floor:
-            st.error(f"🚨 **CRITICAL DANGER (ABORTED):** Requested target ({target_visc}s) is lower than the historical Viscosity Floor ({viscosity_floor:.1f}s). Solvent addition aborted to prevent permanent paint film damage.")
+            st.error(f"🚨 **CRITICAL DANGER:** Requested target ({target_visc}s) is lower than the historical Viscosity Floor ({viscosity_floor:.1f}s). Aborted.")
         else:
-            # MODULE 1: Predict Solvent Addition Weight
             predicted_ratio_needed = delta_v_target / baseline_efficiency
             recommended_solvent_kg = (paint_weight * predicted_ratio_needed) / 100
-
-            # MODULE 2: Efficiency Monitor & Diminishing Return Zone Analysis
-            # Thresholds: 70% of max historical ratio is optimal, 90% is diminishing return zone
             yellow_threshold = max_historical_ratio * 0.70
             red_threshold = max_historical_ratio * 0.90
 
-            # Display Output Cards based on Diminishing Return Level
             if predicted_ratio_needed <= yellow_threshold:
-                st.success(f"### ✅ **Recommended Solvent to Add:** `{recommended_solvent_kg:.2f} kg`")
-                st.markdown(f"""
-                - **Expected Solvent Ratio:** `{predicted_ratio_needed:.2f}%`
-                - **Efficiency Status:** `Optimal Zone` (High dilution performance. Solvent is fully effective).
-                """)
+                st.success(f"### ✅ **Recommended Solvent:** `{recommended_solvent_kg:.2f} kg` (Optimal Zone)")
             elif predicted_ratio_needed <= red_threshold:
-                st.warning(f"### ⚠️ **Recommended Solvent to Add:** `{recommended_solvent_kg:.2f} kg`")
-                st.markdown(f"""
-                - **Expected Solvent Ratio:** `{predicted_ratio_needed:.2f}%` (Approaching yellow threshold of `{yellow_threshold:.2f}%`)
-                - **Efficiency Status:** `Diminishing Return Zone (Yellow Alert)`
-                - **Notice:** The calculated solvent ratio is approaching historical limits. Viscosity reduction efficiency may start dropping. Monitor the blend closely.
-                """)
+                st.warning(f"### ⚠️ **Recommended Solvent:** `{recommended_solvent_kg:.2f} kg` (Diminishing Return Zone)")
             else:
-                st.error(f"### 🚨 **CRITICAL CAP: Recommended Solvent to Add:** `{recommended_solvent_kg:.2f} kg`")
-                st.markdown(f"""
-                - **Expected Solvent Ratio:** `{predicted_ratio_needed:.2f}%` (Historical Max Limit is `{max_historical_ratio:.2f}%`)
-                - **Efficiency Status:** `Severe Diminishing Return Zone (Red Alert)`
-                - **Danger:** Adding this amount enters a critical saturation level where dilution efficiency drops significantly. Additional solvent will weaken core resin bonding without providing significant viscosity reduction.
-                """)
+                st.error(f"### 🚨 **CRITICAL CAP:** `{recommended_solvent_kg:.2f} kg` (Severe Diminishing Return Zone)")
+
+        # --- ĐÃ TÍCH HỢP: TỰ ĐỘNG XUẤT BẢNG SOP ĐẶT TẠI NHÀ XƯỞNG ---
+        st.markdown("---")
+        st.header("📋 Standard SOP Reference Matrix for Workshop Layout")
+        st.markdown(f"**Target System:** Resin: `{engine_resin}` | Vendor: `{engine_vendor}` | Solvent: `{engine_solvent}`")
+        st.markdown("*This matrix provides pre-calculated solvent addition targets (in kg) based on standard paint weights and required viscosity drops ($\Delta V$). Print this table for workshop operators.*")
+
+        # Define standard workshop baselines for table generation
+        standard_paint_weights = [50, 100, 150, 200, 250, 300, 400, 500]  # Rows (kg)
+        standard_delta_v = [2, 4, 6, 8, 10, 12]  # Columns (seconds drop)
+
+        # Build the matrix using the historical baseline efficiency
+        sop_data = []
+        for w in standard_paint_weights:
+            row_dict = {"Paint Weight (kg)": f"{w} kg"}
+            for dv in standard_delta_v:
+                # Calculate required ratio for this specific Delta V
+                ratio_needed = dv / baseline_efficiency
+                solvent_kg = (w * ratio_needed) / 100
+                
+                # Apply Diminishing Return threshold coloring logic
+                if ratio_needed > max_historical_ratio * 0.90:
+                    # Over-saturation: block or flag as dangerous
+                    row_dict[f"Drop {dv}s"] = f"{solvent_kg:.2f} kg 🚨 (HIGH RISK)"
+                elif ratio_needed > max_historical_ratio * 0.70:
+                    row_dict[f"Drop {dv}s"] = f"{solvent_kg:.2f} kg ⚠️"
+                else:
+                    row_dict[f"Drop {dv}s"] = f"{solvent_kg:.2f} kg"
+            sop_data.append(row_dict)
+
+        sop_df = pd.DataFrame(sop_data)
+        
+        # Display the workshop lookup table cleanly
+        st.dataframe(sop_df, use_container_width=True, hide_index=True)
+        st.info("""
+        📌 **How Workers Use This Table at the Shop Floor:**
+        1. Look at the left column to find the closest **Paint Weight** currently in the tank.
+        2. Look at the top row to find the **Required Viscosity Drop (Delta V)** (Current Viscosity minus Target Viscosity).
+        3. The intersecting cell tells you exactly how many **kg of solvent** to weigh and add.
+        4. Cells marked with `⚠️` or `🚨` mean the mix is reaching the **Diminishing Return Zone**. Add 80% first, stir well, and re-test.
+        """)
+
     else:
         st.info("No data available for the selected combination.")
 
 
-# --- 5. HISTORICAL SOP REFERENCE MATRIX ---
+# --- 5. HISTORICAL BACKGROUND REFERENCE MATRIX ---
 st.markdown("---")
-st.subheader("📚 SOP Reference Matrix (Filtered: Only Groups with 10+ Batches)")
+st.subheader("📚 Global Historical Performance Reference (All Systems)")
 
-# Build clean summary reference table
 agg_funcs = {
     'Batches': pd.NamedAgg(column='塗料批號', aggfunc='nunique'),
     'Total Paint (kg)': pd.NamedAgg(column='塗料重量', aggfunc='sum'),
@@ -174,28 +188,9 @@ st.dataframe(
         "Total Solvent (kg)": st.column_config.NumberColumn(format="%d"),
         "Avg Initial V (s)": st.column_config.NumberColumn(format="%.1f"),
         "Avg Final V (s)": st.column_config.NumberColumn(format="%.1f"),
-        "Viscosity Floor (s) ⚠️": st.column_config.NumberColumn(format="%.1f", help="Absolute lowest recorded viscosity in history."),
-        "Baseline Efficiency (s/%)": st.column_config.NumberColumn(format="%.2f", help="Median viscosity seconds dropped per 1% of solvent added."),
-        "Max Historical Ratio %": st.column_config.ProgressColumn(format="%.2f%%", min_value=0, max_value=30, help="Maximum solvent ratio ever used in historical production.")
+        "Viscosity Floor (s) ⚠️": st.column_config.NumberColumn(format="%.1f"),
+        "Baseline Efficiency (s/%)": st.column_config.NumberColumn(format="%.2f"),
+        "Max Historical Ratio %": st.column_config.ProgressColumn(format="%.2f%%", min_value=0, max_value=30)
     },
     use_container_width=True
 )
-
-
-# --- 6. CHART 3: MULTI-GROUP COMPARATIVE REGRESSION VIZ ---
-st.markdown("---")
-st.subheader("📈 Visual Distribution: Solvent Ratio vs. Viscosity")
-
-fig_regression = px.scatter(
-    filtered_df,
-    x='Solvent_Ratio_Percent',
-    y='黏度(秒)',
-    color='Solvent_Type',
-    symbol='Resin',
-    facet_col='Vendor',
-    trendline='ols',
-    labels={'Solvent_Ratio_Percent': 'Solvent Added (%)', '黏度(秒)': 'Viscosity (s)'},
-    title="Historical Scatter Distribution Analysis"
-)
-fig_regression.update_layout(plot_bgcolor='white', font=dict(size=12))
-st.plotly_chart(fig_regression, use_container_width=True)
