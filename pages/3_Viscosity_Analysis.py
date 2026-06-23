@@ -126,10 +126,10 @@ else:
         st.info("No data available for the selected combination.")
 
 
-# --- 5. BIỂU ĐỒ XU HƯỚNG PHI TUYẾN TÍNH (DỮ LIỆU ĐỐI CHIẾU TRƯỚC/SAU) ---
+# --- 5. BIỂU ĐỒ XU HƯỚNG PHI TUYẾN TÍNH (ĐÃ NÂNG CẤP LINK DỮ LIỆU ĐỐI CHIẾU CHÉO) ---
 st.markdown("---")
 st.subheader("📈 Non-linear Distribution Analysis: Initial vs. Final Viscosity Trends")
-st.markdown("*This interactive plot tracks the exact viscosity drop for each batch. The vertical dotted lines connect the Initial Viscosity (Orange) to its Final Viscosity (Blue) after adding the specified Solvent Ratio.*")
+st.markdown("*Hover over any data point to see the comprehensive history of that specific batch, including both Before and After viscosity values.*")
 
 if not filtered_df.empty:
     fig_trend = go.Figure()
@@ -152,24 +152,34 @@ if not filtered_df.empty:
         showlegend=True
     ))
 
-    # 1. Vẽ các điểm dữ liệu "Độ nhớt TRƯỚC khi thêm dung môi" (Màu Cam)
+    # 1. Vẽ điểm "Độ nhớt TRƯỚC khi thêm dung môi" (Màu Cam) - Tích hợp customdata để gọi thông số điểm Sau
     fig_trend.add_trace(go.Scatter(
         x=filtered_df['Solvent_Ratio_Percent'],
         y=filtered_df['黏度(秒)'],
         mode='markers',
         name='Initial Viscosity (Before)',
         marker=dict(color='#ED7D31', size=7, opacity=0.9, line=dict(width=1, color='white')),
-        hovertemplate='Ratio: %{x:.2f}%<br>Initial: %{y:.1f}s<extra></extra>'
+        customdata=filtered_df[['黏度(秒)_1', 'Viscosity_Reduction']].values,
+        hovertemplate='<b>Batch Details</b><br>' +
+                      'Solvent Ratio: %{x:.2f}%<br>' +
+                      'Initial Visc (Before): %{y:.1f}s 🌟<br>' +
+                      'Final Visc (After): %{customdata[0]:.1f}s<br>' +
+                      'Viscosity Drop (Delta V): %{customdata[1]:.1f}s<extra></extra>'
     ))
 
-    # 2. Vẽ các điểm dữ liệu "Độ nhớt SAU khi thêm dung môi" (Màu Xanh Dương)
+    # 2. Vẽ điểm "Độ nhớt SAU khi thêm dung môi" (Màu Xanh Dương) - Tích hợp customdata để gọi thông số điểm Trước
     fig_trend.add_trace(go.Scatter(
         x=filtered_df['Solvent_Ratio_Percent'],
         y=filtered_df['黏度(秒)_1'],
         mode='markers',
         name='Final Viscosity (After)',
         marker=dict(color='#4472C4', size=7, opacity=0.9, line=dict(width=1, color='white')),
-        hovertemplate='Ratio: %{x:.2f}%<br>Final: %{y:.1f}s<extra></extra>'
+        customdata=filtered_df[['黏度(秒)', 'Viscosity_Reduction']].values,
+        hovertemplate='<b>Batch Details</b><br>' +
+                      'Solvent Ratio: %{x:.2f}%<br>' +
+                      'Initial Visc (Before): %{customdata[0]:.1f}s<br>' +
+                      'Final Visc (After): %{y:.1f}s 🌟<br>' +
+                      'Viscosity Drop (Delta V): %{customdata[1]:.1f}s<extra></extra>'
     ))
 
     # 3. Tính toán và vẽ Đường xu hướng Phi tuyến tính
@@ -188,7 +198,7 @@ if not filtered_df.empty:
             hoverinfo='skip'
         ))
 
-    # ĐÃ SỬA LỖI HIỂN THỊ CỦA BIỂU ĐỒ
+    # Cấu hình Layout tối ưu hiển thị
     fig_trend.update_layout(
         plot_bgcolor='white',
         xaxis=dict(
@@ -205,9 +215,7 @@ if not filtered_df.empty:
             linecolor='black',
             linewidth=1
         ),
-        margin=dict(l=50, r=50, t=60, b=50), # Tăng lề trên (t=60) để lấy chỗ cho legend
-        
-        # 1. Đưa Chú thích (Legend) lên nóc và dàn ngang để KHÔNG CHE mất dữ liệu
+        margin=dict(l=50, r=50, t=60, b=50),
         legend=dict(
             orientation="h",
             yanchor="bottom",
@@ -216,9 +224,7 @@ if not filtered_df.empty:
             x=0.5,
             bgcolor="rgba(255,255,255,0)"
         ),
-        
-        # 2. Đổi về chế độ 'closest' để Rà chuột chính xác từng điểm mẻ sơn
-        hovermode='closest' 
+        hovermode='closest' # Giữ chế độ chọn điểm độc lập chính xác
     )
     
     st.plotly_chart(fig_trend, use_container_width=True)
