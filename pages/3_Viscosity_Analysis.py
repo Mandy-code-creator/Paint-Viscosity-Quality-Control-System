@@ -55,30 +55,31 @@ st.plotly_chart(fig_regression, use_container_width=True)
 
 # --- 5. Biểu đồ 2: Ma trận SOP ---
 st.markdown("---")
-st.subheader("📚 SOP Matrix: Resin – Vendor – Solvent")
+st.subheader("📚 SOP Matrix: Resin – Vendor – Solvent (Saturation Aware)")
 
+# Cập nhật phương pháp agg để lấy thêm min/max cảnh báo bão hòa
+agg_funcs = {}
 available_cols = group_a.columns
-agg_dict = {}
-if '塗料批號' in available_cols: agg_dict['塗料批號'] = 'nunique'
-if '塗料重量' in available_cols: agg_dict['塗料重量'] = 'sum'
-if '添加重量' in available_cols: agg_dict['添加重量'] = 'sum'
-if '黏度(秒)' in available_cols: agg_dict['黏度(秒)'] = 'mean'
-if '黏度(秒)_1' in available_cols: agg_dict['黏度(秒)_1'] = 'mean'
-if 'Solvent_Ratio_Percent' in available_cols: agg_dict['Solvent_Ratio_Percent'] = 'mean'
-if 'Sensitivity' in available_cols: agg_dict['Sensitivity'] = 'mean'
 
-summary_matrix = group_a.groupby(['Resin','Vendor','Solvent_Type']).agg(agg_dict)
+if '塗料批號' in available_cols: agg_funcs['Batches'] = ('塗料批號', 'nunique')
+if '塗料重量' in available_cols: agg_funcs['Total Paint (kg)'] = ('塗料重量', 'sum')
+if '添加重量' in available_cols: agg_funcs['Total Solvent (kg)'] = ('添加重量', 'sum')
+if '黏度(秒)' in available_cols: agg_funcs['Avg Initial V (s)'] = ('黏度(秒)', 'mean')
+if '黏度(秒)_1' in available_cols: 
+    agg_funcs['Avg Final V (s)'] = ('黏度(秒)_1', 'mean')
+    # Thêm đáy bão hòa độ nhớt (thấp nhất từng đạt)
+    agg_funcs['Viscosity Floor (s) ⚠️'] = ('黏度(秒)_1', 'min') 
+if 'Solvent_Ratio_Percent' in available_cols: 
+    agg_funcs['Avg Solvent %'] = ('Solvent_Ratio_Percent', 'mean')
+    # Thêm điểm bão hòa dung môi (cao nhất từng châm)
+    agg_funcs['Max Solvent Limit % ⚠️'] = ('Solvent_Ratio_Percent', 'max')
+if 'Sensitivity' in available_cols: 
+    agg_funcs['Avg Sensitivity'] = ('Sensitivity', 'mean')
 
-summary_matrix = summary_matrix.rename(columns={
-    '塗料批號': 'Batches',
-    '塗料重量': 'Total Paint (kg)',
-    '添加重量': 'Total Solvent (kg)',
-    '黏度(秒)': 'Initial V (s)',
-    '黏度(秒)_1': 'Final V (s)',
-    'Solvent_Ratio_Percent': 'Avg Solvent %',
-    'Sensitivity': 'Avg Sensitivity'
-})
+# Tạo dataframe phẳng (flat dataframe)
+summary_matrix = group_a.groupby(['Resin','Vendor','Solvent_Type']).agg(**agg_funcs).reset_index()
 
+# Tính toán định mức SOP
 if 'Avg Sensitivity' in summary_matrix.columns:
     summary_matrix['Solvent Factor (kg/1s drop)'] = summary_matrix.apply(
         lambda row: (row['Total Paint (kg)'] * (1.0 / row['Avg Sensitivity']) / 100)
@@ -86,7 +87,24 @@ if 'Avg Sensitivity' in summary_matrix.columns:
         axis=1
     )
 
-st.dataframe(summary_matrix, use_container_width=True)
+# Format lại giao diện hiển thị cho đẹp
+st.dataframe(
+    summary_matrix.style.format({
+        'Total Paint (kg)': '{:,.0f}',
+        'Total Solvent (kg)': '{:,.0f}',
+        'Avg Initial V (s)': '{:.1f}',
+        'Avg Final V (s)': '{:.1f}',
+        'Viscosity Floor (s) ⚠️': '{:.1f}',
+        'Avg Solvent %': '{:.2f}%',
+        'Max Solvent Limit % ⚠️': '{:.2f}%',
+        'Avg Sensitivity': '{:.3f}',
+        'Solvent Factor (kg/1s drop)': '{:.3f}'
+    }).background_gradient(subset=['Max Solvent Limit % ⚠️'], cmap='Oranges')
+      .background_gradient(subset=['Viscosity Floor (s) ⚠️'], cmap='Blues_r'),
+    use_container_width=True
+)
+
+st.info("⚠️ **Lưu ý SOP:** `Viscosity Floor` là ngưỡng độ nhớt bão hòa (không thể giảm thêm). Không khuyến nghị thêm dung môi vượt quá `Max Solvent Limit %` để tránh phá vỡ cấu trúc sơn.")
 
 # --- 6. Biểu đồ 3: Line chart trung bình Initial vs Final Viscosity ---
 st.markdown("---")
