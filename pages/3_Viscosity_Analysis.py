@@ -77,20 +77,17 @@ else:
         max_historical_ratio = group_data['Solvent_Ratio_Percent'].max()
         viscosity_floor = group_data['黏度(秒)_1'].min()
 
-        # Fallback safe defaults if data is missing or corrupted
         if pd.isna(baseline_efficiency) or baseline_efficiency <= 0:
             baseline_efficiency = 5.0  
         if pd.isna(max_historical_ratio) or max_historical_ratio <= 0:
             max_historical_ratio = 10.0
 
-        # --- TECHNICAL FORMULA DISPLAY PANEL ---
         with st.expander("📐 Technical Formulation & Logic Reference"):
             st.markdown("##### **1. Solvent Blending Ratio Formula**")
             st.latex(r"Solvent\ Ratio\ (\%) = \frac{Solvent\ Weight\ (kg)}{Paint\ Weight\ (kg)} \times 100")
             st.markdown(r"##### **2. Recommended Solvent Weight Estimation**")
             st.latex(r"Required\ Solvent\ Weight\ (kg) = \frac{Paint\ Weight\ (kg) \times \left( \frac{\Delta V\ (Required\ Drop)}{Baseline\ Efficiency} \right)}{100}")
 
-        # Operator Live Inputs
         st.markdown("### **Step 2: Input Current Tank Conditions (Dynamic Calc)**")
         col_i1, col_i2, col_i3, col_i4 = st.columns(4)
         with col_i1:
@@ -103,7 +100,6 @@ else:
             delta_v_target = current_visc - target_visc
             st.metric(label="Required Viscosity Drop (Delta V)", value=f"{delta_v_target:.1f} s")
 
-        # EXECUTION CALCULATION
         st.markdown("### **Step 3: Dynamic Calculation Output**")
         if delta_v_target <= 0:
             st.success("✅ **Result:** Current viscosity meets or exceeds target. No solvent addition required.")
@@ -126,15 +122,21 @@ else:
         st.info("No data available for the selected combination.")
 
 
-# --- 5. BIỂU ĐỒ XU HƯỚNG PHI TUYẾN TÍNH (ĐÃ NÂNG CẤP LINK DỮ LIỆU ĐỐI CHIẾU CHÉO) ---
+# --- 5. BIỂU ĐỒ XU HƯỚNG PHI TUYẾN TÍNH (NÂNG CẤP NHẬN DIỆN VENDOR) ---
 st.markdown("---")
 st.subheader("📈 Non-linear Distribution Analysis: Initial vs. Final Viscosity Trends")
-st.markdown("*Hover over any data point to see the comprehensive history of that specific batch, including both Before and After viscosity values.*")
+st.markdown("*Hover over any data point to view batch details. Different symbol shapes represent different vendors.*")
 
 if not filtered_df.empty:
     fig_trend = go.Figure()
 
-    # Vẽ các đường thẳng dọc nét đứt nối từng mẻ (Cam rớt xuống Xanh)
+    # TỰ ĐỘNG GÁN HÌNH KHỐI (SYMBOL) CHO TỪNG VENDOR ĐỂ PHÂN BIỆT TRỰC QUAN
+    unique_v = filtered_df['Vendor'].unique()
+    symbols_list = ['circle', 'square', 'diamond', 'triangle-up', 'pentagon', 'hexagram', 'star', 'cross']
+    vendor_symbol_map = {v: symbols_list[i % len(symbols_list)] for i, v in enumerate(unique_v)}
+    filtered_df['Marker_Symbol'] = filtered_df['Vendor'].map(vendor_symbol_map)
+
+    # 1. Vẽ đường nét đứt dọc (Cam rớt xuống Xanh)
     x_lines = []
     y_lines = []
     for _, row in filtered_df.iterrows():
@@ -147,48 +149,58 @@ if not filtered_df.empty:
         y=y_lines,
         mode='lines',
         name='Viscosity Drop (Delta V)',
-        line=dict(color='gray', width=1, dash='dot'),
+        line=dict(color='lightgray', width=1, dash='dot'),
         hoverinfo='skip',
         showlegend=True
     ))
 
-    # 1. Vẽ điểm "Độ nhớt TRƯỚC khi thêm dung môi" (Màu Cam) - Tích hợp customdata để gọi thông số điểm Sau
+    # 2. Vẽ điểm TRƯỚC khi châm (Màu Cam) - Có bổ sung thông tin Vendor vào Hover
     fig_trend.add_trace(go.Scatter(
         x=filtered_df['Solvent_Ratio_Percent'],
         y=filtered_df['黏度(秒)'],
         mode='markers',
         name='Initial Viscosity (Before)',
-        marker=dict(color='#ED7D31', size=7, opacity=0.9, line=dict(width=1, color='white')),
-        customdata=filtered_df[['黏度(秒)_1', 'Viscosity_Reduction']].values,
-        hovertemplate='<b>Batch Details</b><br>' +
+        marker=dict(
+            color='#ED7D31', 
+            size=8, 
+            opacity=0.8, 
+            line=dict(width=1, color='white'),
+            symbol=filtered_df['Marker_Symbol'] # Áp dụng hình khối theo Vendor
+        ),
+        customdata=filtered_df[['黏度(秒)_1', 'Viscosity_Reduction', 'Vendor', 'Resin', 'Solvent_Type']].values,
+        hovertemplate='<b>%{customdata[2]} | %{customdata[3]} | Solvent: %{customdata[4]}</b><br><br>' +
                       'Solvent Ratio: %{x:.2f}%<br>' +
                       'Initial Visc (Before): %{y:.1f}s 🌟<br>' +
                       'Final Visc (After): %{customdata[0]:.1f}s<br>' +
-                      'Viscosity Drop (Delta V): %{customdata[1]:.1f}s<extra></extra>'
+                      'Viscosity Drop: %{customdata[1]:.1f}s<extra></extra>'
     ))
 
-    # 2. Vẽ điểm "Độ nhớt SAU khi thêm dung môi" (Màu Xanh Dương) - Tích hợp customdata để gọi thông số điểm Trước
+    # 3. Vẽ điểm SAU khi châm (Màu Xanh Dương) - Có bổ sung thông tin Vendor vào Hover
     fig_trend.add_trace(go.Scatter(
         x=filtered_df['Solvent_Ratio_Percent'],
         y=filtered_df['黏度(秒)_1'],
         mode='markers',
         name='Final Viscosity (After)',
-        marker=dict(color='#4472C4', size=7, opacity=0.9, line=dict(width=1, color='white')),
-        customdata=filtered_df[['黏度(秒)', 'Viscosity_Reduction']].values,
-        hovertemplate='<b>Batch Details</b><br>' +
+        marker=dict(
+            color='#4472C4', 
+            size=8, 
+            opacity=0.8, 
+            line=dict(width=1, color='white'),
+            symbol=filtered_df['Marker_Symbol'] # Áp dụng hình khối theo Vendor
+        ),
+        customdata=filtered_df[['黏度(秒)', 'Viscosity_Reduction', 'Vendor', 'Resin', 'Solvent_Type']].values,
+        hovertemplate='<b>%{customdata[2]} | %{customdata[3]} | Solvent: %{customdata[4]}</b><br><br>' +
                       'Solvent Ratio: %{x:.2f}%<br>' +
                       'Initial Visc (Before): %{customdata[0]:.1f}s<br>' +
                       'Final Visc (After): %{y:.1f}s 🌟<br>' +
-                      'Viscosity Drop (Delta V): %{customdata[1]:.1f}s<extra></extra>'
+                      'Viscosity Drop: %{customdata[1]:.1f}s<extra></extra>'
     ))
 
-    # 3. Tính toán và vẽ Đường xu hướng Phi tuyến tính
+    # 4. Tính toán và vẽ Đường xu hướng
     sorted_df = filtered_df.dropna(subset=['Solvent_Ratio_Percent', '黏度(秒)_1']).sort_values(by='Solvent_Ratio_Percent')
-    
     if len(sorted_df) > 5:
         poly_fit = np.polyfit(sorted_df['Solvent_Ratio_Percent'], sorted_df['黏度(秒)_1'], 2)
         poly_curve = np.polyval(poly_fit, sorted_df['Solvent_Ratio_Percent'])
-        
         fig_trend.add_trace(go.Scatter(
             x=sorted_df['Solvent_Ratio_Percent'],
             y=poly_curve,
@@ -198,24 +210,21 @@ if not filtered_df.empty:
             hoverinfo='skip'
         ))
 
-    # Cấu hình Layout tối ưu hiển thị
+    # 5. Thêm các mục Vendor vào thanh Chú thích (Legend) dưới dạng màu Xám trung tính để đối chiếu Hình khối
+    for v in unique_v:
+        fig_trend.add_trace(go.Scatter(
+            x=[None], y=[None], mode='markers',
+            name=f'Vendor: {v}',
+            marker=dict(size=8, color='gray', symbol=vendor_symbol_map[v]),
+            showlegend=True
+        ))
+
+    # 6. Cấu hình Layout
     fig_trend.update_layout(
         plot_bgcolor='white',
-        xaxis=dict(
-            title='Solvent Blending Ratio (%)',
-            showgrid=True,
-            gridcolor='#EAEAEA',
-            linecolor='black',
-            linewidth=1
-        ),
-        yaxis=dict(
-            title='Viscosity (seconds)',
-            showgrid=True,
-            gridcolor='#EAEAEA',
-            linecolor='black',
-            linewidth=1
-        ),
-        margin=dict(l=50, r=50, t=60, b=50),
+        xaxis=dict(title='Solvent Blending Ratio (%)', showgrid=True, gridcolor='#EAEAEA', linecolor='black', linewidth=1),
+        yaxis=dict(title='Viscosity (seconds)', showgrid=True, gridcolor='#EAEAEA', linecolor='black', linewidth=1),
+        margin=dict(l=50, r=50, t=80, b=50), # Tăng lề trên để đủ chỗ cho Legend nhiều mục
         legend=dict(
             orientation="h",
             yanchor="bottom",
@@ -224,7 +233,7 @@ if not filtered_df.empty:
             x=0.5,
             bgcolor="rgba(255,255,255,0)"
         ),
-        hovermode='closest' # Giữ chế độ chọn điểm độc lập chính xác
+        hovermode='closest' 
     )
     
     st.plotly_chart(fig_trend, use_container_width=True)
