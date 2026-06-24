@@ -48,11 +48,12 @@ tab_exec, tab_env, tab_ai = st.tabs([
 ])
 
 # ==========================================
+# ==========================================
 # TAB 1: VENDOR & RESIN PORTFOLIO
 # ==========================================
 with tab_exec:
     st.markdown("### 📋 Resin, Vendor & Application Performance Analysis")
-    st.markdown("*Comprehensive breakdown of historical performance by vendor and end-product application.*")
+    st.markdown("*Comprehensive breakdown of historical performance by vendor and end-product application, optimized to exclude saturated outliers.*")
 
     matrix_df = group_a.copy()
     paint_code_col = '塗料代碼' 
@@ -89,25 +90,25 @@ with tab_exec:
         '塗料重量': 'sum',
         '添加重量': 'sum',
         '黏度(秒)': 'mean',
-        '黏度(秒)_1': 'mean',
+        '黏度(秒)_1': 'min', # Lấy Viscosity Floor (Đáy độ nhớt an toàn) thay vì mean
         '溫度': 'mean',
         '濕度': 'mean',
-        'Solvent_Ratio_Percent': 'mean',
-        'Sensitivity': 'mean'
+        'Solvent_Ratio_Percent': 'max', # Lấy ngưỡng bão hòa tối đa lịch sử
+        'Sensitivity': 'median' # ĐÃ SỬA: Dùng Median để tự động lọc bỏ các mẻ bị bão hòa (Outliers)
     }).rename(columns={
         '塗料批號': 'Batches',
         '塗料重量': 'Total Paint (kg)',
         '添加重量': 'Total Solvent (kg)',
-        '黏度(秒)': 'Initial V (s)',
-        '黏度(秒)_1': 'Final V (s)',
+        '黏度(秒)': 'Avg Initial V (s)',
+        '黏度(秒)_1': 'Viscosity Floor (s)',
         '溫度': 'Avg Temp (°C)',
         '濕度': 'Avg Humidity (%)',
-        'Solvent_Ratio_Percent': 'Avg Solvent %',
-        'Sensitivity': 'Avg Sensitivity'
+        'Solvent_Ratio_Percent': 'Max Safe Ratio %',
+        'Sensitivity': 'Optimal Sensitivity'
     }).reset_index()
 
-    detailed_summary['Solvent % / 1s Drop'] = detailed_summary['Avg Sensitivity'].apply(lambda x: (1.0 / x) if x > 0 else 0)
-    detailed_summary = detailed_summary.drop(columns=['Avg Sensitivity'])
+    detailed_summary['Optimal Solvent % / 1s Drop'] = detailed_summary['Optimal Sensitivity'].apply(lambda x: (1.0 / x) if x > 0 else 0)
+    detailed_summary = detailed_summary.drop(columns=['Optimal Sensitivity'])
 
     # Advanced visualization dashboard presentation
     st.dataframe(
@@ -115,12 +116,12 @@ with tab_exec:
         column_config={
             "Total Paint (kg)": st.column_config.NumberColumn(format="%d"),
             "Total Solvent (kg)": st.column_config.NumberColumn(format="%d"),
-            "Initial V (s)": st.column_config.NumberColumn(format="%.1f"),
-            "Final V (s)": st.column_config.NumberColumn(format="%.1f"),
+            "Avg Initial V (s)": st.column_config.NumberColumn(format="%.1f"),
+            "Viscosity Floor (s)": st.column_config.NumberColumn(format="%.1f"),
             "Avg Temp (°C)": st.column_config.NumberColumn(format="%.1f"),
             "Avg Humidity (%)": st.column_config.ProgressColumn(format="%.1f%%", min_value=0, max_value=100),
-            "Avg Solvent %": st.column_config.NumberColumn(format="%.2f%%"),
-            "Solvent % / 1s Drop": st.column_config.NumberColumn(format="%.3f%%")
+            "Max Safe Ratio %": st.column_config.NumberColumn(format="%.2f%%"),
+            "Optimal Solvent % / 1s Drop": st.column_config.NumberColumn(format="%.3f%%")
         },
         use_container_width=True,
         hide_index=True
