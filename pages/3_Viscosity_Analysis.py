@@ -105,16 +105,15 @@ with tab1:
     fig_scatter.update_yaxes(title="Viscosity (seconds)", showgrid=True, gridcolor='#EAEAEA', linecolor='black')
     st.plotly_chart(fig_scatter, use_container_width=True)
 
-    # ĐÃ XÓA BỎ BOX-PLOT (MARGINAL="BOX") ĐỂ TRẢ LẠI GIAO DIỆN SẠCH SẼ
     col_h1, col_h2 = st.columns(2)
     with col_h1:
         st.markdown("#### 2. Histogram: Solvent Addition (%)")
-        st.markdown("*Mật độ phân bổ các mức pha loãng dung môi trong lịch sử sản xuất.*")
+        st.markdown("*Historical distribution density of solvent dilution levels.*")
         fig_hist1 = px.histogram(
             system_data, x="Solvent_Ratio_Percent", 
-            nbins=20, 
+            nbins=40,  # Increased nbins to make columns narrower and finer
             color_discrete_sequence=['#7030A0'],
-            text_auto=True  # In số liệu trực tiếp, không bị Box-plot đè xuống
+            text_auto=True 
         )
         fig_hist1.update_traces(marker_line_color='white', marker_line_width=1.5, opacity=0.85)
         fig_hist1.update_layout(plot_bgcolor='white', height=350, margin=dict(l=20, r=20, t=30, b=20))
@@ -124,10 +123,10 @@ with tab1:
         
     with col_h2:
         st.markdown("#### 3. Histogram: Viscosity Drop (s)")
-        st.markdown("*Tần suất biên độ giảm độ nhớt (Delta V) đạt được sau khi pha loãng.*")
+        st.markdown("*Frequency of viscosity drop (Delta V) achieved after dilution.*")
         fig_hist2 = px.histogram(
             system_data, x="Viscosity_Reduction", 
-            nbins=20, 
+            nbins=40,  # Increased nbins to make columns narrower and finer
             color_discrete_sequence=['#2CA02C'],
             text_auto=True
         )
@@ -145,7 +144,7 @@ with tab2:
     col_o1, col_o2 = st.columns(2)
     with col_o1:
         st.markdown("#### 🗺️ Heatmap: Historical Matrix (Avg Solvent %)")
-        st.markdown("*Lưới ma trận đã được làm tròn mỗi 10 giây. Gióng **Độ nhớt đầu vào** và **Đầu ra mục tiêu** để xem số % dung môi trung bình từng dùng.*")
+        st.markdown("*Matrix grid is rounded to every 10 seconds. Align **Initial Viscosity** and **Target Final Viscosity** to see the historical average solvent % used.*")
         
         df_heat = system_data.copy()
         df_heat['Initial_Bin'] = (df_heat['黏度(秒)'] // 10 * 10).astype(int).astype(str) + "s"
@@ -168,7 +167,7 @@ with tab2:
 
     with col_o2:
         st.markdown("#### 🎯 Contour: Operational Sweet Spot")
-        st.markdown("*Vùng màu Xanh Đậm (như bản đồ địa hình) thể hiện định mức châm dung môi phổ biến và hiệu quả nhất trong lịch sử.*")
+        st.markdown("*Dark Blue areas (like a topographical map) represent the most common and effective historical solvent addition ranges.*")
         fig_contour = px.density_contour(
             system_data, x="Solvent_Ratio_Percent", y="Viscosity_Reduction",
             color_discrete_sequence=['#4472C4'],
@@ -181,7 +180,7 @@ with tab2:
         st.plotly_chart(fig_contour, use_container_width=True)
 
     st.markdown("#### 📉 Regression Model Prediction (Non-linear Fit)")
-    st.markdown("*Mô hình toán học dự đoán độ nhớt thành phẩm dựa trên tỷ lệ % dung môi thêm vào.*")
+    st.markdown("*Mathematical model predicting final viscosity based on the added solvent ratio (%).*")
     sorted_sys_df = system_data.dropna(subset=['Solvent_Ratio_Percent', '黏度(秒)_1']).sort_values(by='Solvent_Ratio_Percent')
     if len(sorted_sys_df) > 3:
         poly_fit = np.polyfit(sorted_sys_df['Solvent_Ratio_Percent'], sorted_sys_df['黏度(秒)_1'], 2)
