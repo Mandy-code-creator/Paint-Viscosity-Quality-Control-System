@@ -17,216 +17,185 @@ if not st.session_state.get('raw_data_loaded', False):
 group_a = st.session_state['group_a_data'].copy()
 group_a['Solvent_Type'] = group_a['Solvent_Type'].astype(str)
 
-# STEP 1: Data Normalization (Solvent Ratio & Viscosity Reduction)
+# Data Normalization (Solvent Ratio & Viscosity Reduction)
 group_a['Solvent_Ratio_Percent'] = (group_a['添加重量'] / group_a['塗料重量'].replace(0, 1)) * 100
 group_a['Viscosity_Reduction'] = group_a['黏度(秒)'] - group_a['黏度(秒)_1']
 
-# Step 2: Calculate Historical Efficiency per batch (seconds dropped per 1% solvent)
+# Calculate Historical Efficiency per batch (seconds dropped per 1% solvent)
 group_a['Historical_Efficiency'] = group_a['Viscosity_Reduction'] / group_a['Solvent_Ratio_Percent'].replace(0, np.nan)
 
-# --- 3. INTERACTIVE GLOBAL FILTERS ---
-unique_resins = sorted(group_a['Resin'].unique())
-unique_vendors = sorted(group_a['Vendor'].unique())
-unique_solvents = sorted(group_a['Solvent_Type'].unique())
 
-col_f1, col_f2, col_f3 = st.columns(3)
-with col_f1:
-    selected_resins = st.multiselect("Select Resin:", options=unique_resins, default=unique_resins)
-with col_f2:
-    selected_vendors = st.multiselect("Select Vendor:", options=unique_vendors, default=unique_vendors)
-with col_f3:
-    selected_solvents = st.multiselect("Select Solvent Type:", options=unique_solvents, default=unique_solvents)
-
-filtered_df = group_a[
-    (group_a['Resin'].isin(selected_resins)) &
-    (group_a['Vendor'].isin(selected_vendors)) &
-    (group_a['Solvent_Type'].isin(selected_solvents))
-].copy()
-
-
-# --- 4. PRODUCTION ENGINE ---
+# --- 3. MASTER CONTROL PANEL (UNIFIED SYSTEM SELECTION) ---
 st.markdown("---")
-st.header("⚙️ Live Production Calculation & Efficiency Monitor")
+st.header("🎯 Master System Selection")
+st.markdown("*Select the specific paint system to analyze. This selection automatically powers both the calculator and the trend charts below.*")
 
+# Filter strictly >= 10 batches to ensure statistical reliability
 valid_groups = group_a.groupby(['Resin', 'Vendor', 'Solvent_Type']).filter(lambda x: x['塗料批號'].nunique() >= 10)
 
 if valid_groups.empty:
-    st.info("No groups found with 10+ historical batches to run the production engine.")
-else:
-    st.markdown("### **Step 1: Select Target Paint System**")
-    col_e1, col_e2, col_e3 = st.columns(3)
-    with col_e1:
-        engine_resin = st.selectbox("Execution Resin:", sorted(valid_groups['Resin'].unique()))
-    with col_e2:
-        engine_vendor = st.selectbox("Execution Vendor:", sorted(valid_groups[valid_groups['Resin'] == engine_resin]['Vendor'].unique()))
-    with col_e3:
-        engine_solvent = st.selectbox("Execution Solvent Type:", sorted(valid_groups[(valid_groups['Resin'] == engine_resin) & (valid_groups['Vendor'] == engine_vendor)]['Solvent_Type'].unique()))
+    st.error("❌ No groups found with 10+ historical batches. Please upload a larger dataset.")
+    st.stop()
 
-    group_data = valid_groups[
-        (valid_groups['Resin'] == engine_resin) & 
-        (valid_groups['Vendor'] == engine_vendor) & 
-        (valid_groups['Solvent_Type'] == engine_solvent)
-    ]
-    
-    if not group_data.empty:
-        baseline_efficiency = group_data['Historical_Efficiency'].median()
-        max_historical_ratio = group_data['Solvent_Ratio_Percent'].max()
-        viscosity_floor = group_data['黏度(秒)_1'].min()
+# ĐÃ TỐI ƯU: Gộp chung thành 1 bộ lọc duy nhất cho toàn trang
+col_m1, col_m2, col_m3 = st.columns(3)
+with col_m1:
+    master_resin = st.selectbox("1. Select Resin:", sorted(valid_groups['Resin'].unique()))
+with col_m2:
+    master_vendor = st.selectbox("2. Select Vendor:", sorted(valid_groups[valid_groups['Resin'] == master_resin]['Vendor'].unique()))
+with col_m3:
+    master_solvent = st.selectbox("3. Select Solvent Type:", sorted(valid_groups[(valid_groups['Resin'] == master_resin) & (valid_groups['Vendor'] == master_vendor)]['Solvent_Type'].unique()))
 
-        if pd.isna(baseline_efficiency) or baseline_efficiency <= 0:
-            baseline_efficiency = 5.0  
-        if pd.isna(max_historical_ratio) or max_historical_ratio <= 0:
-            max_historical_ratio = 10.0
-
-        with st.expander("📐 Technical Formulation & Logic Reference"):
-            st.markdown("##### **1. Solvent Blending Ratio Formula**")
-            st.latex(r"Solvent\ Ratio\ (\%) = \frac{Solvent\ Weight\ (kg)}{Paint\ Weight\ (kg)} \times 100")
-            st.markdown(r"##### **2. Recommended Solvent Weight Estimation**")
-            st.latex(r"Required\ Solvent\ Weight\ (kg) = \frac{Paint\ Weight\ (kg) \times \left( \frac{\Delta V\ (Required\ Drop)}{Baseline\ Efficiency} \right)}{100}")
-
-        st.markdown("### **Step 2: Input Current Tank Conditions (Dynamic Calc)**")
-        col_i1, col_i2, col_i3, col_i4 = st.columns(4)
-        with col_i1:
-            paint_weight = st.number_input("Paint Weight (kg):", min_value=1.0, value=120.0, step=10.0)
-        with col_i2:
-            current_visc = st.number_input("Current Viscosity (seconds):", min_value=1.0, value=58.0, step=1.0)
-        with col_i3:
-            target_visc = st.number_input("Target Viscosity (seconds):", min_value=1.0, value=50.0, step=1.0)
-        with col_i4:
-            delta_v_target = current_visc - target_visc
-            st.metric(label="Required Viscosity Drop (Delta V)", value=f"{delta_v_target:.1f} s")
-
-        st.markdown("### **Step 3: Dynamic Calculation Output**")
-        if delta_v_target <= 0:
-            st.success("✅ **Result:** Current viscosity meets or exceeds target. No solvent addition required.")
-        elif target_visc < viscosity_floor:
-            st.error(f"🚨 **CRITICAL DANGER:** Requested target ({target_visc}s) is lower than the historical Viscosity Floor ({viscosity_floor:.1f}s). Aborted.")
-        else:
-            predicted_ratio_needed = delta_v_target / baseline_efficiency
-            recommended_solvent_kg = (paint_weight * predicted_ratio_needed) / 100
-            yellow_threshold = max_historical_ratio * 0.70
-            red_threshold = max_historical_ratio * 0.90
-
-            if predicted_ratio_needed <= yellow_threshold:
-                st.success(f"### ✅ **Recommended Solvent:** `{recommended_solvent_kg:.2f} kg` (Optimal Zone)")
-            elif predicted_ratio_needed <= red_threshold:
-                st.warning(f"### ⚠️ **Recommended Solvent:** `{recommended_solvent_kg:.2f} kg` (Diminishing Return Zone)")
-            else:
-                st.error(f"### 🚨 **CRITICAL CAP:** `{recommended_solvent_kg:.2f} kg` (Severe Diminishing Return Zone)")
-
-    else:
-        st.info("No data available for the selected combination.")
+# Extract data specifically for the chosen system
+system_data = valid_groups[
+    (valid_groups['Resin'] == master_resin) & 
+    (valid_groups['Vendor'] == master_vendor) & 
+    (valid_groups['Solvent_Type'] == master_solvent)
+]
 
 
-# --- 5. BIỂU ĐỒ XU HƯỚNG PHI TUYẾN TÍNH (FOCUS MODE - FULL WIDTH) ---
+# --- 4. PRODUCTION ENGINE (DYNAMIC CALCULATION) ---
 st.markdown("---")
-st.subheader("📈 High-Resolution Trend Analysis: Before vs. After")
-st.markdown("*Select a specific **Resin** and **Vendor** below to view a detailed, full-width visualization without clutter. Hover over points to trace individual batches.*")
+st.header("⚙️ Live Production Calculation & Efficiency Monitor")
 
-if not filtered_df.empty:
-    # BỘ LỌC DÀNH RIÊNG CHO BIỂU ĐỒ NÀY ĐỂ TRÁNH RỐI MẮT
-    col_v1, col_v2 = st.columns(2)
-    with col_v1:
-        viz_resin = st.selectbox("📊 Select Resin to Visualize:", sorted(filtered_df['Resin'].unique()), key='viz_r')
-    with col_v2:
-        viz_vendor = st.selectbox("🏢 Select Vendor to Visualize:", sorted(filtered_df[filtered_df['Resin'] == viz_resin]['Vendor'].unique()), key='viz_v')
+if not system_data.empty:
+    # Establish baseline historical metrics
+    baseline_efficiency = system_data['Historical_Efficiency'].median()
+    max_historical_ratio = system_data['Solvent_Ratio_Percent'].max()
+    viscosity_floor = system_data['黏度(秒)_1'].min()
 
-    # Trích xuất dữ liệu mẻ sơn chỉ cho cụm Nhựa-Nhà cung cấp đã chọn
-    viz_df = filtered_df[(filtered_df['Resin'] == viz_resin) & (filtered_df['Vendor'] == viz_vendor)]
+    # Fallback safe defaults if data is missing or corrupted
+    if pd.isna(baseline_efficiency) or baseline_efficiency <= 0:
+        baseline_efficiency = 5.0  
+    if pd.isna(max_historical_ratio) or max_historical_ratio <= 0:
+        max_historical_ratio = 10.0
 
-    if not viz_df.empty:
-        fig_trend = go.Figure()
-        
-        # Bảng màu cho các loại dung môi trong hệ này
-        unique_solvents_in_viz = viz_df['Solvent_Type'].unique()
-        color_palette = px.colors.qualitative.Bold
-        solvent_colors = {sol: color_palette[i % len(color_palette)] for i, sol in enumerate(unique_solvents_in_viz)}
+    with st.expander("📐 Technical Formulation & Logic Reference"):
+        st.markdown("##### **1. Solvent Blending Ratio Formula**")
+        st.latex(r"Solvent\ Ratio\ (\%) = \frac{Solvent\ Weight\ (kg)}{Paint\ Weight\ (kg)} \times 100")
+        st.markdown(r"##### **2. Recommended Solvent Weight Estimation**")
+        st.latex(r"Required\ Solvent\ Weight\ (kg) = \frac{Paint\ Weight\ (kg) \times \left( \frac{\Delta V\ (Required\ Drop)}{Baseline\ Efficiency} \right)}{100}")
 
-        # 1. Vẽ các đường kẻ dọc nối Before-After cho từng mẻ
-        x_lines = []
-        y_lines = []
-        for _, row in viz_df.iterrows():
-            if pd.notna(row['Solvent_Ratio_Percent']) and pd.notna(row['黏度(秒)']) and pd.notna(row['黏度(秒)_1']):
-                x_lines.extend([row['Solvent_Ratio_Percent'], row['Solvent_Ratio_Percent'], None])
-                y_lines.extend([row['黏度(秒)'], row['黏度(秒)_1'], None])
-                
+    # Operator Live Inputs
+    st.markdown("### **Input Current Tank Conditions**")
+    col_i1, col_i2, col_i3, col_i4 = st.columns(4)
+    with col_i1:
+        paint_weight = st.number_input("Paint Weight (kg):", min_value=1.0, value=120.0, step=10.0)
+    with col_i2:
+        current_visc = st.number_input("Current Viscosity (seconds):", min_value=1.0, value=58.0, step=1.0)
+    with col_i3:
+        target_visc = st.number_input("Target Viscosity (seconds):", min_value=1.0, value=50.0, step=1.0)
+    with col_i4:
+        delta_v_target = current_visc - target_visc
+        st.metric(label="Required Viscosity Drop (Delta V)", value=f"{delta_v_target:.1f} s")
+
+    # Execution Calculation Output
+    st.markdown("### **Optimization Results & Safety Verification**")
+    if delta_v_target <= 0:
+        st.success("✅ **Result:** Current viscosity meets or exceeds target. No solvent addition required.")
+    elif target_visc < viscosity_floor:
+        st.error(f"🚨 **CRITICAL DANGER:** Requested target ({target_visc}s) is lower than the historical Viscosity Floor ({viscosity_floor:.1f}s). Aborted.")
+    else:
+        predicted_ratio_needed = delta_v_target / baseline_efficiency
+        recommended_solvent_kg = (paint_weight * predicted_ratio_needed) / 100
+        yellow_threshold = max_historical_ratio * 0.70
+        red_threshold = max_historical_ratio * 0.90
+
+        if predicted_ratio_needed <= yellow_threshold:
+            st.success(f"### ✅ **Recommended Solvent:** `{recommended_solvent_kg:.2f} kg` (Optimal Zone)")
+        elif predicted_ratio_needed <= red_threshold:
+            st.warning(f"### ⚠️ **Recommended Solvent:** `{recommended_solvent_kg:.2f} kg` (Diminishing Return Zone)")
+        else:
+            st.error(f"### 🚨 **CRITICAL CAP:** `{recommended_solvent_kg:.2f} kg` (Severe Diminishing Return Zone)")
+
+else:
+    st.info("System data is unavailable.")
+
+
+# --- 5. HIGH-RESOLUTION TREND ANALYSIS (AUTO-SYNCED TO MASTER SELECTION) ---
+st.markdown("---")
+st.subheader(f"📈 High-Resolution Trend Analysis: {master_resin} | {master_vendor} | {master_solvent}")
+st.markdown("*This interactive plot visualizes the exact viscosity drop for each batch of the selected system. Hover over points to trace individual batches.*")
+
+if not system_data.empty:
+    fig_trend = go.Figure()
+    
+    sol_color = '#7030A0' # Sử dụng màu tím đậm chuyên nghiệp cho toàn bộ hệ thống đang Focus
+
+    # 1. Vẽ các đường kẻ dọc nối Before-After
+    x_lines = []
+    y_lines = []
+    for _, row in system_data.iterrows():
+        if pd.notna(row['Solvent_Ratio_Percent']) and pd.notna(row['黏度(秒)']) and pd.notna(row['黏度(秒)_1']):
+            x_lines.extend([row['Solvent_Ratio_Percent'], row['Solvent_Ratio_Percent'], None])
+            y_lines.extend([row['黏度(秒)'], row['黏度(秒)_1'], None])
+            
+    fig_trend.add_trace(go.Scatter(
+        x=x_lines, y=y_lines, mode='lines',
+        line=dict(color='lightgray', width=1, dash='dot'),
+        hoverinfo='skip', showlegend=False
+    ))
+
+    # 2. Điểm TRƯỚC khi châm (Vòng tròn rỗng)
+    fig_trend.add_trace(go.Scatter(
+        x=system_data['Solvent_Ratio_Percent'], y=system_data['黏度(秒)'],
+        mode='markers',
+        name="Initial Viscosity (Before)",
+        marker=dict(color=sol_color, size=9, symbol='circle-open', line=dict(width=2, color=sol_color)),
+        customdata=system_data[['黏度(秒)_1', 'Viscosity_Reduction', 'Vendor', 'Resin', 'Solvent_Type']].values,
+        hovertemplate='<b>%{customdata[2]} | %{customdata[3]} | Solvent: %{customdata[4]}</b><br>' +
+                      'Solvent Ratio: %{x:.2f}%<br>' +
+                      'Initial Visc (Before): %{y:.1f}s 🌟<br>' +
+                      'Final Visc (After): %{customdata[0]:.1f}s<br>' +
+                      'Viscosity Drop: %{customdata[1]:.1f}s<extra></extra>',
+    ))
+    
+    # 3. Điểm SAU khi châm (Vòng tròn đặc)
+    fig_trend.add_trace(go.Scatter(
+        x=system_data['Solvent_Ratio_Percent'], y=system_data['黏度(秒)_1'],
+        mode='markers',
+        name="Final Viscosity (After)",
+        marker=dict(color=sol_color, size=9, symbol='circle'),
+        customdata=system_data[['黏度(秒)', 'Viscosity_Reduction', 'Vendor', 'Resin', 'Solvent_Type']].values,
+        hovertemplate='<b>%{customdata[2]} | %{customdata[3]} | Solvent: %{customdata[4]}</b><br>' +
+                      'Solvent Ratio: %{x:.2f}%<br>' +
+                      'Initial Visc (Before): %{customdata[0]:.1f}s<br>' +
+                      'Final Visc (After): %{y:.1f}s 🌟<br>' +
+                      'Viscosity Drop: %{customdata[1]:.1f}s<extra></extra>',
+    ))
+
+    # 4. Đường xu hướng phi tuyến tính
+    sorted_sys_df = system_data.dropna(subset=['Solvent_Ratio_Percent', '黏度(秒)_1']).sort_values(by='Solvent_Ratio_Percent')
+    if len(sorted_sys_df) > 3:
+        poly_fit = np.polyfit(sorted_sys_df['Solvent_Ratio_Percent'], sorted_sys_df['黏度(秒)_1'], 2)
+        poly_curve = np.polyval(poly_fit, sorted_sys_df['Solvent_Ratio_Percent'])
         fig_trend.add_trace(go.Scatter(
-            x=x_lines, y=y_lines, mode='lines',
-            line=dict(color='lightgray', width=1, dash='dot'),
-            hoverinfo='skip', showlegend=False
+            x=sorted_sys_df['Solvent_Ratio_Percent'], y=poly_curve,
+            mode='lines',
+            name="Non-linear Trend (After)",
+            line=dict(color='#C00000', width=2, dash='dash'),
+            hoverinfo='skip'
         ))
 
-        # 2. Vẽ điểm Trước / Sau phân biệt theo loại dung môi
-        for solvent in unique_solvents_in_viz:
-            sol_df = viz_df[viz_df['Solvent_Type'] == solvent]
-            sol_color = solvent_colors[solvent]
-            
-            # Điểm TRƯỚC khi châm (Vòng tròn rỗng)
-            fig_trend.add_trace(go.Scatter(
-                x=sol_df['Solvent_Ratio_Percent'], y=sol_df['黏度(秒)'],
-                mode='markers',
-                name=f"Solvent {solvent} (Before)",
-                legendgroup=f"sol_{solvent}",
-                marker=dict(color=sol_color, size=9, symbol='circle-open', line=dict(width=2, color=sol_color)),
-                customdata=sol_df[['黏度(秒)_1', 'Viscosity_Reduction', 'Vendor', 'Resin', 'Solvent_Type']].values,
-                hovertemplate='<b>%{customdata[2]} | %{customdata[3]} | Solvent: %{customdata[4]}</b><br>' +
-                              'Solvent Ratio: %{x:.2f}%<br>' +
-                              'Initial Visc (Before): %{y:.1f}s 🌟<br>' +
-                              'Final Visc (After): %{customdata[0]:.1f}s<br>' +
-                              'Viscosity Drop: %{customdata[1]:.1f}s<extra></extra>',
-            ))
-            
-            # Điểm SAU khi châm (Vòng tròn đặc)
-            fig_trend.add_trace(go.Scatter(
-                x=sol_df['Solvent_Ratio_Percent'], y=sol_df['黏度(秒)_1'],
-                mode='markers',
-                name=f"Solvent {solvent} (After)",
-                legendgroup=f"sol_{solvent}",
-                marker=dict(color=sol_color, size=9, symbol='circle'),
-                customdata=sol_df[['黏度(秒)', 'Viscosity_Reduction', 'Vendor', 'Resin', 'Solvent_Type']].values,
-                hovertemplate='<b>%{customdata[2]} | %{customdata[3]} | Solvent: %{customdata[4]}</b><br>' +
-                              'Solvent Ratio: %{x:.2f}%<br>' +
-                              'Initial Visc (Before): %{customdata[0]:.1f}s<br>' +
-                              'Final Visc (After): %{y:.1f}s 🌟<br>' +
-                              'Viscosity Drop: %{customdata[1]:.1f}s<extra></extra>',
-            ))
-
-            # Đường xu hướng phi tuyến tính cho từng loại dung môi
-            sorted_sol_df = sol_df.dropna(subset=['Solvent_Ratio_Percent', '黏度(秒)_1']).sort_values(by='Solvent_Ratio_Percent')
-            if len(sorted_sol_df) > 3:
-                poly_fit = np.polyfit(sorted_sol_df['Solvent_Ratio_Percent'], sorted_sol_df['黏度(秒)_1'], 2)
-                poly_curve = np.polyval(poly_fit, sorted_sol_df['Solvent_Ratio_Percent'])
-                fig_trend.add_trace(go.Scatter(
-                    x=sorted_sol_df['Solvent_Ratio_Percent'], y=poly_curve,
-                    mode='lines',
-                    name=f"Trend {solvent}",
-                    legendgroup=f"sol_{solvent}",
-                    line=dict(color=sol_color, width=2, dash='dash'),
-                    hoverinfo='skip',
-                    showlegend=False
-                ))
-
-        # 3. Cấu hình Layout Full-width chuẩn mực
-        fig_trend.update_layout(
-            plot_bgcolor='white',
-            height=500, # Đủ cao để các điểm không bị dính chùm
-            xaxis=dict(title='Solvent Blending Ratio (%)', showgrid=True, gridcolor='#EAEAEA', linecolor='black', linewidth=1),
-            yaxis=dict(title='Viscosity (seconds)', showgrid=True, gridcolor='#EAEAEA', linecolor='black', linewidth=1),
-            margin=dict(l=50, r=50, t=50, b=50),
-            legend=dict(
-                orientation="h",
-                yanchor="bottom", y=1.02,
-                xanchor="center", x=0.5,
-                bgcolor="rgba(255,255,255,0)"
-            ),
-            hovermode='closest'
-        )
-        
-        st.plotly_chart(fig_trend, use_container_width=True)
-    else:
-        st.info("No data available for this specific Resin and Vendor combination.")
+    # Cấu hình Layout Full-width chuẩn mực
+    fig_trend.update_layout(
+        plot_bgcolor='white',
+        height=500,
+        xaxis=dict(title='Solvent Blending Ratio (%)', showgrid=True, gridcolor='#EAEAEA', linecolor='black', linewidth=1),
+        yaxis=dict(title='Viscosity (seconds)', showgrid=True, gridcolor='#EAEAEA', linecolor='black', linewidth=1),
+        margin=dict(l=50, r=50, t=50, b=50),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom", y=1.02,
+            xanchor="center", x=0.5,
+            bgcolor="rgba(255,255,255,0)"
+        ),
+        hovermode='closest'
+    )
+    
+    st.plotly_chart(fig_trend, use_container_width=True)
 else:
-    st.info("No filtered data available to generate the trend visualization.")
+    st.info("No data available to generate the trend visualization.")
 
 
 # --- 6. GLOBAL HISTORICAL REFERENCE MATRIX (BACKGROUND) ---
