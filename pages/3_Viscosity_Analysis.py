@@ -46,7 +46,7 @@ system_data = valid_groups[
     (valid_groups['Resin'] == master_resin) & 
     (valid_groups['Vendor'] == master_vendor) & 
     (valid_groups['Solvent_Type'] == master_solvent)
-]
+].copy()
 
 if system_data.empty:
     st.warning("No data available for this specific combination.")
@@ -129,31 +129,47 @@ with tab1:
 with tab2:
     col_o1, col_o2 = st.columns(2)
     with col_o1:
-        st.markdown("#### Heatmap: Avg Solvent Needed (%)")
-        st.markdown("*X: Initial Viscosity, Y: Target Final Viscosity. Color: % Solvent needed.*")
+        st.markdown("#### 🗺️ Heatmap: Historical Matrix (Avg Solvent %)")
+        st.markdown("*Lưới ma trận đã được làm tròn mỗi 10 giây. Gióng **Độ nhớt đầu vào** và **Đầu ra mục tiêu** để xem số % dung môi trung bình từng dùng.*")
+        
+        # ĐÃ SỬA: Gom nhóm dữ liệu về các mốc chẵn 10s để hiển thị dạng lưới ô vuông rõ ràng
+        df_heat = system_data.copy()
+        df_heat['Initial_Bin'] = (df_heat['黏度(秒)'] // 10 * 10).astype(int).astype(str) + "s"
+        df_heat['Final_Bin'] = (df_heat['黏度(秒)_1'] // 10 * 10).astype(int).astype(str) + "s"
+        
+        # Sắp xếp trục tọa độ tăng dần
+        df_heat = df_heat.sort_values(by=['黏度(秒)', '黏度(秒)_1'])
+
         fig_heat = px.density_heatmap(
-            system_data, x="黏度(秒)", y="黏度(秒)_1", z="Solvent_Ratio_Percent", 
-            histfunc="avg", color_continuous_scale="Viridis",
-            labels={'黏度(秒)': 'Initial Viscosity', '黏度(秒)_1': 'Final Viscosity', 'Solvent_Ratio_Percent': 'Avg Solvent %'}
+            df_heat, 
+            x="Initial_Bin", 
+            y="Final_Bin", 
+            z="Solvent_Ratio_Percent", 
+            histfunc="avg", 
+            text_auto=".1f", # Hiển thị con số rõ ràng
+            color_continuous_scale="Blues", # Tông màu Trắng-Xanh hiện đại
+            labels={'Initial_Bin': 'Initial Viscosity (Rounded)', 'Final_Bin': 'Final Target Viscosity', 'Solvent_Ratio_Percent': 'Avg Solvent %'}
         )
-        fig_heat.update_layout(height=400, margin=dict(l=20, r=20, t=20, b=20))
+        fig_heat.update_layout(height=400, margin=dict(l=20, r=20, t=20, b=20), plot_bgcolor='white')
+        fig_heat.update_coloraxes(colorbar_title="% Solvent")
         st.plotly_chart(fig_heat, use_container_width=True)
 
     with col_o2:
-        st.markdown("#### Contour Plot: Operational Sweet Spot")
-        st.markdown("*Density of historical operations based on Solvent % vs. Viscosity Drop.*")
+        st.markdown("#### 🎯 Contour: Operational Sweet Spot")
+        st.markdown("*Vùng màu Xanh Đậm (như bản đồ địa hình) thể hiện định mức châm dung môi phổ biến và hiệu quả nhất trong lịch sử.*")
         fig_contour = px.density_contour(
             system_data, x="Solvent_Ratio_Percent", y="Viscosity_Reduction",
-            color_discrete_sequence=['#C00000'],
-            labels={'Solvent_Ratio_Percent': 'Solvent Ratio (%)', 'Viscosity_Reduction': 'Viscosity Drop (s)'}
+            color_discrete_sequence=['#4472C4'],
+            labels={'Solvent_Ratio_Percent': 'Solvent Ratio (%)', 'Viscosity_Reduction': 'Viscosity Drop (Delta V, sec)'}
         )
-        fig_contour.update_traces(contours_coloring="fill", colorscale="Blues", showscale=False)
+        fig_contour.update_traces(contours_coloring="fill", colorscale="Blues", showscale=True)
         fig_contour.update_layout(plot_bgcolor='white', height=400, margin=dict(l=20, r=20, t=20, b=20))
         fig_contour.update_xaxes(showgrid=True, gridcolor='#EAEAEA', linecolor='black')
         fig_contour.update_yaxes(showgrid=True, gridcolor='#EAEAEA', linecolor='black')
         st.plotly_chart(fig_contour, use_container_width=True)
 
-    st.markdown("#### Regression Model Prediction (Non-linear Fit)")
+    st.markdown("#### 📉 Regression Model Prediction (Non-linear Fit)")
+    st.markdown("*Mô hình toán học dự đoán độ nhớt thành phẩm dựa trên tỷ lệ % dung môi thêm vào.*")
     sorted_sys_df = system_data.dropna(subset=['Solvent_Ratio_Percent', '黏度(秒)_1']).sort_values(by='Solvent_Ratio_Percent')
     if len(sorted_sys_df) > 3:
         poly_fit = np.polyfit(sorted_sys_df['Solvent_Ratio_Percent'], sorted_sys_df['黏度(秒)_1'], 2)
@@ -170,8 +186,8 @@ with tab2:
             title=f"Regression Equation: {eq_str}", plot_bgcolor='white', height=350, margin=dict(l=40, r=40, t=40, b=20),
             legend=dict(orientation="h", y=1.05, x=0.5, xanchor="center")
         )
-        fig_reg.update_xaxes(title="Solvent Ratio (%)", linecolor='black')
-        fig_reg.update_yaxes(title="Final Viscosity (s)", linecolor='black')
+        fig_reg.update_xaxes(title="Solvent Ratio (%)", linecolor='black', showgrid=True, gridcolor='#EAEAEA')
+        fig_reg.update_yaxes(title="Final Viscosity (s)", linecolor='black', showgrid=True, gridcolor='#EAEAEA')
         st.plotly_chart(fig_reg, use_container_width=True)
 
 
