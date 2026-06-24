@@ -105,20 +105,35 @@ with tab1:
     fig_scatter.update_yaxes(title="Viscosity (seconds)", showgrid=True, gridcolor='#EAEAEA', linecolor='black')
     st.plotly_chart(fig_scatter, use_container_width=True)
 
+    # ĐÃ SỬA LỖI HIỂN THỊ HISTOGRAM
     col_h1, col_h2 = st.columns(2)
+    
+    # Tính toán kích thước bước nhảy (step) cho trục X để đẹp nhất
+    max_sol = system_data['Solvent_Ratio_Percent'].max()
+    sol_step = 1.0 if max_sol <= 25 else 2.0  # Mỗi cột đại diện cho 1%
+    
+    max_drop = system_data['Viscosity_Reduction'].max()
+    drop_step = 5.0 if max_drop <= 100 else 10.0 # Mỗi cột đại diện cho 5s
+    
     with col_h1:
         st.markdown("#### 2. Histogram: Solvent Addition (%)")
         st.markdown("*Historical distribution density of solvent dilution levels.*")
         fig_hist1 = px.histogram(
             system_data, x="Solvent_Ratio_Percent", 
-            nbins=40,  # Increased nbins to make columns narrower and finer
             color_discrete_sequence=['#7030A0'],
             text_auto=True 
         )
-        fig_hist1.update_traces(marker_line_color='white', marker_line_width=1.5, opacity=0.85)
-        fig_hist1.update_layout(plot_bgcolor='white', height=350, margin=dict(l=20, r=20, t=30, b=20))
-        fig_hist1.update_xaxes(title="Solvent Ratio (%)", showgrid=True, gridcolor='#EAEAEA', linecolor='black')
-        fig_hist1.update_yaxes(title="Frequency (Batches)", showgrid=True, gridcolor='#EAEAEA', linecolor='black')
+        # Khóa cứng độ rộng mỗi cột là 1% (hoặc 2%) để không bị vỡ vụn
+        fig_hist1.update_traces(
+            marker_line_color='white', marker_line_width=1, opacity=0.85,
+            xbins=dict(start=0, size=sol_step)
+        )
+        fig_hist1.update_layout(
+            plot_bgcolor='white', height=350, margin=dict(l=20, r=20, t=30, b=20),
+            bargap=0.05, # Khoảng cách nhỏ liên kết các khối
+            xaxis=dict(title="Solvent Ratio (%)", showgrid=True, gridcolor='#EAEAEA', linecolor='black', dtick=sol_step), # Trục X khớp đúng độ rộng cột
+            yaxis=dict(title="Frequency (Batches)", showgrid=True, gridcolor='#EAEAEA', linecolor='black')
+        )
         st.plotly_chart(fig_hist1, use_container_width=True)
         
     with col_h2:
@@ -126,14 +141,20 @@ with tab1:
         st.markdown("*Frequency of viscosity drop (Delta V) achieved after dilution.*")
         fig_hist2 = px.histogram(
             system_data, x="Viscosity_Reduction", 
-            nbins=40,  # Increased nbins to make columns narrower and finer
             color_discrete_sequence=['#2CA02C'],
             text_auto=True
         )
-        fig_hist2.update_traces(marker_line_color='white', marker_line_width=1.5, opacity=0.85)
-        fig_hist2.update_layout(plot_bgcolor='white', height=350, margin=dict(l=20, r=20, t=30, b=20))
-        fig_hist2.update_xaxes(title="Viscosity Drop (seconds)", showgrid=True, gridcolor='#EAEAEA', linecolor='black')
-        fig_hist2.update_yaxes(title="Frequency (Batches)", showgrid=True, gridcolor='#EAEAEA', linecolor='black')
+        # Khóa cứng độ rộng mỗi cột là 5 giây để gom nhóm chuẩn xác
+        fig_hist2.update_traces(
+            marker_line_color='white', marker_line_width=1, opacity=0.85,
+            xbins=dict(start=0, size=drop_step)
+        )
+        fig_hist2.update_layout(
+            plot_bgcolor='white', height=350, margin=dict(l=20, r=20, t=30, b=20),
+            bargap=0.05,
+            xaxis=dict(title="Viscosity Drop (seconds)", showgrid=True, gridcolor='#EAEAEA', linecolor='black', dtick=drop_step), # Trục X nhảy theo đúng số giây
+            yaxis=dict(title="Frequency (Batches)", showgrid=True, gridcolor='#EAEAEA', linecolor='black')
+        )
         st.plotly_chart(fig_hist2, use_container_width=True)
 
 
