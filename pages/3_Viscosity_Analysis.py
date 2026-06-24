@@ -37,7 +37,7 @@ if valid_groups.empty:
     st.error("❌ No groups found with 10+ historical batches. Please upload a larger dataset.")
     st.stop()
 
-# ĐÃ TỐI ƯU: Gộp chung thành 1 bộ lọc duy nhất cho toàn trang
+# Bộ lọc điều khiển trung tâm
 col_m1, col_m2, col_m3 = st.columns(3)
 with col_m1:
     master_resin = st.selectbox("1. Select Resin:", sorted(valid_groups['Resin'].unique()))
@@ -115,14 +115,16 @@ else:
 # --- 5. HIGH-RESOLUTION TREND ANALYSIS (AUTO-SYNCED TO MASTER SELECTION) ---
 st.markdown("---")
 st.subheader(f"📈 High-Resolution Trend Analysis: {master_resin} | {master_vendor} | {master_solvent}")
-st.markdown("*This interactive plot visualizes the exact viscosity drop for each batch of the selected system. Hover over points to trace individual batches.*")
+st.markdown("*This interactive plot visualizes the exact viscosity drop for each batch. Orange dots indicate the starting viscosity, and blue dots indicate the final viscosity.*")
 
 if not system_data.empty:
     fig_trend = go.Figure()
     
-    sol_color = '#7030A0' # Sử dụng màu tím đậm chuyên nghiệp cho toàn bộ hệ thống đang Focus
+    # ĐÃ ĐỔI THÀNH 2 MÀU TƯƠNG PHẢN RÕ RỆT
+    color_before = '#ED7D31' # Màu Cam (Initial)
+    color_after = '#4472C4'  # Màu Xanh Dương (Final)
 
-    # 1. Vẽ các đường kẻ dọc nối Before-After
+    # 1. Vẽ các đường kẻ dọc nối Before-After (Nét đứt xám)
     x_lines = []
     y_lines = []
     for _, row in system_data.iterrows():
@@ -132,16 +134,16 @@ if not system_data.empty:
             
     fig_trend.add_trace(go.Scatter(
         x=x_lines, y=y_lines, mode='lines',
-        line=dict(color='lightgray', width=1, dash='dot'),
+        line=dict(color='lightgray', width=1.5, dash='dot'),
         hoverinfo='skip', showlegend=False
     ))
 
-    # 2. Điểm TRƯỚC khi châm (Vòng tròn rỗng)
+    # 2. Điểm TRƯỚC khi châm (Màu Cam)
     fig_trend.add_trace(go.Scatter(
         x=system_data['Solvent_Ratio_Percent'], y=system_data['黏度(秒)'],
         mode='markers',
         name="Initial Viscosity (Before)",
-        marker=dict(color=sol_color, size=9, symbol='circle-open', line=dict(width=2, color=sol_color)),
+        marker=dict(color=color_before, size=9, symbol='circle', line=dict(width=1, color='white')),
         customdata=system_data[['黏度(秒)_1', 'Viscosity_Reduction', 'Vendor', 'Resin', 'Solvent_Type']].values,
         hovertemplate='<b>%{customdata[2]} | %{customdata[3]} | Solvent: %{customdata[4]}</b><br>' +
                       'Solvent Ratio: %{x:.2f}%<br>' +
@@ -150,12 +152,12 @@ if not system_data.empty:
                       'Viscosity Drop: %{customdata[1]:.1f}s<extra></extra>',
     ))
     
-    # 3. Điểm SAU khi châm (Vòng tròn đặc)
+    # 3. Điểm SAU khi châm (Màu Xanh Dương)
     fig_trend.add_trace(go.Scatter(
         x=system_data['Solvent_Ratio_Percent'], y=system_data['黏度(秒)_1'],
         mode='markers',
         name="Final Viscosity (After)",
-        marker=dict(color=sol_color, size=9, symbol='circle'),
+        marker=dict(color=color_after, size=9, symbol='circle', line=dict(width=1, color='white')),
         customdata=system_data[['黏度(秒)', 'Viscosity_Reduction', 'Vendor', 'Resin', 'Solvent_Type']].values,
         hovertemplate='<b>%{customdata[2]} | %{customdata[3]} | Solvent: %{customdata[4]}</b><br>' +
                       'Solvent Ratio: %{x:.2f}%<br>' +
@@ -164,7 +166,7 @@ if not system_data.empty:
                       'Viscosity Drop: %{customdata[1]:.1f}s<extra></extra>',
     ))
 
-    # 4. Đường xu hướng phi tuyến tính
+    # 4. Đường xu hướng phi tuyến tính (Curve Đỏ nét đứt)
     sorted_sys_df = system_data.dropna(subset=['Solvent_Ratio_Percent', '黏度(秒)_1']).sort_values(by='Solvent_Ratio_Percent')
     if len(sorted_sys_df) > 3:
         poly_fit = np.polyfit(sorted_sys_df['Solvent_Ratio_Percent'], sorted_sys_df['黏度(秒)_1'], 2)
@@ -177,10 +179,10 @@ if not system_data.empty:
             hoverinfo='skip'
         ))
 
-    # Cấu hình Layout Full-width chuẩn mực
+    # Cấu hình Layout Full-width
     fig_trend.update_layout(
         plot_bgcolor='white',
-        height=500,
+        height=550, # Đủ cao để các đường kẻ dọc rõ nét
         xaxis=dict(title='Solvent Blending Ratio (%)', showgrid=True, gridcolor='#EAEAEA', linecolor='black', linewidth=1),
         yaxis=dict(title='Viscosity (seconds)', showgrid=True, gridcolor='#EAEAEA', linecolor='black', linewidth=1),
         margin=dict(l=50, r=50, t=50, b=50),
