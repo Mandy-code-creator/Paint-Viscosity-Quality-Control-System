@@ -7,15 +7,14 @@ import numpy as np
 # 1. PAGE SETUP
 # =========================================================
 st.set_page_config(
-    page_title="Executive Summary",
-    page_icon="📈",
+    page_title="Solvent Analysis",
+    page_icon="🧪",
     layout="wide"
 )
 
-st.title("📈 Executive Summary & Portfolio Analysis")
+st.title("🧪 Solvent Sensitivity & Recommendation System")
 st.markdown(
-    "High-level performance metrics, solvent sensitivity tracking, "
-    "environmental analysis, and recommendation engine."
+    "Analyze solvent efficiency, environmental impact, and recommend staged solvent addition."
 )
 st.markdown("---")
 
@@ -38,52 +37,8 @@ rejected_data = st.session_state.get("rejected_data", pd.DataFrame())
 # =========================================================
 # 3. HELPER FUNCTIONS
 # =========================================================
-def get_clean_application(code_value):
-    """
-    Decode application type based on the 4th character of paint code.
-    """
-    if pd.isna(code_value):
-        return "Unknown/Other"
-
-    code = str(code_value).strip().upper()
-
-    if len(code) < 4:
-        return "Unknown/Other"
-
-    char_4 = code[3]
-
-    f_map = {
-        "B": "Anti-Bacteria",
-        "C": "High-Corrosion Resistance",
-        "D": "Anti-Dust",
-        "E": "Anti-Electrostatics",
-        "F": "High Formability",
-        "G": "General Usage",
-        "H": "Thermal Insulation",
-        "K": "Anti-Stain/Grease",
-        "L": "Whiteboard",
-        "M": "Mirror-like Paint",
-        "N": "Neo Matt",
-        "P": "Primer B",
-        "R": "Repaint System",
-        "S": "Shutter",
-        "T": "Texture Surface",
-        "U": "Ultra-High Formability",
-        "V": "Variety",
-        "W": "Wrinkle Paint",
-        "Z": "Other"
-    }
-
-    if char_4.isdigit():
-        return "General Usage"
-
-    return f_map.get(char_4, "Unknown/Other")
-
-
 def safe_quantile(series, q, default=np.nan):
-    """
-    Return quantile safely after removing NaN values.
-    """
+    """Return a quantile safely after removing invalid values."""
     clean_series = pd.to_numeric(series, errors="coerce").dropna()
 
     if clean_series.empty:
@@ -93,10 +48,7 @@ def safe_quantile(series, q, default=np.nan):
 
 
 def generate_dynamic_bins(series):
-    """
-    Create viscosity zones by quartile.
-    Falls back to equal-width bins when qcut cannot be used.
-    """
+    """Create viscosity zones using quartiles."""
     numeric_series = pd.to_numeric(series, errors="coerce")
 
     if numeric_series.dropna().nunique() < 2:
@@ -119,14 +71,12 @@ def generate_dynamic_bins(series):
             return pd.Series(["Unknown"] * len(series), index=series.index)
 
 
-def calculate_confidence_label(sample_size, level):
-    """
-    Confidence logic based on matching quality and number of records.
-    """
-    if sample_size >= 10 and level == "strict":
+def calculate_confidence_label(sample_size, match_type):
+    """Return confidence label based on matching quality and sample size."""
+    if sample_size >= 10 and match_type == "strict":
         return "High Confidence", "green"
 
-    if sample_size >= 5 and level in ["strict", "partial"]:
+    if sample_size >= 5 and match_type in ["strict", "partial"]:
         return "Medium Confidence", "orange"
 
     return "Low Confidence", "red"
@@ -155,7 +105,7 @@ if missing_columns:
 
 group_a = group_a_raw.copy()
 
-# Convert relevant columns into numeric
+# Convert numeric fields
 numeric_columns = [
     "添加重量",
     "塗料重量",
@@ -169,7 +119,7 @@ for col in numeric_columns:
     if col in group_a.columns:
         group_a[col] = pd.to_numeric(group_a[col], errors="coerce")
 
-# Ensure optional columns exist
+# Create missing optional fields
 if "Solvent_Type" not in group_a.columns:
     group_a["Solvent_Type"] = "Unknown"
 
@@ -179,13 +129,10 @@ if "溫度" not in group_a.columns:
 if "濕度" not in group_a.columns:
     group_a["濕度"] = np.nan
 
-if "塗料代碼" not in group_a.columns:
-    group_a["塗料代碼"] = np.nan
-
 if "塗料批號" not in group_a.columns:
     group_a["塗料批號"] = group_a.index.astype(str)
 
-# Calculate solvent ratio and viscosity reduction
+# Core calculations
 group_a["Solvent_Ratio_Percent"] = (
     group_a["添加重量"]
     / group_a["塗料重量"].replace(0, np.nan)
@@ -201,15 +148,7 @@ group_a["Sensitivity"] = (
     / group_a["Solvent_Ratio_Percent"].replace(0, np.nan)
 )
 
-group_a["Application"] = group_a["塗料代碼"].apply(get_clean_application)
-
-# ---------------------------------------------------------
-# Valid data only:
-# 1. Solvent must be added
-# 2. Paint weight must be positive
-# 3. Viscosity must decrease
-# 4. Sensitivity must be positive
-# ---------------------------------------------------------
+# Valid records only
 analysis_df = group_a[
     (group_a["添加重量"] > 0) &
     (group_a["塗料重量"] > 0) &
@@ -218,7 +157,7 @@ analysis_df = group_a[
     (group_a["Sensitivity"] > 0)
 ].copy()
 
-# Remove extremely abnormal sensitivity values
+# Remove extreme sensitivity outliers: P1 to P99
 if not analysis_df.empty:
     sensitivity_p01 = analysis_df["Sensitivity"].quantile(0.01)
     sensitivity_p99 = analysis_df["Sensitivity"].quantile(0.99)
@@ -238,136 +177,52 @@ col1, col2, col3, col4 = st.columns(4)
 
 with col1:
     st.metric(
-        label="Total Records",
-        value=f"{len(group_a):,}"
+        "Total Records",
+        f"{len(group_a):,}"
     )
 
 with col2:
     st.metric(
-        label="Valid Solvent Adjustment Records",
-        value=f"{len(analysis_df):,}"
+        "Valid Adjustment Records",
+        f"{len(analysis_df):,}"
     )
 
 with col3:
     st.metric(
-        label="Total Paint Processed",
-        value=f"{group_a['塗料重量'].sum():,.1f} kg"
+        "Total Paint Processed",
+        f"{group_a['塗料重量'].sum():,.2f} kg"
     )
 
 with col4:
     st.metric(
-        label="Rejected / Invalid Records",
-        value=f"{len(rejected_data):,}"
+        "Rejected / Invalid Records",
+        f"{len(rejected_data):,}"
     )
 
 st.markdown("---")
 
 if analysis_df.empty:
     st.warning(
-        "⚠️ No valid solvent-adjustment data found. "
-        "Please check whether solvent weight, paint weight, and viscosity values are available."
+        "⚠️ No valid solvent-adjustment records found. "
+        "Please check solvent weight, paint weight, and viscosity data."
     )
     st.stop()
 
 
 # =========================================================
-# 6. TABS
+# 6. TWO TASKS ONLY
 # =========================================================
-tab_exec, tab_env, tab_ai = st.tabs([
-    "📋 Tab 1: Vendor & Resin Portfolio",
-    "🌡️ Tab 2: Sensitivity & Environment",
-    "🧠 Tab 3: Multi-Factor Recommendation"
+tab_env, tab_ai = st.tabs([
+    "🌡️ Task 1: Sensitivity & Environment",
+    "🧠 Task 2: Solvent Recommendation & SOP Matrix"
 ])
 
 
 # =========================================================
-# TAB 1: PORTFOLIO ANALYSIS
-# =========================================================
-with tab_exec:
-    st.markdown("### 📋 Resin, Vendor & Application Performance Analysis")
-    st.caption(
-        "Only valid records are included: solvent added > 0, paint weight > 0, "
-        "and viscosity reduction > 0."
-    )
-
-    detailed_summary = (
-        analysis_df
-        .groupby(
-            ["Resin", "Vendor", "Application", "Solvent_Type"],
-            dropna=False
-        )
-        .agg(
-            Batches=("塗料批號", "nunique"),
-            Total_Paint_kg=("塗料重量", "sum"),
-            Total_Solvent_kg=("添加重量", "sum"),
-            Avg_Initial_Viscosity=("黏度(秒)", "mean"),
-            Typical_Target_Viscosity=("黏度(秒)_1", "median"),
-            Low_Viscosity_P10=("黏度(秒)_1", lambda x: safe_quantile(x, 0.10)),
-            Avg_Temp=("溫度", "mean"),
-            Avg_Humidity=("濕度", "mean"),
-            Median_Sensitivity=("Sensitivity", "median"),
-            Historical_Ratio_P90=(
-                "Solvent_Ratio_Percent",
-                lambda x: safe_quantile(x, 0.90)
-            ),
-            Historical_Ratio_Max=("Solvent_Ratio_Percent", "max")
-        )
-        .reset_index()
-    )
-
-    detailed_summary["Solvent % per 1s Drop"] = np.where(
-        detailed_summary["Median_Sensitivity"] > 0,
-        1 / detailed_summary["Median_Sensitivity"],
-        np.nan
-    )
-
-    detailed_summary = detailed_summary.rename(columns={
-        "Total_Paint_kg": "Total Paint (kg)",
-        "Total_Solvent_kg": "Total Solvent (kg)",
-        "Avg_Initial_Viscosity": "Avg Initial V (s)",
-        "Typical_Target_Viscosity": "Typical Target V (s)",
-        "Low_Viscosity_P10": "Historical Low V P10 (s)",
-        "Avg_Temp": "Avg Temp (°C)",
-        "Avg_Humidity": "Avg Humidity (%)",
-        "Median_Sensitivity": "Median Sensitivity (s/%)",
-        "Historical_Ratio_P90": "Historical Ratio P90 (%)",
-        "Historical_Ratio_Max": "Historical Max Ratio (%)"
-    })
-
-    st.dataframe(
-        detailed_summary.sort_values(
-            by=["Resin", "Vendor", "Batches"],
-            ascending=[True, True, False]
-        ),
-        column_config={
-            "Batches": st.column_config.NumberColumn(format="%d"),
-            "Total Paint (kg)": st.column_config.NumberColumn(format="%.1f"),
-            "Total Solvent (kg)": st.column_config.NumberColumn(format="%.1f"),
-            "Avg Initial V (s)": st.column_config.NumberColumn(format="%.1f"),
-            "Typical Target V (s)": st.column_config.NumberColumn(format="%.1f"),
-            "Historical Low V P10 (s)": st.column_config.NumberColumn(format="%.1f"),
-            "Avg Temp (°C)": st.column_config.NumberColumn(format="%.1f"),
-            "Avg Humidity (%)": st.column_config.NumberColumn(format="%.1f"),
-            "Median Sensitivity (s/%)": st.column_config.NumberColumn(format="%.2f"),
-            "Solvent % per 1s Drop": st.column_config.NumberColumn(format="%.3f"),
-            "Historical Ratio P90 (%)": st.column_config.NumberColumn(format="%.2f"),
-            "Historical Max Ratio (%)": st.column_config.NumberColumn(format="%.2f")
-        },
-        use_container_width=True,
-        hide_index=True
-    )
-
-    st.info(
-        "Note: Historical Ratio P90 is used as a practical operating reference. "
-        "Historical Max Ratio is displayed only as historical evidence and should not be treated as a safe limit."
-    )
-
-
-# =========================================================
-# TAB 2: SENSITIVITY & ENVIRONMENT
+# TASK 1: SENSITIVITY & ENVIRONMENT
 # =========================================================
 with tab_env:
-    st.markdown("### 🌡️ Process Sensitivity & Environmental Impact Matrix")
+    st.markdown("### 🌡️ Process Sensitivity & Environmental Impact")
 
     available_resins = sorted(
         analysis_df["Resin"].dropna().astype(str).unique().tolist()
@@ -381,13 +236,13 @@ with tab_env:
 
     with col_f1:
         selected_resin = st.selectbox(
-            "Select Target Resin",
+            "Select Resin",
             available_resins
         )
 
     with col_f2:
         selected_vendors = st.multiselect(
-            "Select Target Vendor(s)",
+            "Select Vendor(s)",
             available_vendors,
             default=available_vendors
         )
@@ -444,7 +299,7 @@ with tab_env:
 
             fig_heatmap = px.imshow(
                 pivot_table.astype(float),
-                text_auto=".1f",
+                text_auto=".2f",
                 aspect="auto",
                 color_continuous_scale="Blues",
                 labels={
@@ -512,7 +367,7 @@ with tab_env:
 
                 fig_env = px.imshow(
                     pivot_env.astype(float),
-                    text_auto=".1f",
+                    text_auto=".2f",
                     aspect="auto",
                     color_continuous_scale="Oranges",
                     labels={
@@ -532,19 +387,20 @@ with tab_env:
                 )
 
         st.caption(
-            "Environmental heatmaps are observational. Differences may also be influenced by paint formula, "
-            "vendor, paint code, initial viscosity, operator, shift, and solvent type."
+            "Note: The environment heatmap is observational. Results may also be affected by paint formula, "
+            "paint batch, solvent type, operator, and production conditions."
         )
 
 
 # =========================================================
-# TAB 3: RECOMMENDATION ENGINE
+# TASK 2: RECOMMENDATION ENGINE + SOP MATRIX
 # =========================================================
 with tab_ai:
-    st.markdown("### 🧠 Smart Multi-Factor Recommendation Engine")
+    st.markdown("### 🧠 Solvent Recommendation Engine")
+
     st.caption(
-        "Recommendation is based on historical records with similar resin, vendor, viscosity, "
-        "and environmental conditions. The result should be applied in stages and rechecked."
+        "The system recommends solvent addition based on historical records with similar "
+        "Resin, Vendor, viscosity, temperature, and humidity."
     )
 
     col_i1, col_i2, col_i3, col_i4, col_i5 = st.columns(5)
@@ -552,37 +408,42 @@ with tab_ai:
     with col_i1:
         curr_viscosity = st.number_input(
             "Current Tank Viscosity (s)",
-            value=55.0,
-            step=1.0
+            value=55.00,
+            step=1.00,
+            format="%.2f"
         )
 
     with col_i2:
         target_viscosity = st.number_input(
             "Target Viscosity (s)",
-            value=52.0,
-            step=1.0
+            value=52.00,
+            step=1.00,
+            format="%.2f"
         )
 
     with col_i3:
         curr_temp = st.number_input(
             "Shop Temperature (°C)",
-            value=32.0,
-            step=1.0
+            value=32.00,
+            step=1.00,
+            format="%.2f"
         )
 
     with col_i4:
         curr_humidity = st.number_input(
             "Shop Humidity (%)",
-            value=85.0,
-            step=1.0
+            value=85.00,
+            step=1.00,
+            format="%.2f"
         )
 
     with col_i5:
         coil_paint_qty = st.number_input(
-            "Total Batch Weight (kg)",
-            value=200.0,
-            min_value=1.0,
-            step=10.0
+            "Total Paint Weight (kg)",
+            value=200.00,
+            min_value=1.00,
+            step=10.00,
+            format="%.2f"
         )
 
     if target_viscosity >= curr_viscosity:
@@ -596,13 +457,13 @@ with tab_ai:
             (analysis_df["Vendor"].astype(str).isin(selected_vendors))
         ].copy()
 
-        # Match records with similar initial viscosity
+        # Similar initial viscosity: ±15 seconds
         visc_mask = (
             (base_subset["黏度(秒)"] >= curr_viscosity - 15) &
             (base_subset["黏度(秒)"] <= curr_viscosity + 15)
         )
 
-        # Match records with similar environment
+        # Similar environment: Temp ±5°C and Humidity ±10%
         weather_mask = (
             (base_subset["溫度"] >= curr_temp - 5) &
             (base_subset["溫度"] <= curr_temp + 5) &
@@ -618,6 +479,7 @@ with tab_ai:
         selected_subset = pd.DataFrame()
         match_type = ""
 
+        # Require at least 5 records for recommendation
         if len(subset_strict) >= 5:
             expected_sensitivity = subset_strict["Sensitivity"].median()
             selected_subset = subset_strict
@@ -643,8 +505,8 @@ with tab_ai:
             sample_size = len(selected_subset)
 
             confidence_label, confidence_color = calculate_confidence_label(
-                sample_size=sample_size,
-                level=match_type
+                sample_size,
+                match_type
             )
 
             historical_floor_p10 = safe_quantile(
@@ -665,14 +527,13 @@ with tab_ai:
             theoretical_ratio = viscosity_drop / expected_sensitivity
             theoretical_solvent_kg = coil_paint_qty * theoretical_ratio / 100
 
-            # Staged addition recommendation
+            # Staged Addition: 65% first, then max 35%
             stage_1_ratio = theoretical_ratio * 0.65
             stage_1_kg = coil_paint_qty * stage_1_ratio / 100
 
             stage_2_ratio = theoretical_ratio * 0.35
             stage_2_kg = coil_paint_qty * stage_2_ratio / 100
 
-            # Check safety conditions
             floor_warning = (
                 not pd.isna(historical_floor_p10)
                 and target_viscosity < historical_floor_p10
@@ -703,7 +564,7 @@ with tab_ai:
                             {theoretical_solvent_kg:.2f} kg
                         </span>
                     </h3>
-                    <p><b>Required Viscosity Reduction:</b> {viscosity_drop:.1f} s</p>
+                    <p><b>Required Viscosity Reduction:</b> {viscosity_drop:.2f} s</p>
                     <p><b>Historical Median Sensitivity:</b> {expected_sensitivity:.2f} s per 1% solvent</p>
                     <p><b>Calculated Solvent Ratio:</b> {theoretical_ratio:.2f}%</p>
                     <p><b>Matched Historical Records:</b> {sample_size}</p>
@@ -737,7 +598,7 @@ with tab_ai:
                 )
 
             st.info(
-                "Recommended operation: Add Stage 1 first, mix thoroughly, measure viscosity again, "
+                "Operation instruction: Add Stage 1 first, mix thoroughly, measure viscosity again, "
                 "then add Stage 2 gradually only if needed."
             )
 
@@ -748,7 +609,7 @@ with tab_ai:
             with col_ref1:
                 st.metric(
                     "Historical Low Viscosity P10",
-                    f"{historical_floor_p10:.1f} s"
+                    f"{historical_floor_p10:.2f} s"
                     if not pd.isna(historical_floor_p10)
                     else "N/A"
                 )
@@ -771,30 +632,33 @@ with tab_ai:
 
             if floor_warning:
                 st.warning(
-                    f"⚠️ Target viscosity ({target_viscosity:.1f}s) is below the historical low-viscosity "
-                    f"P10 reference ({historical_floor_p10:.1f}s). Do not apply the full calculated amount at once."
+                    f"⚠️ Target viscosity ({target_viscosity:.2f}s) is below the historical P10 "
+                    f"viscosity reference ({historical_floor_p10:.2f}s). "
+                    "Do not add the full calculated amount at once."
                 )
 
             if ratio_warning:
                 st.warning(
                     f"⚠️ Calculated solvent ratio ({theoretical_ratio:.2f}%) exceeds historical P90 "
-                    f"({historical_ratio_p90:.2f}%). Use staged addition and verify viscosity after each step."
+                    f"({historical_ratio_p90:.2f}%). "
+                    "Use staged addition and re-check viscosity after each addition."
                 )
 
             if critical_ratio_warning:
                 st.error(
                     f"🚨 Calculated solvent ratio ({theoretical_ratio:.2f}%) exceeds historical P95 "
-                    f"({historical_ratio_p95:.2f}%). This may indicate saturation risk or insufficient matching data."
+                    f"({historical_ratio_p95:.2f}%). "
+                    "This may indicate saturation risk or insufficient matching data."
                 )
-
 
     # =====================================================
     # SOP MATRIX
     # =====================================================
     st.markdown("---")
-    st.markdown("#### 📚 SOP Reference Coefficient Matrix")
+    st.markdown("### 📚 SOP Coefficient Matrix")
+
     st.caption(
-        "This matrix provides median historical sensitivity by Resin, Vendor, Application, and Initial Viscosity Zone."
+        "The matrix is grouped only by Resin, Vendor, and Initial Viscosity Range."
     )
 
     matrix_df = analysis_df.copy()
@@ -807,7 +671,7 @@ with tab_ai:
     target_viscosity_map = (
         matrix_df
         .groupby(
-            ["Resin", "Vendor", "Application"],
+            ["Resin", "Vendor"],
             dropna=False
         )
         .agg(
@@ -820,7 +684,7 @@ with tab_ai:
                 "Solvent_Ratio_Percent",
                 lambda x: safe_quantile(x, 0.90)
             ),
-            Sample_Size=("塗料批號", "nunique")
+            Total_Group_Samples=("塗料批號", "nunique")
         )
         .reset_index()
     )
@@ -828,30 +692,32 @@ with tab_ai:
     sensitivity_map = (
         matrix_df
         .groupby(
-            ["Resin", "Vendor", "Application", "Viscosity_Zone"],
+            ["Resin", "Vendor", "Viscosity_Zone"],
             observed=False,
             dropna=False
         )
         .agg(
             Median_Sensitivity=("Sensitivity", "median"),
-            Records=("塗料批號", "nunique")
+            Records_in_Zone=("塗料批號", "nunique")
         )
         .reset_index()
     )
 
+    # Keep zones with at least 3 records
     sensitivity_map = sensitivity_map[
         (sensitivity_map["Median_Sensitivity"] > 0) &
-        (sensitivity_map["Records"] >= 3)
+        (sensitivity_map["Records_in_Zone"] >= 3)
     ].copy()
 
     sop_grouped = sensitivity_map.merge(
         target_viscosity_map,
-        on=["Resin", "Vendor", "Application"],
+        on=["Resin", "Vendor"],
         how="left"
     )
 
     if sop_grouped.empty:
         st.info("No SOP coefficient matrix can be generated from the current data.")
+
     else:
         sop_grouped["Solvent % per 1s Drop"] = (
             1 / sop_grouped["Median_Sensitivity"]
@@ -867,15 +733,14 @@ with tab_ai:
             "Historical_Low_V_P10": "Historical Low V P10 (s)",
             "Historical_Ratio_P90": "Historical Ratio P90 (%)",
             "Median_Sensitivity": "Median Sensitivity (s/%)",
-            "Records": "Records in Zone",
-            "Sample_Size": "Total Group Samples"
+            "Records_in_Zone": "Records in Zone",
+            "Total_Group_Samples": "Total Group Samples"
         })
 
         sop_display = sop_display[
             [
                 "Resin",
                 "Vendor",
-                "Application",
                 "Initial Viscosity Range",
                 "Typical Target V (s)",
                 "Historical Low V P10 (s)",
@@ -888,15 +753,38 @@ with tab_ai:
             ]
         ].copy()
 
+        numeric_sop_columns = [
+            "Typical Target V (s)",
+            "Historical Low V P10 (s)",
+            "Historical Ratio P90 (%)",
+            "Median Sensitivity (s/%)",
+            "Solvent % per 1s Drop",
+            "Factor (kg per 100kg paint / 1s)"
+        ]
+
+        sop_display[numeric_sop_columns] = (
+            sop_display[numeric_sop_columns].round(2)
+        )
+
         st.dataframe(
             sop_display.sort_values(
-                by=["Resin", "Vendor", "Application"]
+                by=["Resin", "Vendor", "Initial Viscosity Range"]
             ),
+            column_config={
+                "Typical Target V (s)": st.column_config.NumberColumn(format="%.2f"),
+                "Historical Low V P10 (s)": st.column_config.NumberColumn(format="%.2f"),
+                "Historical Ratio P90 (%)": st.column_config.NumberColumn(format="%.2f"),
+                "Median Sensitivity (s/%)": st.column_config.NumberColumn(format="%.2f"),
+                "Solvent % per 1s Drop": st.column_config.NumberColumn(format="%.2f"),
+                "Factor (kg per 100kg paint / 1s)": st.column_config.NumberColumn(format="%.2f")
+            },
             use_container_width=True,
             hide_index=True
         )
 
-        csv = sop_display.to_csv(index=False).encode("utf-8-sig")
+        csv = sop_display.to_csv(
+            index=False
+        ).encode("utf-8-sig")
 
         st.download_button(
             label="📥 Download SOP Coefficient Matrix as CSV",
