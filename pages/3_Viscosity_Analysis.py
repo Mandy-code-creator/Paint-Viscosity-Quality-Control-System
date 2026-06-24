@@ -105,19 +105,17 @@ with tab1:
     fig_scatter.update_yaxes(title="Viscosity (seconds)", showgrid=True, gridcolor='#EAEAEA', linecolor='black')
     st.plotly_chart(fig_scatter, use_container_width=True)
 
-    # NÂNG CẤP BIỂU ĐỒ HISTOGRAM TẠI ĐÂY
+    # ĐÃ XÓA BỎ BOX-PLOT (MARGINAL="BOX") ĐỂ TRẢ LẠI GIAO DIỆN SẠCH SẼ
     col_h1, col_h2 = st.columns(2)
     with col_h1:
         st.markdown("#### 2. Histogram: Solvent Addition (%)")
-        st.markdown("*Biểu đồ phân bổ kèm Box-plot hiển thị khoảng tỷ lệ dung môi phổ biến.*")
+        st.markdown("*Mật độ phân bổ các mức pha loãng dung môi trong lịch sử sản xuất.*")
         fig_hist1 = px.histogram(
             system_data, x="Solvent_Ratio_Percent", 
             nbins=20, 
             color_discrete_sequence=['#7030A0'],
-            marginal="box", # Thêm biểu đồ hộp ở trên lề
-            text_auto=True  # Hiển thị số liệu trực tiếp trên đỉnh cột
+            text_auto=True  # In số liệu trực tiếp, không bị Box-plot đè xuống
         )
-        # Thêm viền trắng và độ trong suốt để cột rõ nét, tách bạch
         fig_hist1.update_traces(marker_line_color='white', marker_line_width=1.5, opacity=0.85)
         fig_hist1.update_layout(plot_bgcolor='white', height=350, margin=dict(l=20, r=20, t=30, b=20))
         fig_hist1.update_xaxes(title="Solvent Ratio (%)", showgrid=True, gridcolor='#EAEAEA', linecolor='black')
@@ -131,7 +129,6 @@ with tab1:
             system_data, x="Viscosity_Reduction", 
             nbins=20, 
             color_discrete_sequence=['#2CA02C'],
-            marginal="box", 
             text_auto=True
         )
         fig_hist2.update_traces(marker_line_color='white', marker_line_width=1.5, opacity=0.85)
