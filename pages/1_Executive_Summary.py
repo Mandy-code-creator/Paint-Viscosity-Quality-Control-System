@@ -38,7 +38,7 @@ rejected_data = st.session_state.get("rejected_data", pd.DataFrame())
 # 3. HELPER FUNCTIONS
 # =========================================================
 def safe_quantile(series, q, default=np.nan):
-    """Return a quantile safely after removing invalid values."""
+    """Return quantile safely after removing invalid values."""
     clean_series = pd.to_numeric(series, errors="coerce").dropna()
 
     if clean_series.empty:
@@ -69,6 +69,29 @@ def generate_dynamic_bins(series):
             )
         except Exception:
             return pd.Series(["Unknown"] * len(series), index=series.index)
+
+
+def format_viscosity_zone(interval_value):
+    """
+    Convert intervals such as:
+    (59.9990, 100.0000]
+    into:
+    60–100
+    """
+    if isinstance(interval_value, pd.Interval):
+        left_value = int(round(interval_value.left))
+        right_value = int(round(interval_value.right))
+        return f"{left_value}–{right_value}"
+
+    return str(interval_value)
+
+
+def get_zone_sort_value(interval_value):
+    """Return lower boundary of interval for correct sorting."""
+    if isinstance(interval_value, pd.Interval):
+        return int(round(interval_value.left))
+
+    return 999999
 
 
 def calculate_confidence_label(sample_size, match_type):
@@ -105,7 +128,6 @@ if missing_columns:
 
 group_a = group_a_raw.copy()
 
-# Convert numeric fields
 numeric_columns = [
     "添加重量",
     "塗料重量",
@@ -119,7 +141,6 @@ for col in numeric_columns:
     if col in group_a.columns:
         group_a[col] = pd.to_numeric(group_a[col], errors="coerce")
 
-# Create missing optional fields
 if "Solvent_Type" not in group_a.columns:
     group_a["Solvent_Type"] = "Unknown"
 
@@ -148,7 +169,7 @@ group_a["Sensitivity"] = (
     / group_a["Solvent_Ratio_Percent"].replace(0, np.nan)
 )
 
-# Valid records only
+# Valid solvent-adjustment records only
 analysis_df = group_a[
     (group_a["添加重量"] > 0) &
     (group_a["塗料重量"] > 0) &
@@ -157,7 +178,7 @@ analysis_df = group_a[
     (group_a["Sensitivity"] > 0)
 ].copy()
 
-# Remove extreme sensitivity outliers: P1 to P99
+# Remove extreme sensitivity outliers: P1–P99
 if not analysis_df.empty:
     sensitivity_p01 = analysis_df["Sensitivity"].quantile(0.01)
     sensitivity_p99 = analysis_df["Sensitivity"].quantile(0.99)
@@ -176,16 +197,10 @@ st.subheader("💡 Global Key Performance Indicators")
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    st.metric(
-        "Total Records",
-        f"{len(group_a):,}"
-    )
+    st.metric("Total Records", f"{len(group_a):,}")
 
 with col2:
-    st.metric(
-        "Valid Adjustment Records",
-        f"{len(analysis_df):,}"
-    )
+    st.metric("Valid Adjustment Records", f"{len(analysis_df):,}")
 
 with col3:
     st.metric(
@@ -254,6 +269,7 @@ with tab_env:
 
     if filtered_data.empty:
         st.info("No valid data available for the selected Resin and Vendor.")
+
     else:
         col_heat1, col_heat2 = st.columns(2)
 
@@ -261,10 +277,15 @@ with tab_env:
         # Heatmap 1: Initial viscosity vs solvent ratio
         # -------------------------------------------------
         with col_heat1:
-            st.markdown("#### Formula Efficiency: Initial Viscosity vs. Solvent Ratio")
+            st.markdown(
+                "#### Formula Efficiency: Initial Viscosity vs. Solvent Ratio"
+            )
 
             solvent_bins = [0, 2, 4, 6, 8, 10, 12, 15, 20, 30, 50]
-            viscosity_bins = [0, 50, 70, 90, 110, 130, 150, 170, 190, 210, 250, 500]
+            viscosity_bins = [
+                0, 50, 70, 90, 110, 130,
+                150, 170, 190, 210, 250, 500
+            ]
 
             filtered_data["Solvent_Bin"] = pd.cut(
                 filtered_data["Solvent_Ratio_Percent"],
@@ -330,6 +351,7 @@ with tab_env:
 
             if env_data.empty:
                 st.info("No valid temperature and humidity data available.")
+
             else:
                 temp_bins = [10, 15, 20, 25, 30, 35, 40, 50]
                 hum_bins = [20, 30, 40, 50, 60, 70, 80, 90, 100]
@@ -387,8 +409,8 @@ with tab_env:
                 )
 
         st.caption(
-            "Note: The environment heatmap is observational. Results may also be affected by paint formula, "
-            "paint batch, solvent type, operator, and production conditions."
+            "Note: The environment heatmap is observational. Results may also be affected "
+            "by paint formula, paint batch, solvent type, operator, and production conditions."
         )
 
 
@@ -463,7 +485,7 @@ with tab_ai:
             (base_subset["黏度(秒)"] <= curr_viscosity + 15)
         )
 
-        # Similar environment: Temp ±5°C and Humidity ±10%
+        # Similar environment: Temperature ±5°C, humidity ±10%
         weather_mask = (
             (base_subset["溫度"] >= curr_temp - 5) &
             (base_subset["溫度"] <= curr_temp + 5) &
@@ -479,7 +501,7 @@ with tab_ai:
         selected_subset = pd.DataFrame()
         match_type = ""
 
-        # Require at least 5 records for recommendation
+        # Require at least 5 historical records
         if len(subset_strict) >= 5:
             expected_sensitivity = subset_strict["Sensitivity"].median()
             selected_subset = subset_strict
@@ -527,7 +549,7 @@ with tab_ai:
             theoretical_ratio = viscosity_drop / expected_sensitivity
             theoretical_solvent_kg = coil_paint_qty * theoretical_ratio / 100
 
-            # Staged Addition: 65% first, then max 35%
+            # Staged addition: 65% then 35%
             stage_1_ratio = theoretical_ratio * 0.65
             stage_1_kg = coil_paint_qty * stage_1_ratio / 100
 
@@ -663,9 +685,22 @@ with tab_ai:
 
     matrix_df = analysis_df.copy()
 
-    matrix_df["Viscosity_Zone"] = (
+    # Generate temporary interval zone
+    matrix_df["_Viscosity_Zone_Interval"] = (
         matrix_df.groupby("Resin")["黏度(秒)"]
         .transform(generate_dynamic_bins)
+    )
+
+    # Convert interval into integer display labels, e.g. 60–100
+    matrix_df["Viscosity_Zone"] = (
+        matrix_df["_Viscosity_Zone_Interval"]
+        .apply(format_viscosity_zone)
+    )
+
+    # Create numeric key for correct sorting
+    matrix_df["Viscosity_Zone_Sort"] = (
+        matrix_df["_Viscosity_Zone_Interval"]
+        .apply(get_zone_sort_value)
     )
 
     target_viscosity_map = (
@@ -692,7 +727,12 @@ with tab_ai:
     sensitivity_map = (
         matrix_df
         .groupby(
-            ["Resin", "Vendor", "Viscosity_Zone"],
+            [
+                "Resin",
+                "Vendor",
+                "Viscosity_Zone",
+                "Viscosity_Zone_Sort"
+            ],
             observed=False,
             dropna=False
         )
@@ -742,6 +782,7 @@ with tab_ai:
                 "Resin",
                 "Vendor",
                 "Initial Viscosity Range",
+                "Viscosity_Zone_Sort",
                 "Typical Target V (s)",
                 "Historical Low V P10 (s)",
                 "Historical Ratio P90 (%)",
@@ -766,10 +807,13 @@ with tab_ai:
             sop_display[numeric_sop_columns].round(2)
         )
 
+        # Sort ranges correctly before hiding sort column
+        sop_display = sop_display.sort_values(
+            by=["Resin", "Vendor", "Viscosity_Zone_Sort"]
+        ).drop(columns=["Viscosity_Zone_Sort"])
+
         st.dataframe(
-            sop_display.sort_values(
-                by=["Resin", "Vendor", "Initial Viscosity Range"]
-            ),
+            sop_display,
             column_config={
                 "Typical Target V (s)": st.column_config.NumberColumn(format="%.2f"),
                 "Historical Low V P10 (s)": st.column_config.NumberColumn(format="%.2f"),
@@ -782,9 +826,7 @@ with tab_ai:
             hide_index=True
         )
 
-        csv = sop_display.to_csv(
-            index=False
-        ).encode("utf-8-sig")
+        csv = sop_display.to_csv(index=False).encode("utf-8-sig")
 
         st.download_button(
             label="📥 Download SOP Coefficient Matrix as CSV",
