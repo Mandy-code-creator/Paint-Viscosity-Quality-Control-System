@@ -55,15 +55,12 @@ rejected_data = st.session_state.get("rejected_data", pd.DataFrame())
 # =========================================================
 def safe_quantile(series, q, default=np.nan):
     clean_series = pd.to_numeric(series, errors="coerce").dropna()
-
     if clean_series.empty:
         return default
-
     return clean_series.quantile(q)
 
 
 def generate_dynamic_bins(series):
-    """Create viscosity zones using quartiles."""
     numeric_series = pd.to_numeric(series, errors="coerce")
 
     if numeric_series.dropna().nunique() < 2:
@@ -92,27 +89,22 @@ def format_viscosity_zone(interval_value):
         left_value = int(round(interval_value.left))
         right_value = int(round(interval_value.right))
         return f"{left_value}–{right_value}"
-
     return str(interval_value)
 
 
 def get_zone_lower_bound(interval_value):
     if isinstance(interval_value, pd.Interval):
         return int(round(interval_value.left))
-
     return 999999
 
 
 def get_data_confidence(record_count):
     if record_count >= MIN_RECORDS_RELIABLE:
         return "Reliable", "✅"
-
     if record_count >= MIN_RECORDS_FOR_RECOMMENDATION:
         return "Usable with Caution", "⚠️"
-
     if record_count >= MIN_RECORDS_FOR_REFERENCE:
         return "Limited Data", "🟡"
-
     return "Insufficient Data", "🔴"
 
 
@@ -227,7 +219,7 @@ group_a["Sensitivity"] = (
     / group_a["Solvent_Ratio_Percent"].replace(0, np.nan)
 )
 
-# Valid adjustment records only
+# Valid records only
 analysis_df = group_a[
     (group_a["添加重量"] > 0) &
     (group_a["塗料重量"] > 0) &
@@ -255,7 +247,8 @@ if analysis_df.empty:
 
 
 # =========================================================
-# 6. CREATE SOP MATRIX BY RESIN + VENDOR + SOLVENT TYPE
+# 6. CREATE SOP MATRIX
+# Resin + Vendor + Solvent Type + Initial Viscosity Zone
 # =========================================================
 matrix_df = analysis_df.copy()
 
@@ -293,7 +286,6 @@ matrix_df["Zone_Sort"] = (
     .apply(get_zone_lower_bound)
 )
 
-# SOP summary: every metric calculated separately inside each zone
 sop_zone_df = (
     matrix_df
     .groupby(
@@ -311,40 +303,30 @@ sop_zone_df = (
     )
     .agg(
         Typical_Target_V=("黏度(秒)_1", "median"),
-
         Historical_Low_V_P10=(
             "黏度(秒)_1",
             lambda x: safe_quantile(x, 0.10)
         ),
-
         Historical_Ratio_P90=(
             "Solvent_Ratio_Percent",
             lambda x: safe_quantile(x, 0.90)
         ),
-
         Historical_Ratio_P95=(
             "Solvent_Ratio_Percent",
             lambda x: safe_quantile(x, 0.95)
         ),
-
         Typical_Viscosity_Drop=("Delta_V", "median"),
-
         Viscosity_Drop_P10=(
             "Delta_V",
             lambda x: safe_quantile(x, 0.10)
         ),
-
         Viscosity_Drop_P90=(
             "Delta_V",
             lambda x: safe_quantile(x, 0.90)
         ),
-
         Max_Historical_Drop=("Delta_V", "max"),
-
         Median_Sensitivity=("Sensitivity", "median"),
-
         Sensitivity_Std=("Sensitivity", "std"),
-
         Records_in_Zone=("塗料批號", "nunique")
     )
     .reset_index()
@@ -382,14 +364,14 @@ sop_zone_df["Ratio_Risk_Flag"] = np.select(
     default="Normal"
 )
 
-# Display zones only when at least 3 unique batches exist
+# Display only zones with at least 3 records
 sop_zone_df = sop_zone_df[
     sop_zone_df["Records_in_Zone"] >= MIN_RECORDS_FOR_REFERENCE
 ].copy()
 
 
 # =========================================================
-# 7. GLOBAL KPI
+# 7. KPI
 # =========================================================
 st.subheader("💡 Global Key Performance Indicators")
 
@@ -419,9 +401,7 @@ st.markdown("---")
 # =========================================================
 # 8. GLOBAL FILTERS
 # =========================================================
-available_resins = sorted(analysis_df["Resin"].unique().tolist())
-available_vendors = sorted(analysis_df["Vendor"].unique().tolist())
-available_solvents = sorted(analysis_df["Solvent_Type"].unique().tolist())
+available_resins = sorted(matrix_df["Resin"].unique().tolist())
 
 filter_col1, filter_col2, filter_col3 = st.columns(3)
 
@@ -431,11 +411,26 @@ with filter_col1:
         available_resins
     )
 
+available_vendors = sorted(
+    matrix_df.loc[
+        matrix_df["Resin"] == selected_resin,
+        "Vendor"
+    ].unique().tolist()
+)
+
 with filter_col2:
     selected_vendor = st.selectbox(
         "Select Vendor",
         available_vendors
     )
+
+available_solvents = sorted(
+    matrix_df.loc[
+        (matrix_df["Resin"] == selected_resin) &
+        (matrix_df["Vendor"] == selected_vendor),
+        "Solvent_Type"
+    ].unique().tolist()
+)
 
 with filter_col3:
     selected_solvent = st.selectbox(
@@ -443,10 +438,13 @@ with filter_col3:
         available_solvents
     )
 
-filtered_data = analysis_df[
-    (analysis_df["Resin"] == selected_resin) &
-    (analysis_df["Vendor"] == selected_vendor) &
-    (analysis_df["Solvent_Type"] == selected_solvent)
+# IMPORTANT FIX:
+# Use matrix_df here, not analysis_df,
+# because matrix_df includes Viscosity_Zone, Zone_Sort, Zone_Lower, Zone_Upper.
+filtered_data = matrix_df[
+    (matrix_df["Resin"] == selected_resin) &
+    (matrix_df["Vendor"] == selected_vendor) &
+    (matrix_df["Solvent_Type"] == selected_solvent)
 ].copy()
 
 filtered_sop = sop_zone_df[
@@ -479,6 +477,9 @@ with tab_env:
     else:
         chart_col1, chart_col2 = st.columns(2)
 
+        # -------------------------------------------------
+        # Chart 1: Sensitivity heatmap
+        # -------------------------------------------------
         with chart_col1:
             st.markdown(
                 "#### Formula Efficiency: Initial Viscosity vs. Solvent Ratio"
@@ -512,7 +513,6 @@ with tab_env:
                 )
                 .agg(
                     Median_Sensitivity=("Sensitivity", "median"),
-                    Median_Delta_V=("Delta_V", "median"),
                     Records=("塗料批號", "nunique")
                 )
                 .reset_index()
@@ -545,16 +545,35 @@ with tab_env:
 
             st.plotly_chart(fig_heatmap, use_container_width=True)
 
+        # -------------------------------------------------
+        # Chart 2: Delta V distribution
+        # -------------------------------------------------
         with chart_col2:
-            st.markdown(
-                "#### Historical Viscosity Reduction Distribution"
+            st.markdown("#### Historical Viscosity Reduction Distribution")
+
+            delta_plot_df = filtered_data.copy()
+
+            delta_plot_df = delta_plot_df.sort_values(
+                by="Zone_Sort"
+            )
+
+            zone_order = (
+                delta_plot_df[
+                    ["Viscosity_Zone", "Zone_Sort"]
+                ]
+                .drop_duplicates()
+                .sort_values("Zone_Sort")["Viscosity_Zone"]
+                .tolist()
             )
 
             fig_delta = px.box(
-                filtered_data,
+                delta_plot_df,
                 x="Viscosity_Zone",
                 y="Delta_V",
                 points="all",
+                category_orders={
+                    "Viscosity_Zone": zone_order
+                },
                 labels={
                     "Viscosity_Zone": "Initial Viscosity Zone",
                     "Delta_V": "Actual Viscosity Drop (s)"
@@ -567,6 +586,9 @@ with tab_env:
 
             st.plotly_chart(fig_delta, use_container_width=True)
 
+        # -------------------------------------------------
+        # Chart 3: Environment heatmap
+        # -------------------------------------------------
         st.markdown("#### Weather Impact: Temperature vs. Humidity")
 
         env_data = filtered_data.dropna(
@@ -720,8 +742,6 @@ with tab_ai:
             else:
                 zone_data = filtered_data.copy()
 
-            # Similar historical viscosity drop:
-            # minimum ±5 seconds, or ±20% of required reduction
             drop_tolerance = max(5, required_delta_v * 0.20)
 
             drop_match_data = zone_data[
@@ -740,29 +760,21 @@ with tab_ai:
             reference_data = pd.DataFrame()
             match_type = ""
 
-            # Priority 1:
-            # Resin + Vendor + Solvent + Zone + Similar Delta V + Similar Environment
             if len(strict_data) >= MIN_RECORDS_FOR_RECOMMENDATION:
                 expected_sensitivity = strict_data["Sensitivity"].median()
                 reference_data = strict_data
                 match_type = "strict"
 
-            # Priority 2:
-            # Resin + Vendor + Solvent + Zone + Similar Delta V
             elif len(drop_match_data) >= MIN_RECORDS_FOR_RECOMMENDATION:
                 expected_sensitivity = drop_match_data["Sensitivity"].median()
                 reference_data = drop_match_data
                 match_type = "drop_match"
 
-            # Priority 3:
-            # Resin + Vendor + Solvent + Zone
             elif len(zone_data) >= MIN_RECORDS_FOR_RECOMMENDATION:
                 expected_sensitivity = zone_data["Sensitivity"].median()
                 reference_data = zone_data
                 match_type = "zone"
 
-            # Priority 4:
-            # Resin + Vendor + Solvent overall
             elif len(filtered_data) >= MIN_RECORDS_FOR_RECOMMENDATION:
                 expected_sensitivity = filtered_data["Sensitivity"].median()
                 reference_data = filtered_data
