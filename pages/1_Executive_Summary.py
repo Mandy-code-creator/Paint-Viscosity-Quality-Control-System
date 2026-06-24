@@ -154,6 +154,10 @@ with tab_env:
             heatmap_data = filtered_data.groupby(['Initial_V_Bin', 'Solvent_Bin'], observed=False)['Sensitivity'].mean().reset_index()
             pivot_table = heatmap_data.pivot(index='Initial_V_Bin', columns='Solvent_Bin', values='Sensitivity')
 
+            # --- ĐÃ SỬA LỖI Ở ĐÂY: Ép kiểu Interval thành String để chống lỗi JSON ---
+            pivot_table.index = pivot_table.index.astype(str)
+            pivot_table.columns = pivot_table.columns.astype(str)
+
             fig_heatmap = px.imshow(
                 pivot_table.astype(float), text_auto=".1f", aspect="auto", color_continuous_scale='Blues',
                 labels=dict(x="Solvent Ratio (%)", y="Initial Viscosity (s)", color="Sensitivity (s/%)")
@@ -177,6 +181,10 @@ with tab_env:
 
                 heatmap_env = filtered_data.groupby(['Hum_Bin', 'Temp_Bin'], observed=False)['Sensitivity'].mean().reset_index()
                 pivot_env = heatmap_env.pivot(index='Hum_Bin', columns='Temp_Bin', values='Sensitivity')
+
+                # --- ĐÃ SỬA LỖI Ở ĐÂY: Ép kiểu Interval thành String để chống lỗi JSON ---
+                pivot_env.index = pivot_env.index.astype(str)
+                pivot_env.columns = pivot_env.columns.astype(str)
 
                 fig_env = px.imshow(
                     pivot_env.astype(float), text_auto=".1f", aspect="auto", color_continuous_scale='Oranges',
