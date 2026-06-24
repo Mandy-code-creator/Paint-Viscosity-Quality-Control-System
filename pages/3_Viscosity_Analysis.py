@@ -105,21 +105,39 @@ with tab1:
     fig_scatter.update_yaxes(title="Viscosity (seconds)", showgrid=True, gridcolor='#EAEAEA', linecolor='black')
     st.plotly_chart(fig_scatter, use_container_width=True)
 
+    # NÂNG CẤP BIỂU ĐỒ HISTOGRAM TẠI ĐÂY
     col_h1, col_h2 = st.columns(2)
     with col_h1:
         st.markdown("#### 2. Histogram: Solvent Addition (%)")
-        fig_hist1 = px.histogram(system_data, x="Solvent_Ratio_Percent", nbins=20, color_discrete_sequence=['#7030A0'])
-        fig_hist1.update_layout(plot_bgcolor='white', height=300, margin=dict(l=20, r=20, t=30, b=20))
+        st.markdown("*Biểu đồ phân bổ kèm Box-plot hiển thị khoảng tỷ lệ dung môi phổ biến.*")
+        fig_hist1 = px.histogram(
+            system_data, x="Solvent_Ratio_Percent", 
+            nbins=20, 
+            color_discrete_sequence=['#7030A0'],
+            marginal="box", # Thêm biểu đồ hộp ở trên lề
+            text_auto=True  # Hiển thị số liệu trực tiếp trên đỉnh cột
+        )
+        # Thêm viền trắng và độ trong suốt để cột rõ nét, tách bạch
+        fig_hist1.update_traces(marker_line_color='white', marker_line_width=1.5, opacity=0.85)
+        fig_hist1.update_layout(plot_bgcolor='white', height=350, margin=dict(l=20, r=20, t=30, b=20))
         fig_hist1.update_xaxes(title="Solvent Ratio (%)", showgrid=True, gridcolor='#EAEAEA', linecolor='black')
-        fig_hist1.update_yaxes(title="Frequency", showgrid=True, gridcolor='#EAEAEA', linecolor='black')
+        fig_hist1.update_yaxes(title="Frequency (Batches)", showgrid=True, gridcolor='#EAEAEA', linecolor='black')
         st.plotly_chart(fig_hist1, use_container_width=True)
         
     with col_h2:
         st.markdown("#### 3. Histogram: Viscosity Drop (s)")
-        fig_hist2 = px.histogram(system_data, x="Viscosity_Reduction", nbins=20, color_discrete_sequence=['#2CA02C'])
-        fig_hist2.update_layout(plot_bgcolor='white', height=300, margin=dict(l=20, r=20, t=30, b=20))
+        st.markdown("*Tần suất biên độ giảm độ nhớt (Delta V) đạt được sau khi pha loãng.*")
+        fig_hist2 = px.histogram(
+            system_data, x="Viscosity_Reduction", 
+            nbins=20, 
+            color_discrete_sequence=['#2CA02C'],
+            marginal="box", 
+            text_auto=True
+        )
+        fig_hist2.update_traces(marker_line_color='white', marker_line_width=1.5, opacity=0.85)
+        fig_hist2.update_layout(plot_bgcolor='white', height=350, margin=dict(l=20, r=20, t=30, b=20))
         fig_hist2.update_xaxes(title="Viscosity Drop (seconds)", showgrid=True, gridcolor='#EAEAEA', linecolor='black')
-        fig_hist2.update_yaxes(title="Frequency", showgrid=True, gridcolor='#EAEAEA', linecolor='black')
+        fig_hist2.update_yaxes(title="Frequency (Batches)", showgrid=True, gridcolor='#EAEAEA', linecolor='black')
         st.plotly_chart(fig_hist2, use_container_width=True)
 
 
@@ -132,12 +150,9 @@ with tab2:
         st.markdown("#### 🗺️ Heatmap: Historical Matrix (Avg Solvent %)")
         st.markdown("*Lưới ma trận đã được làm tròn mỗi 10 giây. Gióng **Độ nhớt đầu vào** và **Đầu ra mục tiêu** để xem số % dung môi trung bình từng dùng.*")
         
-        # ĐÃ SỬA: Gom nhóm dữ liệu về các mốc chẵn 10s để hiển thị dạng lưới ô vuông rõ ràng
         df_heat = system_data.copy()
         df_heat['Initial_Bin'] = (df_heat['黏度(秒)'] // 10 * 10).astype(int).astype(str) + "s"
         df_heat['Final_Bin'] = (df_heat['黏度(秒)_1'] // 10 * 10).astype(int).astype(str) + "s"
-        
-        # Sắp xếp trục tọa độ tăng dần
         df_heat = df_heat.sort_values(by=['黏度(秒)', '黏度(秒)_1'])
 
         fig_heat = px.density_heatmap(
@@ -146,8 +161,8 @@ with tab2:
             y="Final_Bin", 
             z="Solvent_Ratio_Percent", 
             histfunc="avg", 
-            text_auto=".1f", # Hiển thị con số rõ ràng
-            color_continuous_scale="Blues", # Tông màu Trắng-Xanh hiện đại
+            text_auto=".1f", 
+            color_continuous_scale="Blues",
             labels={'Initial_Bin': 'Initial Viscosity (Rounded)', 'Final_Bin': 'Final Target Viscosity', 'Solvent_Ratio_Percent': 'Avg Solvent %'}
         )
         fig_heat.update_layout(height=400, margin=dict(l=20, r=20, t=20, b=20), plot_bgcolor='white')
@@ -179,7 +194,6 @@ with tab2:
         fig_reg.add_trace(go.Scatter(x=sorted_sys_df['Solvent_Ratio_Percent'], y=sorted_sys_df['黏度(秒)_1'], mode='markers', name='Actual Final Visc', marker=dict(color='lightgray', size=8)))
         fig_reg.add_trace(go.Scatter(x=sorted_sys_df['Solvent_Ratio_Percent'], y=poly_curve, mode='lines', name='Polynomial Fit', line=dict(color='#C00000', width=3)))
         
-        # Build Equation String
         eq_str = f"y = {poly_fit[0]:.2f}x² {'+' if poly_fit[1]>0 else '-'} {abs(poly_fit[1]):.2f}x {'+' if poly_fit[2]>0 else '-'} {abs(poly_fit[2]):.2f}"
         
         fig_reg.update_layout(
@@ -216,25 +230,21 @@ with tab3:
     elif target_visc < viscosity_floor:
         st.error(f"🚨 **CRITICAL DANGER:** Target ({target_visc}s) is below the physical saturation floor ({viscosity_floor:.1f}s). Action aborted.")
     else:
-        # Core Calculations
         predicted_ratio_needed = delta_v_target / baseline_efficiency
         recommended_solvent_kg = (paint_weight * predicted_ratio_needed) / 100
         
-        # Expected Final Visc (Using the non-linear regression model if possible, otherwise baseline)
         try:
             poly_fit_c = np.polyfit(system_data['Solvent_Ratio_Percent'].dropna(), system_data['黏度(秒)_1'].dropna(), 2)
             expected_final_visc = np.polyval(poly_fit_c, predicted_ratio_needed)
-            # Clip expected to not go below target too unrealistically
             expected_final_visc = max(expected_final_visc, target_visc - 2.0)
         except:
             expected_final_visc = current_visc - (predicted_ratio_needed * baseline_efficiency)
 
-        # Confidence Score Logic (Heuristic based on Diminishing Returns)
         yellow_threshold = max_historical_ratio * 0.70
         red_threshold = max_historical_ratio * 0.90
         
         if predicted_ratio_needed <= yellow_threshold:
-            confidence = np.random.uniform(92, 98) # Randomize slightly for realistic simulation or fix it
+            confidence = np.random.uniform(92, 98) 
             conf_color = "green"
             status_msg = "Optimal Zone"
         elif predicted_ratio_needed <= red_threshold:
@@ -246,13 +256,10 @@ with tab3:
             conf_color = "red"
             status_msg = "Saturation Overload Risk"
 
-        # DISPLAY RESULTS
         st.markdown(f"### 📊 Result for: `{master_resin} | {master_vendor} | {master_solvent}`")
         
-        # 3 Big Metrics Cards
         mc1, mc2, mc3 = st.columns(3)
         
-        # Card 1
         mc1.markdown(f"""
         <div style="background-color: #F8F9FA; padding: 20px; border-radius: 10px; border-top: 5px solid #00BFFF; text-align: center; height: 140px;">
             <h4 style="margin: 0; color: #555;">Recommended Solvent</h4>
@@ -261,7 +268,6 @@ with tab3:
         </div>
         """, unsafe_allow_html=True)
         
-        # Card 2
         mc2.markdown(f"""
         <div style="background-color: #F8F9FA; padding: 20px; border-radius: 10px; border-top: 5px solid #4472C4; text-align: center; height: 140px;">
             <h4 style="margin: 0; color: #555;">Expected Final Viscosity</h4>
@@ -270,7 +276,6 @@ with tab3:
         </div>
         """, unsafe_allow_html=True)
         
-        # Card 3
         mc3.markdown(f"""
         <div style="background-color: #F8F9FA; padding: 20px; border-radius: 10px; border-top: 5px solid {conf_color}; text-align: center; height: 140px;">
             <h4 style="margin: 0; color: #555;">Model Confidence</h4>
