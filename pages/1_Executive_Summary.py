@@ -56,7 +56,7 @@ def export_chart_to_word(
     table.style = "Table Grid"
 
     headers = [
-        "Valid Coils",
+        "Valid Batches",
         "Median Sensitivity",
         "P10-P90 Ratio Range",
         "Maximum Viscosity Drop"
@@ -118,7 +118,7 @@ def export_chart_to_word(
     note_run = note.add_run(
         "Note: Orange points represent viscosity before solvent addition. "
         "Blue points represent viscosity after solvent addition. "
-        "The dotted line connects the same mixing event."
+        "The dotted line connects the same mixing batch."
     )
     note_run.italic = True
     note_run.font.size = Pt(9)
@@ -196,7 +196,7 @@ def process_data(df):
 
     data["Initial_Viscosity_Zone"] = data["黏度(秒)"].apply(assign_zone)
 
-    # STRICT STATISTICAL RULE: n >= 30 COILS
+    # STRICT STATISTICAL RULE: n >= 30 BATCHES
     system_batch_counts = (
         data.groupby(
             ["Resin", "Vendor", "Solvent_Type"]
@@ -236,7 +236,7 @@ master_df = process_data(st.session_state["group_a_data"])
 if master_df.empty or "Resin" not in master_df.columns:
     st.error(
         "⚠️ No valid historical data available. All systems failed to meet "
-        "the strict statistical requirement (n ≥ 30 coils) or basic SOP "
+        "the strict statistical requirement (n ≥ 30 batches) or basic SOP "
         "logic constraints."
     )
     st.stop()
@@ -321,13 +321,13 @@ with tab1:
 
     st.markdown(
         "Validate data stability before enforcing automated SOPs. "
-        "*Hover over points to trace individual coils from their "
+        "*Hover over points to trace individual batches from their "
         "Initial (Orange) to Final (Blue) state.*"
     )
 
     c1, c2, c3, c4 = st.columns(4)
 
-    c1.metric("Valid Coils (n ≥ 30)", len(system_df))
+    c1.metric("Valid Batches (n ≥ 30)", len(system_df))
     c2.metric(
         "Median Sensitivity",
         f"{system_df['Sensitivity'].median():.2f} s/%"
@@ -886,7 +886,7 @@ with tab4:
         columns={
             "Solvent_Type": "Solvent",
             "Initial_Viscosity_Zone": "Input Viscosity Range",
-            "Valid_Batches": "Valid Coils",
+            "Valid_Batches": "Valid Batches",
             "Target_Visc": "Typical Target (s)",
             "Practical_Factor": (
                 "Add kg (per 100kg Dilution Base / 10s drop)"
@@ -906,7 +906,7 @@ with tab4:
             ]
         ),
         column_config={
-            "Valid Coils": st.column_config.NumberColumn(
+            "Valid Batches": st.column_config.NumberColumn(
                 format="%d"
             ),
             "Typical Target (s)": st.column_config.NumberColumn(
