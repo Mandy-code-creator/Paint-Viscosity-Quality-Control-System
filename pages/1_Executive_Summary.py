@@ -4,1338 +4,501 @@ import plotly.express as px
 import numpy as np
 
 # =========================================================
-
 # [S00] PAGE CONFIGURATION
-
 # =========================================================
-
-st.set_page_config(
-page_title="Solvent Analysis",
-page_icon="🧪",
-layout="wide"
-)
-
+st.set_page_config(page_title="Solvent Analysis", page_icon="🧪", layout="wide")
 st.title("🧪 Solvent Sensitivity & SOP Recommendation System")
-st.caption(
-"Historical dilution analysis grouped by Resin, Vendor, "
-"Solvent Type, and Initial Viscosity Zone."
-)
+st.caption("Historical dilution analysis: Resin + Vendor + Solvent Type + Initial Viscosity Zone")
 st.markdown("---")
 
 # =========================================================
-
 # [S01] GLOBAL CONSTANTS
-
 # =========================================================
-
 MIN_OPERATING_PAINT_KG = 120.0
-
 MIN_RECORDS_FOR_REFERENCE = 3
 MIN_RECORDS_FOR_RECOMMENDATION = 5
 MIN_RECORDS_RELIABLE = 10
-
 STAGE_1_PERCENT = 0.60
 STAGE_2_PERCENT = 0.25
 STAGE_3_PERCENT = 0.15
-
-VISCOSITY_ZONE_ORDER = [
-"≤70 s",
-"71–90 s",
-"91–110 s",
-"111–130 s",
-">130 s"
-]
+VISCOSITY_ZONE_ORDER = ["≤70 s", "71–90 s", "91–110 s", "111–130 s", ">130 s"]
 
 # =========================================================
+# [S02] HELPER FUNCTIONS
+# =========================================================
+def safe_quantile(series, q, default=np.nan):
+    values = pd.to_numeric(series, errors="coerce").dropna()
+    return default if values.empty else values.quantile(q)
 
-# [S02] DATA VALIDATION
+def normalize_text(series, default="Unknown"):
+    return series.fillna(default).astype(str).str.strip().replace("", default)
+
+def get_confidence(n):
+    if n >= MIN_RECORDS_RELIABLE:
+        return "Reliable", "✅"
+    if n >= MIN_RECORDS_FOR_RECOMMENDATION:
+        return "Usable with Caution", "⚠️"
+    if n >= MIN_RECORDS_FOR_REFERENCE:
+        return "Limited Data", "🟡"
+    return "Insufficient Data", "🔴"
+
+def viscosity_zone(value):
+    if value <= 70:
+        return "≤70 s"
+    if value <= 90:
+        return "71–90 s"
+    if value <= 110:
+        return "91–110 s"
+    if value <= 130:
+        return "111–130 s"
+    return ">130 s"
+
+def zone_sort(zone):
+    return {z: i + 1 for i, z in enumerate(VISCOSITY_ZONE_ORDER)}.get(str(zone), 999)
+
+def zone_summary(data, metric):
+    result = (
+        data.groupby(["Viscosity_Zone", "Zone_Sort"], observed=False)
+        .agg(
+            Median=(metric, "median"),
+            P10=(metric, lambda x: safe_quantile(x, 0.10)),
+            P90=(metric, lambda x: safe_quantile(x, 0.90)),
+            Records=(metric, "size"),
+        )
+        .reset_index()
+    )
+    result = result[result["Records"] > 0].copy()
+    result["Err_Plus"] = (result["P90"] - result["Median"]).clip(lower=0)
+    result["Err_Minus"] = (result["Median"] - result["P10"]).clip(lower=0)
+    return result.sort_values("Zone_Sort")
 
 # =========================================================
-
-if (
-"raw_data_loaded" not in st.session_state
-or not st.session_state["raw_data_loaded"]
-):
-st.warning("⚠️ Please upload data on the main page first.")
-st.stop()
-
+# [S03] DATA VALIDATION
+# =========================================================
+if not st.session_state.get("raw_data_loaded", False):
+    st.warning("⚠️ Please upload data on the main page first.")
+    st.stop()
 if "group_a_data" not in st.session_state:
-st.error("❌ Group A data is not available.")
-st.stop()
+    st.error("❌ Group A data is not available.")
+    st.stop()
 
-group_a_raw = st.session_state["group_a_data"].copy()
+raw = st.session_state["group_a_data"].copy()
 rejected_data = st.session_state.get("rejected_data", pd.DataFrame())
 
-# =========================================================
-
-# [S03] HELPER FUNCTIONS
-
-# =========================================================
-
-def safe_quantile(series, q, default=np.nan):
-values = pd.to_numeric(series, errors="coerce").dropna()
-
-```
-if values.empty:
-    return default
-
-return values.quantile(q)
-```
-
-def normalize_text(series, default_value="Unknown"):
-return (
-series.fillna(default_value)
-.astype(str)
-.str.strip()
-.replace("", default_value)
-)
-
-def get_data_confidence(record_count):
-if record_count >= MIN_RECORDS_RELIABLE:
-return "Reliable", "✅"
-
-```
-if record_count >= MIN_RECORDS_FOR_RECOMMENDATION:
-    return "Usable with Caution", "⚠️"
-
-if record_count >= MIN_RECORDS_FOR_REFERENCE:
-    return "Limited Data", "🟡"
-
-return "Insufficient Data", "🔴"
-```
-
-def get_recommendation_confidence(record_count, match_type):
-if record_count >= MIN_RECORDS_RELIABLE and match_type == "zone":
-return "High Confidence", "green"
-
-```
-if record_count >= MIN_RECORDS_FOR_RECOMMENDATION:
-    return "Medium Confidence", "orange"
-
-return "Low Confidence", "red"
-```
-
-def create_viscosity_zone(series):
-return pd.cut(
-pd.to_numeric(series, errors="coerce"),
-bins=[-np.inf, 70, 90, 110, 130, np.inf],
-labels=VISCOSITY_ZONE_ORDER,
-include_lowest=True
-)
-
-def get_zone_sort_value(zone):
-zone_map = {
-"≤70 s": 1,
-"71–90 s": 2,
-"91–110 s": 3,
-"111–130 s": 4,
-">130 s": 5
-}
-
-```
-return zone_map.get(str(zone), 999)
-```
-
-def get_current_viscosity_zone(current_viscosity):
-if current_viscosity <= 70:
-return "≤70 s"
-elif current_viscosity <= 90:
-return "71–90 s"
-elif current_viscosity <= 110:
-return "91–110 s"
-elif current_viscosity <= 130:
-return "111–130 s"
-else:
-return ">130 s"
-
-def make_zone_summary(data, value_column):
-"""
-Create Median + P10-P90 summary for bar charts.
-"""
-summary = (
-data
-.groupby(
-["Viscosity_Zone", "Zone_Sort"],
-observed=False
-)
-.agg(
-Median=(value_column, "median"),
-P10=(value_column, lambda x: safe_quantile(x, 0.10)),
-P90=(value_column, lambda x: safe_quantile(x, 0.90)),
-Records=(value_column, "size")
-)
-.reset_index()
-)
-
-```
-summary = summary[summary["Records"] > 0].copy()
-
-summary["Error_Upper"] = summary["P90"] - summary["Median"]
-summary["Error_Lower"] = summary["Median"] - summary["P10"]
-
-return summary.sort_values("Zone_Sort")
-```
+required = ["Resin", "Vendor", "稀釋劑", "黏度(秒)", "黏度(秒)_1", "添加重量", "塗料重量"]
+missing = [c for c in required if c not in raw.columns]
+if missing:
+    st.error("❌ Missing required columns: " + ", ".join(missing))
+    st.stop()
 
 # =========================================================
-
 # [S04] DATA PREPROCESSING
+# =========================================================
+df = raw.copy()
+for c in ["添加重量", "塗料重量", "黏度(秒)", "黏度(秒)_1", "溫度", "濕度"]:
+    if c in df.columns:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    else:
+        df[c] = np.nan
+if "塗料批號" not in df.columns:
+    df["塗料批號"] = df.index.astype(str)
+
+df["Resin"] = normalize_text(df["Resin"])
+df["Vendor"] = normalize_text(df["Vendor"])
+df["Solvent_Type"] = normalize_text(df["稀釋劑"])
 
 # =========================================================
-
-required_columns = [
-"Resin",
-"Vendor",
-"稀釋劑",
-"黏度(秒)",
-"黏度(秒)_1",
-"添加重量",
-"塗料重量"
-]
-
-missing_columns = [
-col for col in required_columns
-if col not in group_a_raw.columns
-]
-
-if missing_columns:
-st.error(
-f"❌ Missing required columns: {', '.join(missing_columns)}"
-)
-st.stop()
-
-group_a = group_a_raw.copy()
-
-numeric_columns = [
-"添加重量",
-"塗料重量",
-"黏度(秒)",
-"黏度(秒)_1",
-"溫度",
-"濕度"
-]
-
-for col in numeric_columns:
-if col in group_a.columns:
-group_a[col] = pd.to_numeric(
-group_a[col],
-errors="coerce"
-)
-
-if "溫度" not in group_a.columns:
-group_a["溫度"] = np.nan
-
-if "濕度" not in group_a.columns:
-group_a["濕度"] = np.nan
-
-if "塗料批號" not in group_a.columns:
-group_a["塗料批號"] = group_a.index.astype(str)
-
-group_a["Resin"] = normalize_text(group_a["Resin"])
-group_a["Vendor"] = normalize_text(group_a["Vendor"])
-group_a["Solvent_Type"] = normalize_text(group_a["稀釋劑"])
-
-# =========================================================
-
 # [S05] CORE CALCULATIONS
+# =========================================================
+# [S05.01] Dilution Base = 塗料重量 + 120 kg
+df["Minimum_Operating_Paint_kg"] = MIN_OPERATING_PAINT_KG
+df["Dilution_Base_Paint_kg"] = df["塗料重量"] + MIN_OPERATING_PAINT_KG
+
+# [S05.02] Ratio / Delta V / Sensitivity
+df["Solvent_Ratio_Percent"] = df["添加重量"] / df["Dilution_Base_Paint_kg"].replace(0, np.nan) * 100
+df["Delta_V"] = df["黏度(秒)"] - df["黏度(秒)_1"]
+df["Sensitivity"] = df["Delta_V"] / df["Solvent_Ratio_Percent"].replace(0, np.nan)
+
+# [S05.03] Fixed viscosity zone
+df["Viscosity_Zone"] = pd.cut(
+    df["黏度(秒)"],
+    bins=[-np.inf, 70, 90, 110, 130, np.inf],
+    labels=VISCOSITY_ZONE_ORDER,
+    include_lowest=True,
+)
+df["Zone_Sort"] = df["Viscosity_Zone"].apply(zone_sort)
 
 # =========================================================
-
-# ---------------------------------------------------------
-
-# [S05.01] Dilution calculation base
-
-# 塗料重量 = order paint quantity
-
-# Dilution Base = 塗料重量 + 120 kg
-
-# ---------------------------------------------------------
-
-group_a["Minimum_Operating_Paint_kg"] = MIN_OPERATING_PAINT_KG
-
-group_a["Dilution_Base_Paint_kg"] = (
-group_a["塗料重量"]
-+ group_a["Minimum_Operating_Paint_kg"]
-)
-
-# ---------------------------------------------------------
-
-# [S05.02] Solvent ratio
-
-# ---------------------------------------------------------
-
-group_a["Solvent_Ratio_Percent"] = (
-group_a["添加重量"]
-/ group_a["Dilution_Base_Paint_kg"].replace(0, np.nan)
-) * 100
-
-# ---------------------------------------------------------
-
-# [S05.03] Viscosity reduction
-
-# ---------------------------------------------------------
-
-group_a["Delta_V"] = (
-group_a["黏度(秒)"]
-- group_a["黏度(秒)_1"]
-)
-
-# ---------------------------------------------------------
-
-# [S05.04] Solvent sensitivity
-
-# ---------------------------------------------------------
-
-group_a["Sensitivity"] = (
-group_a["Delta_V"]
-/ group_a["Solvent_Ratio_Percent"].replace(0, np.nan)
-)
-
-# ---------------------------------------------------------
-
-# [S05.05] Initial viscosity zone
-
-# ---------------------------------------------------------
-
-group_a["Viscosity_Zone"] = create_viscosity_zone(
-group_a["黏度(秒)"]
-)
-
-group_a["Zone_Sort"] = group_a["Viscosity_Zone"].apply(
-get_zone_sort_value
-)
-
-# =========================================================
-
 # [S06] VALID RECORD FILTER
-
 # =========================================================
-
-analysis_df = group_a[
-(group_a["添加重量"] > 0) &
-(group_a["塗料重量"] > 0) &
-(group_a["Dilution_Base_Paint_kg"] > 0) &
-(group_a["Solvent_Ratio_Percent"] > 0) &
-(group_a["Delta_V"] > 0) &
-(group_a["Sensitivity"] > 0) &
-(group_a["Resin"] != "Unknown") &
-(group_a["Vendor"] != "Unknown") &
-(group_a["Solvent_Type"] != "Unknown")
+analysis_df = df[
+    (df["添加重量"] > 0)
+    & (df["塗料重量"] > 0)
+    & (df["Solvent_Ratio_Percent"] > 0)
+    & (df["Delta_V"] > 0)
+    & (df["Sensitivity"] > 0)
+    & (df["Resin"] != "Unknown")
+    & (df["Vendor"] != "Unknown")
+    & (df["Solvent_Type"] != "Unknown")
 ].copy()
-
-# ---------------------------------------------------------
-
-# [S06.01] Remove global sensitivity outliers
-
-# ---------------------------------------------------------
 
 if not analysis_df.empty:
-sensitivity_p01 = analysis_df["Sensitivity"].quantile(0.01)
-sensitivity_p99 = analysis_df["Sensitivity"].quantile(0.99)
-
-```
-analysis_df = analysis_df[
-    (analysis_df["Sensitivity"] >= sensitivity_p01) &
-    (analysis_df["Sensitivity"] <= sensitivity_p99)
-].copy()
-```
+    low = analysis_df["Sensitivity"].quantile(0.01)
+    high = analysis_df["Sensitivity"].quantile(0.99)
+    analysis_df = analysis_df[
+        (analysis_df["Sensitivity"] >= low) & (analysis_df["Sensitivity"] <= high)
+    ].copy()
 
 if analysis_df.empty:
-st.warning(
-"⚠️ No valid dilution records found. "
-"Please check paint quantity, solvent quantity, viscosity, "
-"Resin, Vendor, and Solvent Type."
-)
-st.stop()
+    st.warning("⚠️ No valid dilution records found after validation.")
+    st.stop()
 
 # =========================================================
-
 # [S07] SOP MATRIX BUILD
-
-# Grouping:
-
-# Resin + Vendor + Solvent Type + Initial Viscosity Zone
-
+# Group: Resin + Vendor + Solvent Type + Viscosity Zone
 # =========================================================
-
 sop_matrix = (
-analysis_df
-.groupby(
-[
-"Resin",
-"Vendor",
-"Solvent_Type",
-"Viscosity_Zone",
-"Zone_Sort"
-],
-observed=False,
-dropna=False
-)
-.agg(
-Typical_Target_V=("黏度(秒)_1", "median"),
-
-```
-    Historical_Low_V_P10=(
-        "黏度(秒)_1",
-        lambda x: safe_quantile(x, 0.10)
-    ),
-
-    Historical_High_V_P90=(
-        "黏度(秒)_1",
-        lambda x: safe_quantile(x, 0.90)
-    ),
-
-    Historical_Ratio_Median=(
-        "Solvent_Ratio_Percent",
-        "median"
-    ),
-
-    Historical_Ratio_P90=(
-        "Solvent_Ratio_Percent",
-        lambda x: safe_quantile(x, 0.90)
-    ),
-
-    Historical_Ratio_P95=(
-        "Solvent_Ratio_Percent",
-        lambda x: safe_quantile(x, 0.95)
-    ),
-
-    Typical_Viscosity_Drop=(
-        "Delta_V",
-        "median"
-    ),
-
-    Viscosity_Drop_P10=(
-        "Delta_V",
-        lambda x: safe_quantile(x, 0.10)
-    ),
-
-    Viscosity_Drop_P90=(
-        "Delta_V",
-        lambda x: safe_quantile(x, 0.90)
-    ),
-
-    Max_Historical_Drop=(
-        "Delta_V",
-        "max"
-    ),
-
-    Median_Sensitivity=(
-        "Sensitivity",
-        "median"
-    ),
-
-    Sensitivity_Std=(
-        "Sensitivity",
-        "std"
-    ),
-
-    Records_in_Zone=(
-        "塗料批號",
-        "size"
+    analysis_df.groupby(
+        ["Resin", "Vendor", "Solvent_Type", "Viscosity_Zone", "Zone_Sort"],
+        observed=False,
     )
+    .agg(
+        Typical_Target_V=("黏度(秒)_1", "median"),
+        After_V_P10=("黏度(秒)_1", lambda x: safe_quantile(x, 0.10)),
+        After_V_P90=("黏度(秒)_1", lambda x: safe_quantile(x, 0.90)),
+        Ratio_Median=("Solvent_Ratio_Percent", "median"),
+        Ratio_P90=("Solvent_Ratio_Percent", lambda x: safe_quantile(x, 0.90)),
+        Ratio_P95=("Solvent_Ratio_Percent", lambda x: safe_quantile(x, 0.95)),
+        Drop_Median=("Delta_V", "median"),
+        Drop_P10=("Delta_V", lambda x: safe_quantile(x, 0.10)),
+        Drop_P90=("Delta_V", lambda x: safe_quantile(x, 0.90)),
+        Drop_Max=("Delta_V", "max"),
+        Sensitivity_Median=("Sensitivity", "median"),
+        Sensitivity_Std=("Sensitivity", "std"),
+        Records=("塗料批號", "size"),
+    )
+    .reset_index()
 )
-.reset_index()
-```
-
-)
-
-# ---------------------------------------------------------
-
-# [S07.01] Solvent factor per 1 second reduction
-
-# ---------------------------------------------------------
-
 sop_matrix["Factor_kg_per_100kg_per_1s"] = np.where(
-sop_matrix["Median_Sensitivity"] > 0,
-1 / sop_matrix["Median_Sensitivity"],
-np.nan
+    sop_matrix["Sensitivity_Median"] > 0,
+    1 / sop_matrix["Sensitivity_Median"],
+    np.nan,
 )
-
-# ---------------------------------------------------------
-
-# [S07.02] SOP draft coefficients
-
-# ---------------------------------------------------------
-
-sop_matrix["Typical_Total_Coeff_kg_per_100kg"] = (
-sop_matrix["Historical_Ratio_Median"]
-)
-
-sop_matrix["Draft_Stage_1_Coeff_kg_per_100kg"] = (
-sop_matrix["Typical_Total_Coeff_kg_per_100kg"]
-* STAGE_1_PERCENT
-)
-
-sop_matrix["Draft_Stage_2_Coeff_kg_per_100kg"] = (
-sop_matrix["Typical_Total_Coeff_kg_per_100kg"]
-* STAGE_2_PERCENT
-)
-
-sop_matrix["Draft_Fine_Adjust_Coeff_kg_per_100kg"] = (
-sop_matrix["Typical_Total_Coeff_kg_per_100kg"]
-* STAGE_3_PERCENT
-)
-
-sop_matrix["Draft_Max_Total_Coeff_kg_per_100kg"] = (
-sop_matrix["Historical_Ratio_P90"]
-)
-
-# ---------------------------------------------------------
-
-# [S07.03] Data confidence
-
-# ---------------------------------------------------------
-
-sop_matrix["Data_Confidence"] = (
-sop_matrix["Records_in_Zone"]
-.apply(lambda x: get_data_confidence(x)[0])
-)
-
-sop_matrix["Confidence_Icon"] = (
-sop_matrix["Records_in_Zone"]
-.apply(lambda x: get_data_confidence(x)[1])
-)
-
-sop_matrix = sop_matrix[
-sop_matrix["Records_in_Zone"]
->= MIN_RECORDS_FOR_REFERENCE
-].copy()
+sop_matrix["Stage_1_Coeff"] = sop_matrix["Ratio_Median"] * STAGE_1_PERCENT
+sop_matrix["Stage_2_Coeff"] = sop_matrix["Ratio_Median"] * STAGE_2_PERCENT
+sop_matrix["Fine_Adjust_Coeff"] = sop_matrix["Ratio_Median"] * STAGE_3_PERCENT
+sop_matrix["Max_Total_Coeff"] = sop_matrix["Ratio_P90"]
+sop_matrix["Data_Confidence"] = sop_matrix["Records"].apply(lambda x: get_confidence(x)[0])
+sop_matrix["Confidence_Icon"] = sop_matrix["Records"].apply(lambda x: get_confidence(x)[1])
+sop_matrix = sop_matrix[sop_matrix["Records"] >= MIN_RECORDS_FOR_REFERENCE].copy()
 
 # =========================================================
-
 # [S08] KPI AREA
-
 # =========================================================
-
 st.subheader("💡 Historical Mixing Data Overview")
-
-kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
-
-with kpi_col1:
-st.metric("Total Records", f"{len(group_a):,}")
-
-with kpi_col2:
-st.metric("Valid Adjustment Records", f"{len(analysis_df):,}")
-
-with kpi_col3:
-st.metric(
-"Total Order Paint",
-f"{group_a['塗料重量'].sum():,.2f} kg"
-)
-
-with kpi_col4:
-st.metric(
-"Rejected / Invalid Records",
-f"{len(rejected_data):,}"
-)
-
-st.info(
-f"Calculation rule: Dilution Base Paint = 塗料重量 + "
-f"{MIN_OPERATING_PAINT_KG:.0f} kg."
-)
-
+a, b, c, d = st.columns(4)
+a.metric("Total Records", f"{len(df):,}")
+b.metric("Valid Adjustment Records", f"{len(analysis_df):,}")
+c.metric("Total Order Paint", f"{df['塗料重量'].sum():,.2f} kg")
+d.metric("Rejected / Invalid Records", f"{len(rejected_data):,}")
+st.info(f"Calculation rule: Dilution Base Paint = 塗料重量 + {MIN_OPERATING_PAINT_KG:.0f} kg.")
 st.markdown("---")
 
 # =========================================================
-
 # [S09] MAIN FILTERS
-
 # Resin → Vendor → Solvent Type
-
 # =========================================================
-
-filter_col1, filter_col2, filter_col3 = st.columns(3)
-
-available_resins = sorted(
-analysis_df["Resin"].dropna().unique().tolist()
+f1, f2, f3 = st.columns(3)
+resins = sorted(analysis_df["Resin"].unique().tolist())
+with f1:
+    selected_resin = st.selectbox("Select Resin", resins)
+vendors = sorted(analysis_df.loc[analysis_df["Resin"] == selected_resin, "Vendor"].unique().tolist())
+with f2:
+    selected_vendor = st.selectbox("Select Vendor", vendors)
+solvents = sorted(
+    analysis_df.loc[
+        (analysis_df["Resin"] == selected_resin) & (analysis_df["Vendor"] == selected_vendor),
+        "Solvent_Type",
+    ].unique().tolist()
 )
-
-with filter_col1:
-selected_resin = st.selectbox(
-"Select Resin",
-available_resins
-)
-
-available_vendors = sorted(
-analysis_df.loc[
-analysis_df["Resin"] == selected_resin,
-"Vendor"
-].dropna().unique().tolist()
-)
-
-with filter_col2:
-selected_vendor = st.selectbox(
-"Select Vendor",
-available_vendors
-)
-
-available_solvents = sorted(
-analysis_df.loc[
-(
-analysis_df["Resin"] == selected_resin
-) &
-(
-analysis_df["Vendor"] == selected_vendor
-),
-"Solvent_Type"
-].dropna().unique().tolist()
-)
-
-with filter_col3:
-selected_solvent = st.selectbox(
-"Select Solvent Type",
-available_solvents
-)
+with f3:
+    selected_solvent = st.selectbox("Select Solvent Type", solvents)
 
 filtered_data = analysis_df[
-(analysis_df["Resin"] == selected_resin) &
-(analysis_df["Vendor"] == selected_vendor) &
-(analysis_df["Solvent_Type"] == selected_solvent)
+    (analysis_df["Resin"] == selected_resin)
+    & (analysis_df["Vendor"] == selected_vendor)
+    & (analysis_df["Solvent_Type"] == selected_solvent)
 ].copy()
-
 filtered_sop = sop_matrix[
-(sop_matrix["Resin"] == selected_resin) &
-(sop_matrix["Vendor"] == selected_vendor) &
-(sop_matrix["Solvent_Type"] == selected_solvent)
+    (sop_matrix["Resin"] == selected_resin)
+    & (sop_matrix["Vendor"] == selected_vendor)
+    & (sop_matrix["Solvent_Type"] == selected_solvent)
 ].copy()
 
 # =========================================================
-
-# [S10] CREATE TABS
-
+# [S10] TABS
 # =========================================================
-
-tab_analysis, tab_sop, tab_matrix = st.tabs([
-"📊 Historical Analysis",
-"🧠 SOP Recommendation",
-"📚 SOP Matrix"
-])
-
-# =========================================================
-
-# [S11] TAB 1 - HISTORICAL ANALYSIS
-
-# =========================================================
-
-with tab_analysis:
-st.markdown("### 📊 Historical Dilution Behavior")
-
-```
-if filtered_data.empty:
-    st.info("No valid records for the selected group.")
-
-else:
-    # -------------------------------------------------
-    # [S11.01] Scatter: Solvent ratio vs viscosity drop
-    # -------------------------------------------------
-    chart_col1, chart_col2 = st.columns(2)
-
-    with chart_col1:
-        st.markdown("#### Solvent Ratio vs. Viscosity Reduction")
-
-        fig_ratio_delta = px.scatter(
-            filtered_data,
-            x="Solvent_Ratio_Percent",
-            y="Delta_V",
-            color="Viscosity_Zone",
-            category_orders={
-                "Viscosity_Zone": VISCOSITY_ZONE_ORDER
-            },
-            hover_data=[
-                "黏度(秒)",
-                "黏度(秒)_1",
-                "添加重量",
-                "塗料重量",
-                "Dilution_Base_Paint_kg",
-                "溫度",
-                "濕度"
-            ],
-            labels={
-                "Solvent_Ratio_Percent": "Solvent Ratio (%)",
-                "Delta_V": "Viscosity Drop (s)",
-                "Viscosity_Zone": "Initial Viscosity Zone"
-            }
-        )
-
-        fig_ratio_delta.update_layout(
-            margin=dict(l=20, r=20, t=35, b=20)
-        )
-
-        st.plotly_chart(
-            fig_ratio_delta,
-            use_container_width=True
-        )
-
-    # -------------------------------------------------
-    # [S11.02] Bar chart: Median delta V by zone
-    # -------------------------------------------------
-    with chart_col2:
-        st.markdown(
-            "#### Median Viscosity Drop by Initial Viscosity Zone"
-        )
-
-        delta_summary = make_zone_summary(
-            filtered_data,
-            "Delta_V"
-        )
-
-        fig_delta_bar = px.bar(
-            delta_summary,
-            x="Viscosity_Zone",
-            y="Median",
-            error_y="Error_Upper",
-            error_y_minus="Error_Lower",
-            text="Median",
-            category_orders={
-                "Viscosity_Zone": VISCOSITY_ZONE_ORDER
-            },
-            hover_data={
-                "P10": ":.2f",
-                "P90": ":.2f",
-                "Records": True,
-                "Error_Upper": False,
-                "Error_Lower": False
-            },
-            labels={
-                "Viscosity_Zone": "Initial Viscosity Zone",
-                "Median": "Median Viscosity Drop (s)"
-            }
-        )
-
-        fig_delta_bar.update_traces(
-            texttemplate="%{text:.2f}",
-            textposition="outside"
-        )
-
-        fig_delta_bar.update_layout(
-            margin=dict(l=20, r=20, t=35, b=20),
-            yaxis_title="Median Viscosity Drop (s)"
-        )
-
-        st.plotly_chart(
-            fig_delta_bar,
-            use_container_width=True
-        )
-
-    # -------------------------------------------------
-    # [S11.03] Scatter: Solvent ratio vs sensitivity
-    # -------------------------------------------------
-    chart_col3, chart_col4 = st.columns(2)
-
-    with chart_col3:
-        st.markdown(
-            "#### Solvent Ratio vs. Dilution Efficiency"
-        )
-
-        fig_efficiency = px.scatter(
-            filtered_data,
-            x="Solvent_Ratio_Percent",
-            y="Sensitivity",
-            color="Viscosity_Zone",
-            category_orders={
-                "Viscosity_Zone": VISCOSITY_ZONE_ORDER
-            },
-            hover_data=[
-                "黏度(秒)",
-                "黏度(秒)_1",
-                "Delta_V"
-            ],
-            labels={
-                "Solvent_Ratio_Percent": "Solvent Ratio (%)",
-                "Sensitivity": "Sensitivity (s / %)",
-                "Viscosity_Zone": "Initial Viscosity Zone"
-            }
-        )
-
-        fig_efficiency.update_layout(
-            margin=dict(l=20, r=20, t=35, b=20)
-        )
-
-        st.plotly_chart(
-            fig_efficiency,
-            use_container_width=True
-        )
-
-    # -------------------------------------------------
-    # [S11.04] Bar chart: Median after viscosity by zone
-    # -------------------------------------------------
-    with chart_col4:
-        st.markdown(
-            "#### Median After-Dilution Viscosity by Zone"
-        )
-
-        after_v_summary = make_zone_summary(
-            filtered_data,
-            "黏度(秒)_1"
-        )
-
-        fig_after_v_bar = px.bar(
-            after_v_summary,
-            x="Viscosity_Zone",
-            y="Median",
-            error_y="Error_Upper",
-            error_y_minus="Error_Lower",
-            text="Median",
-            category_orders={
-                "Viscosity_Zone": VISCOSITY_ZONE_ORDER
-            },
-            hover_data={
-                "P10": ":.2f",
-                "P90": ":.2f",
-                "Records": True,
-                "Error_Upper": False,
-                "Error_Lower": False
-            },
-            labels={
-                "Viscosity_Zone": "Initial Viscosity Zone",
-                "Median": "Median After-Dilution Viscosity (s)"
-            }
-        )
-
-        fig_after_v_bar.update_traces(
-            texttemplate="%{text:.2f}",
-            textposition="outside"
-        )
-
-        fig_after_v_bar.update_layout(
-            margin=dict(l=20, r=20, t=35, b=20),
-            yaxis_title="Median After-Dilution Viscosity (s)"
-        )
-
-        st.plotly_chart(
-            fig_after_v_bar,
-            use_container_width=True
-        )
-
-    st.caption(
-        "Bar chart shows Median; error range shows P10–P90. "
-        "This page reflects historical mixing behavior only."
-    )
-```
-
-# =========================================================
-
-# [S12] TAB 2 - SOP RECOMMENDATION
-
-# =========================================================
-
-with tab_sop:
-st.markdown("### 🧠 Solvent Recommendation")
-
-```
-if filtered_data.empty:
-    st.warning(
-        "⚠️ No valid history exists for the selected "
-        "Resin, Vendor, and Solvent Type."
-    )
-
-elif filtered_sop.empty:
-    st.warning(
-        "⚠️ No viscosity zone has at least 3 records "
-        "for this group."
-    )
-
-else:
-    # -------------------------------------------------
-    # [S12.01] User input
-    # -------------------------------------------------
-    input_col1, input_col2, input_col3, input_col4 = st.columns(4)
-
-    with input_col1:
-        current_viscosity = st.number_input(
-            "Current Viscosity (s)",
-            value=90.00,
-            step=1.00,
-            format="%.2f"
-        )
-
-    with input_col2:
-        approved_lsl = st.number_input(
-            "Approved Viscosity Lower Limit (s)",
-            value=float(
-                filtered_data["黏度(秒)_1"].quantile(0.25)
-            ),
-            step=1.00,
-            format="%.2f"
-        )
-
-    with input_col3:
-        approved_usl = st.number_input(
-            "Approved Viscosity Upper Limit (s)",
-            value=float(
-                filtered_data["黏度(秒)_1"].quantile(0.75)
-            ),
-            step=1.00,
-            format="%.2f"
-        )
-
-    with input_col4:
-        order_paint_weight = st.number_input(
-            "Order Paint Weight (kg)",
-            value=80.00,
-            min_value=0.00,
-            step=1.00,
-            format="%.2f"
-        )
-
-    # -------------------------------------------------
-    # [S12.02] Dilution base
-    # -------------------------------------------------
-    dilution_base_paint = (
-        order_paint_weight
-        + MIN_OPERATING_PAINT_KG
-    )
-
-    base_col1, base_col2, base_col3 = st.columns(3)
-
-    with base_col1:
-        st.metric(
-            "Order Paint Weight",
-            f"{order_paint_weight:.2f} kg"
-        )
-
-    with base_col2:
-        st.metric(
-            "Minimum Operating Paint",
-            f"{MIN_OPERATING_PAINT_KG:.2f} kg"
-        )
-
-    with base_col3:
-        st.metric(
-            "Dilution Calculation Total",
-            f"{dilution_base_paint:.2f} kg"
-        )
-
-    # -------------------------------------------------
-    # [S12.03] Recommendation engine
-    # -------------------------------------------------
-    if approved_lsl >= approved_usl:
-        st.error(
-            "❌ Approved lower limit must be less than "
-            "approved upper limit."
-        )
-
-    else:
-        target_viscosity = (
-            approved_lsl + approved_usl
-        ) / 2
-
-        required_delta_v = (
-            current_viscosity - target_viscosity
-        )
-
-        if required_delta_v <= 0:
-            st.success(
-                "✅ Current viscosity is already within "
-                "or below the target range."
-            )
-
-        else:
-            current_zone = get_current_viscosity_zone(
-                current_viscosity
-            )
-
-            zone_data = filtered_data[
-                filtered_data["Viscosity_Zone"].astype(str)
-                == current_zone
-            ].copy()
-
-            expected_sensitivity = np.nan
-            reference_data = pd.DataFrame()
-            match_type = ""
-
-            if len(zone_data) >= MIN_RECORDS_FOR_RECOMMENDATION:
-                expected_sensitivity = zone_data[
-                    "Sensitivity"
-                ].median()
-
-                reference_data = zone_data
-                match_type = "zone"
-
-            elif len(filtered_data) >= MIN_RECORDS_FOR_RECOMMENDATION:
-                expected_sensitivity = filtered_data[
-                    "Sensitivity"
-                ].median()
-
-                reference_data = filtered_data
-                match_type = "general"
-
-            if (
-                pd.isna(expected_sensitivity)
-                or expected_sensitivity <= 0
-            ):
-                st.error(
-                    "❌ Insufficient historical records for automatic "
-                    "recommendation. At least 5 valid records are required."
-                )
-
-            else:
-                record_count = len(reference_data)
-
-                confidence_label, confidence_color = (
-                    get_recommendation_confidence(
-                        record_count,
-                        match_type
-                    )
-                )
-
-                required_ratio = (
-                    required_delta_v / expected_sensitivity
-                )
-
-                total_solvent_kg = (
-                    dilution_base_paint
-                    * required_ratio
-                    / 100
-                )
-
-                stage_1_kg = (
-                    total_solvent_kg * STAGE_1_PERCENT
-                )
-
-                stage_2_kg = (
-                    total_solvent_kg * STAGE_2_PERCENT
-                )
-
-                stage_3_kg = (
-                    total_solvent_kg * STAGE_3_PERCENT
-                )
-
-                ratio_p90 = safe_quantile(
-                    reference_data["Solvent_Ratio_Percent"],
-                    0.90
-                )
-
-                ratio_p95 = safe_quantile(
-                    reference_data["Solvent_Ratio_Percent"],
-                    0.95
-                )
-
-                drop_p90 = safe_quantile(
-                    reference_data["Delta_V"],
-                    0.90
-                )
-
-                max_drop = safe_quantile(
-                    reference_data["Delta_V"],
-                    1.00
-                )
-
-                # -------------------------------------
-                # [S12.04] Recommendation result
-                # -------------------------------------
-                st.subheader("Recommendation Result")
-
-                result_col1, result_col2, result_col3 = st.columns(3)
-
-                with result_col1:
-                    st.metric(
-                        "Recommended Total Solvent",
-                        f"{total_solvent_kg:.2f} kg"
-                    )
-
-                with result_col2:
-                    st.metric(
-                        "Required Viscosity Drop",
-                        f"{required_delta_v:.2f} s"
-                    )
-
-                with result_col3:
-                    st.metric(
-                        "Calculated Solvent Ratio",
-                        f"{required_ratio:.2f}%"
-                    )
-
-                st.write(
-                    f"**Main SOP Group:** "
-                    f"{selected_resin} + {selected_vendor} + {selected_solvent}"
-                )
-
-                st.write(
-                    f"**Matched Viscosity Zone:** {current_zone}"
-                )
-
-                st.write(
-                    f"**Target Center:** {target_viscosity:.2f} s"
-                )
-
-                st.write(
-                    f"**Historical Sensitivity Used:** "
-                    f"{expected_sensitivity:.2f} s/%"
-                )
-
-                st.write(
-                    f"**Reference Records:** {record_count}"
-                )
-
-                st.write(
-                    f"**Confidence:** "
-                    f":{confidence_color}[{confidence_label}]"
-                )
-
-                # -------------------------------------
-                # [S12.05] Staged addition
-                # -------------------------------------
-                st.markdown("#### Recommended Staged Addition")
-
-                stage_col1, stage_col2, stage_col3 = st.columns(3)
-
-                with stage_col1:
-                    st.metric(
-                        "Stage 1: Initial Addition",
-                        f"{stage_1_kg:.2f} kg",
-                        f"{STAGE_1_PERCENT * 100:.0f}% of total"
-                    )
-
-                with stage_col2:
-                    st.metric(
-                        "Stage 2: After Re-check",
-                        f"{stage_2_kg:.2f} kg",
-                        f"{STAGE_2_PERCENT * 100:.0f}% of total"
-                    )
-
-                with stage_col3:
-                    st.metric(
-                        "Stage 3: Fine Adjustment",
-                        f"{stage_3_kg:.2f} kg",
-                        f"{STAGE_3_PERCENT * 100:.0f}% of total"
-                    )
-
-                # -------------------------------------
-                # [S12.06] Historical warning limits
-                # -------------------------------------
-                st.markdown("#### Historical Safety Reference")
-
-                ref_col1, ref_col2, ref_col3, ref_col4 = st.columns(4)
-
-                with ref_col1:
-                    st.metric(
-                        "Historical Ratio P90",
-                        (
-                            f"{ratio_p90:.2f}%"
-                            if not pd.isna(ratio_p90)
-                            else "N/A"
-                        )
-                    )
-
-                with ref_col2:
-                    st.metric(
-                        "Historical Ratio P95",
-                        (
-                            f"{ratio_p95:.2f}%"
-                            if not pd.isna(ratio_p95)
-                            else "N/A"
-                        )
-                    )
-
-                with ref_col3:
-                    st.metric(
-                        "Historical Drop P90",
-                        (
-                            f"{drop_p90:.2f} s"
-                            if not pd.isna(drop_p90)
-                            else "N/A"
-                        )
-                    )
-
-                with ref_col4:
-                    st.metric(
-                        "Historical Max Drop",
-                        (
-                            f"{max_drop:.2f} s"
-                            if not pd.isna(max_drop)
-                            else "N/A"
-                        )
-                    )
-
-                # -------------------------------------
-                # [S12.07] Warning rules
-                # -------------------------------------
-                if (
-                    not pd.isna(ratio_p90)
-                    and required_ratio > ratio_p90
-                ):
-                    st.warning(
-                        "⚠️ Required solvent ratio exceeds historical P90. "
-                        "Use staged addition and re-check viscosity after each step."
-                    )
-
-                if (
-                    not pd.isna(ratio_p95)
-                    and required_ratio > ratio_p95
-                ):
-                    st.error(
-                        "🚨 Required solvent ratio exceeds historical P95. "
-                        "QE / process engineer confirmation is required."
-                    )
-
-                if (
-                    not pd.isna(drop_p90)
-                    and required_delta_v > drop_p90
-                ):
-                    st.warning(
-                        "⚠️ Required viscosity reduction exceeds "
-                        "historical P90 range."
-                    )
-
-                if (
-                    not pd.isna(max_drop)
-                    and required_delta_v > max_drop
-                ):
-                    st.error(
-                        "🚨 Required viscosity reduction exceeds maximum "
-                        "historical record. Do not use this as an "
-                        "automatic final instruction."
-                    )
-```
-
-# =========================================================
-
-# [S13] TAB 3 - SOP MATRIX EXPORT
-
-# Export all combinations, not only filtered data
-
-# =========================================================
-
-with tab_matrix:
-st.markdown("### 📚 SOP Coefficient Matrix")
-
-```
-st.caption(
-    "This export includes all Resin + Vendor + Solvent Type + "
-    "Initial Viscosity Zone combinations."
+tab_analysis, tab_recommend, tab_matrix = st.tabs(
+    ["📊 Historical Analysis", "🧠 SOP Recommendation", "📚 SOP Matrix"]
 )
 
-if sop_matrix.empty:
-    st.warning("⚠️ No SOP matrix records are available.")
+# =========================================================
+# [S11] HISTORICAL ANALYSIS
+# No boxplots: Scatter + Median/P10-P90 bar charts
+# =========================================================
+with tab_analysis:
+    st.markdown("### 📊 Historical Dilution Behavior")
+    if filtered_data.empty:
+        st.info("No valid records for the selected group.")
+    else:
+        col1, col2 = st.columns(2)
 
-else:
-    # -------------------------------------------------
-    # [S13.01] Prepare full matrix for export
-    # -------------------------------------------------
-    sop_display = sop_matrix.copy()
+        # [S11.01] Scatter: ratio vs drop
+        with col1:
+            st.markdown("#### Solvent Ratio vs. Viscosity Reduction")
+            fig = px.scatter(
+                filtered_data,
+                x="Solvent_Ratio_Percent",
+                y="Delta_V",
+                color="Viscosity_Zone",
+                category_orders={"Viscosity_Zone": VISCOSITY_ZONE_ORDER},
+                hover_data=["黏度(秒)", "黏度(秒)_1", "添加重量", "塗料重量", "Dilution_Base_Paint_kg", "溫度", "濕度"],
+                labels={
+                    "Solvent_Ratio_Percent": "Solvent Ratio (%)",
+                    "Delta_V": "Viscosity Drop (s)",
+                    "Viscosity_Zone": "Initial Viscosity Zone",
+                },
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
-    sop_display = sop_display.rename(columns={
-        "Viscosity_Zone": "Initial Viscosity Range",
-        "Typical_Target_V": "Typical Target V (s)",
-        "Historical_Low_V_P10": "Historical After V P10 (s)",
-        "Historical_High_V_P90": "Historical After V P90 (s)",
-        "Historical_Ratio_Median": "Historical Ratio Median (%)",
-        "Historical_Ratio_P90": "Historical Ratio P90 (%)",
-        "Historical_Ratio_P95": "Historical Ratio P95 (%)",
-        "Typical_Viscosity_Drop": "Typical Viscosity Drop (s)",
-        "Viscosity_Drop_P10": "Viscosity Drop P10 (s)",
-        "Viscosity_Drop_P90": "Viscosity Drop P90 (s)",
-        "Max_Historical_Drop": "Max Historical Drop (s)",
-        "Median_Sensitivity": "Median Sensitivity (s/%)",
-        "Sensitivity_Std": "Sensitivity Std",
-        "Factor_kg_per_100kg_per_1s": "Factor (kg/100kg/1s)",
-        "Typical_Total_Coeff_kg_per_100kg": "Historical Total Coeff. (kg/100kg)",
-        "Draft_Stage_1_Coeff_kg_per_100kg": "Draft Stage 1 Coeff. (kg/100kg)",
-        "Draft_Stage_2_Coeff_kg_per_100kg": "Draft Stage 2 Coeff. (kg/100kg)",
-        "Draft_Fine_Adjust_Coeff_kg_per_100kg": "Draft Fine Adjust Coeff. (kg/100kg)",
-        "Draft_Max_Total_Coeff_kg_per_100kg": "Draft Max Total Coeff. (kg/100kg)",
-        "Records_in_Zone": "Records"
-    })
+        # [S11.02] Bar: median drop with P10-P90
+        with col2:
+            st.markdown("#### Median Viscosity Drop by Initial Viscosity Zone")
+            summary = zone_summary(filtered_data, "Delta_V")
+            fig = px.bar(
+                summary,
+                x="Viscosity_Zone",
+                y="Median",
+                error_y="Err_Plus",
+                error_y_minus="Err_Minus",
+                text="Median",
+                category_orders={"Viscosity_Zone": VISCOSITY_ZONE_ORDER},
+                hover_data={"P10": ":.2f", "P90": ":.2f", "Records": True},
+                labels={"Viscosity_Zone": "Initial Viscosity Zone", "Median": "Median Viscosity Drop (s)"},
+            )
+            fig.update_traces(texttemplate="%{text:.2f}", textposition="outside")
+            st.plotly_chart(fig, use_container_width=True)
 
-    # -------------------------------------------------
-    # [S13.02] Display columns
-    # -------------------------------------------------
-    display_columns = [
-        "Resin",
-        "Vendor",
-        "Solvent_Type",
-        "Initial Viscosity Range",
-        "Typical Target V (s)",
-        "Historical After V P10 (s)",
-        "Historical After V P90 (s)",
-        "Historical Ratio Median (%)",
-        "Historical Ratio P90 (%)",
-        "Historical Ratio P95 (%)",
-        "Typical Viscosity Drop (s)",
-        "Viscosity Drop P10 (s)",
-        "Viscosity Drop P90 (s)",
-        "Max Historical Drop (s)",
-        "Median Sensitivity (s/%)",
-        "Sensitivity Std",
-        "Factor (kg/100kg/1s)",
-        "Draft Stage 1 Coeff. (kg/100kg)",
-        "Draft Stage 2 Coeff. (kg/100kg)",
-        "Draft Fine Adjust Coeff. (kg/100kg)",
-        "Draft Max Total Coeff. (kg/100kg)",
-        "Records",
-        "Data_Confidence",
-        "Confidence_Icon"
-    ]
+        col3, col4 = st.columns(2)
 
-    numeric_columns = [
-        "Typical Target V (s)",
-        "Historical After V P10 (s)",
-        "Historical After V P90 (s)",
-        "Historical Ratio Median (%)",
-        "Historical Ratio P90 (%)",
-        "Historical Ratio P95 (%)",
-        "Typical Viscosity Drop (s)",
-        "Viscosity Drop P10 (s)",
-        "Viscosity Drop P90 (s)",
-        "Max Historical Drop (s)",
-        "Median Sensitivity (s/%)",
-        "Sensitivity Std",
-        "Factor (kg/100kg/1s)",
-        "Draft Stage 1 Coeff. (kg/100kg)",
-        "Draft Stage 2 Coeff. (kg/100kg)",
-        "Draft Fine Adjust Coeff. (kg/100kg)",
-        "Draft Max Total Coeff. (kg/100kg)"
-    ]
+        # [S11.03] Scatter: ratio vs sensitivity
+        with col3:
+            st.markdown("#### Solvent Ratio vs. Dilution Efficiency")
+            fig = px.scatter(
+                filtered_data,
+                x="Solvent_Ratio_Percent",
+                y="Sensitivity",
+                color="Viscosity_Zone",
+                category_orders={"Viscosity_Zone": VISCOSITY_ZONE_ORDER},
+                hover_data=["黏度(秒)", "黏度(秒)_1", "Delta_V"],
+                labels={
+                    "Solvent_Ratio_Percent": "Solvent Ratio (%)",
+                    "Sensitivity": "Sensitivity (s / %)",
+                    "Viscosity_Zone": "Initial Viscosity Zone",
+                },
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
-    sop_display = sop_display[
-        display_columns + ["Zone_Sort"]
-    ].copy()
+        # [S11.04] Bar: median after viscosity with P10-P90
+        with col4:
+            st.markdown("#### Median After-Dilution Viscosity by Zone")
+            summary = zone_summary(filtered_data, "黏度(秒)_1")
+            fig = px.bar(
+                summary,
+                x="Viscosity_Zone",
+                y="Median",
+                error_y="Err_Plus",
+                error_y_minus="Err_Minus",
+                text="Median",
+                category_orders={"Viscosity_Zone": VISCOSITY_ZONE_ORDER},
+                hover_data={"P10": ":.2f", "P90": ":.2f", "Records": True},
+                labels={"Viscosity_Zone": "Initial Viscosity Zone", "Median": "Median After-Dilution Viscosity (s)"},
+            )
+            fig.update_traces(texttemplate="%{text:.2f}", textposition="outside")
+            st.plotly_chart(fig, use_container_width=True)
 
-    sop_display[numeric_columns] = (
-        sop_display[numeric_columns]
-        .round(2)
-    )
+        st.caption("Bar charts show Median with P10–P90 ranges. No boxplots are used.")
 
-    # -------------------------------------------------
-    # [S13.03] Sort full matrix
-    # -------------------------------------------------
-    sop_display = sop_display.sort_values(
-        by=[
-            "Resin",
-            "Vendor",
-            "Solvent_Type",
-            "Zone_Sort"
+# =========================================================
+# [S12] SOP RECOMMENDATION
+# =========================================================
+with tab_recommend:
+    st.markdown("### 🧠 Solvent Recommendation")
+
+    if filtered_data.empty or filtered_sop.empty:
+        st.warning("⚠️ Insufficient historical SOP data for the selected group.")
+    else:
+        # [S12.01] User input
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            current_v = st.number_input("Current Viscosity (s)", value=90.0, step=1.0, format="%.2f")
+        with c2:
+            target_lsl = st.number_input(
+                "Approved Viscosity Lower Limit (s)",
+                value=float(filtered_data["黏度(秒)_1"].quantile(0.25)),
+                step=1.0,
+                format="%.2f",
+            )
+        with c3:
+            target_usl = st.number_input(
+                "Approved Viscosity Upper Limit (s)",
+                value=float(filtered_data["黏度(秒)_1"].quantile(0.75)),
+                step=1.0,
+                format="%.2f",
+            )
+        with c4:
+            order_paint_kg = st.number_input("Order Paint Weight (kg)", value=80.0, min_value=0.0, step=1.0, format="%.2f")
+
+        # [S12.02] Base calculation
+        dilution_base_kg = order_paint_kg + MIN_OPERATING_PAINT_KG
+        x1, x2, x3 = st.columns(3)
+        x1.metric("Order Paint Weight", f"{order_paint_kg:.2f} kg")
+        x2.metric("Minimum Operating Paint", f"{MIN_OPERATING_PAINT_KG:.2f} kg")
+        x3.metric("Dilution Calculation Total", f"{dilution_base_kg:.2f} kg")
+
+        # [S12.03] Recommendation calculation
+        if target_lsl >= target_usl:
+            st.error("❌ Approved lower limit must be less than upper limit.")
+        else:
+            target_center = (target_lsl + target_usl) / 2
+            required_drop = current_v - target_center
+
+            if required_drop <= 0:
+                st.success("✅ Current viscosity is already within or below target range.")
+            else:
+                current_zone = viscosity_zone(current_v)
+                zone_data = filtered_data[
+                    filtered_data["Viscosity_Zone"].astype(str) == current_zone
+                ].copy()
+
+                if len(zone_data) >= MIN_RECORDS_FOR_RECOMMENDATION:
+                    reference = zone_data
+                    match_type = "zone"
+                else:
+                    reference = filtered_data
+                    match_type = "general"
+
+                if len(reference) < MIN_RECORDS_FOR_RECOMMENDATION:
+                    st.error("❌ At least 5 valid historical records are required.")
+                else:
+                    sensitivity = reference["Sensitivity"].median()
+                    required_ratio = required_drop / sensitivity
+                    total_solvent = dilution_base_kg * required_ratio / 100
+
+                    # [S12.04] Result
+                    st.subheader("Recommendation Result")
+                    r1, r2, r3 = st.columns(3)
+                    r1.metric("Recommended Total Solvent", f"{total_solvent:.2f} kg")
+                    r2.metric("Required Viscosity Drop", f"{required_drop:.2f} s")
+                    r3.metric("Calculated Solvent Ratio", f"{required_ratio:.2f}%")
+
+                    st.write(f"**Main SOP Group:** {selected_resin} + {selected_vendor} + {selected_solvent}")
+                    st.write(f"**Matched Viscosity Zone:** {current_zone}")
+                    st.write(f"**Historical Sensitivity Used:** {sensitivity:.2f} s/%")
+                    st.write(f"**Reference Records:** {len(reference)}")
+                    st.write(f"**Confidence:** {get_confidence(len(reference))[0]}")
+
+                    # [S12.05] Staged addition
+                    st.markdown("#### Recommended Staged Addition")
+                    p1, p2, p3 = st.columns(3)
+                    p1.metric("Stage 1: Initial Addition", f"{total_solvent * STAGE_1_PERCENT:.2f} kg")
+                    p2.metric("Stage 2: After Re-check", f"{total_solvent * STAGE_2_PERCENT:.2f} kg")
+                    p3.metric("Stage 3: Fine Adjustment", f"{total_solvent * STAGE_3_PERCENT:.2f} kg")
+
+                    # [S12.06] Historical warning boundaries
+                    ratio_p90 = safe_quantile(reference["Solvent_Ratio_Percent"], 0.90)
+                    ratio_p95 = safe_quantile(reference["Solvent_Ratio_Percent"], 0.95)
+                    drop_p90 = safe_quantile(reference["Delta_V"], 0.90)
+                    drop_max = safe_quantile(reference["Delta_V"], 1.00)
+
+                    h1, h2, h3, h4 = st.columns(4)
+                    h1.metric("Historical Ratio P90", f"{ratio_p90:.2f}%")
+                    h2.metric("Historical Ratio P95", f"{ratio_p95:.2f}%")
+                    h3.metric("Historical Drop P90", f"{drop_p90:.2f} s")
+                    h4.metric("Historical Max Drop", f"{drop_max:.2f} s")
+
+                    if required_ratio > ratio_p90:
+                        st.warning("⚠️ Required solvent ratio exceeds historical P90. Use staged addition.")
+                    if required_ratio > ratio_p95:
+                        st.error("🚨 Required solvent ratio exceeds historical P95. QE confirmation is required.")
+                    if required_drop > drop_p90:
+                        st.warning("⚠️ Required viscosity reduction exceeds historical P90 range.")
+                    if required_drop > drop_max:
+                        st.error("🚨 Required viscosity reduction exceeds maximum historical drop.")
+
+# =========================================================
+# [S13] FULL SOP MATRIX EXPORT
+# Export ALL groups, not only selected filter group
+# =========================================================
+with tab_matrix:
+    st.markdown("### 📚 Full SOP Coefficient Matrix")
+    st.caption("Export includes all Resin + Vendor + Solvent Type + Initial Viscosity Zone combinations.")
+
+    if sop_matrix.empty:
+        st.warning("⚠️ No SOP matrix records are available.")
+    else:
+        # [S13.01] Full export table
+        export_df = sop_matrix.copy().rename(columns={
+            "Solvent_Type": "Solvent Type",
+            "Viscosity_Zone": "Initial Viscosity Range",
+            "Typical_Target_V": "Typical Target V (s)",
+            "After_V_P10": "Historical After V P10 (s)",
+            "After_V_P90": "Historical After V P90 (s)",
+            "Ratio_Median": "Historical Ratio Median (%)",
+            "Ratio_P90": "Historical Ratio P90 (%)",
+            "Ratio_P95": "Historical Ratio P95 (%)",
+            "Drop_Median": "Typical Viscosity Drop (s)",
+            "Drop_P10": "Viscosity Drop P10 (s)",
+            "Drop_P90": "Viscosity Drop P90 (s)",
+            "Drop_Max": "Max Historical Drop (s)",
+            "Sensitivity_Median": "Median Sensitivity (s/%)",
+            "Sensitivity_Std": "Sensitivity Std",
+            "Factor_kg_per_100kg_per_1s": "Factor (kg/100kg/1s)",
+            "Stage_1_Coeff": "Draft Stage 1 Coeff. (kg/100kg)",
+            "Stage_2_Coeff": "Draft Stage 2 Coeff. (kg/100kg)",
+            "Fine_Adjust_Coeff": "Draft Fine Adjust Coeff. (kg/100kg)",
+            "Max_Total_Coeff": "Draft Max Total Coeff. (kg/100kg)",
+        })
+
+        display_cols = [
+            "Resin", "Vendor", "Solvent Type", "Initial Viscosity Range",
+            "Typical Target V (s)", "Historical After V P10 (s)", "Historical After V P90 (s)",
+            "Historical Ratio Median (%)", "Historical Ratio P90 (%)", "Historical Ratio P95 (%)",
+            "Typical Viscosity Drop (s)", "Viscosity Drop P10 (s)", "Viscosity Drop P90 (s)",
+            "Max Historical Drop (s)", "Median Sensitivity (s/%)", "Sensitivity Std",
+            "Factor (kg/100kg/1s)", "Draft Stage 1 Coeff. (kg/100kg)",
+            "Draft Stage 2 Coeff. (kg/100kg)", "Draft Fine Adjust Coeff. (kg/100kg)",
+            "Draft Max Total Coeff. (kg/100kg)", "Records", "Data_Confidence", "Confidence_Icon",
         ]
-    ).drop(columns=["Zone_Sort"])
+        numeric_cols = [
+            c for c in display_cols
+            if c not in ["Resin", "Vendor", "Solvent Type", "Initial Viscosity Range", "Records", "Data_Confidence", "Confidence_Icon"]
+        ]
 
-    st.dataframe(
-        sop_display,
-        column_config={
-            col: st.column_config.NumberColumn(format="%.2f")
-            for col in numeric_columns
-        },
-        use_container_width=True,
-        hide_index=True
-    )
+        export_df = export_df[display_cols + ["Zone_Sort"]].copy()
+        export_df[numeric_cols] = export_df[numeric_cols].round(2)
+        export_df = export_df.sort_values(["Resin", "Vendor", "Solvent Type", "Zone_Sort"]).drop(columns=["Zone_Sort"])
 
-    # -------------------------------------------------
-    # [S13.04] CSV export
-    # -------------------------------------------------
-    csv = sop_display.to_csv(
-        index=False
-    ).encode("utf-8-sig")
+        st.dataframe(
+            export_df,
+            column_config={c: st.column_config.NumberColumn(format="%.2f") for c in numeric_cols},
+            use_container_width=True,
+            hide_index=True,
+        )
 
-    st.download_button(
-        label="📥 Download Full SOP Matrix as CSV",
-        data=csv,
-        file_name="All_Resin_Vendor_Solvent_SOP_Matrix.csv",
-        mime="text/csv"
-    )
-
-    st.caption(
-        "Important: This matrix is based on historical mixing records. "
-        "It is not yet a final quality-optimized SOP because gloss, ΔE, "
-        "film thickness, appearance defects, and PASS/NG results are "
-        "not included in the current source data."
-    )
+        st.download_button(
+            "📥 Download Full SOP Matrix as CSV",
+            data=export_df.to_csv(index=False).encode("utf-8-sig"),
+            file_name="All_Resin_Vendor_Solvent_SOP_Matrix.csv",
+            mime="text/csv",
+        )
