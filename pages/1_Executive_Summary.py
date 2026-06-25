@@ -1115,7 +1115,8 @@ with tab4:
     matrix_df = master_df.copy()
 
     # =====================================================
-    # 1. HELPER: DISPLAY ACTUAL RANGE
+    # 1. HELPER: DISPLAY ACTUAL FINAL VISCOSITY RANGE
+    # P25-P75; if identical, show one actual value only
     # =====================================================
     def format_actual_range(p25, p75, unit="秒"):
         if pd.isna(p25) or pd.isna(p75):
@@ -1145,14 +1146,22 @@ with tab4:
     ).agg(
         History_Batches=("塗料批號", "nunique"),
 
-        # Historical paint quantity for similar batches
+        # Historical median paint quantity for similar batches
         Ref_Paint_Weight_kg=("塗料重量", "median"),
 
+        # Historical median initial viscosity
         Ref_Start_Visc=("黏度(秒)", "median"),
 
-        Ref_Final_Visc=("黏度(秒)_1", "median"),
-        Final_Visc_P25=("黏度(秒)_1", lambda x: x.quantile(0.25)),
-        Final_Visc_P75=("黏度(秒)_1", lambda x: x.quantile(0.75)),
+        # Historical final viscosity distribution
+        Final_Visc_P25=(
+            "黏度(秒)_1",
+            lambda x: x.quantile(0.25)
+        ),
+
+        Final_Visc_P75=(
+            "黏度(秒)_1",
+            lambda x: x.quantile(0.75)
+        ),
 
         # Historical median actual solvent addition
         Ref_Solvent_Add_kg=("添加重量", "median"),
@@ -1175,7 +1184,7 @@ with tab4:
         )
     ).reset_index()
 
-    # Minimum historical sample size
+    # Each SOP row requires at least 5 historical batches
     worker_sop = worker_sop[
         worker_sop["History_Batches"] >= 5
     ].copy()
@@ -1188,10 +1197,9 @@ with tab4:
         st.stop()
 
     # =====================================================
-    # 3. FINAL VISCOSITY ACTUAL RANGE
-    # P25-P75; if identical, show one actual value only
+    # 3. FINAL VISCOSITY P25-P75 DISPLAY
     # =====================================================
-    worker_sop["Final_Visc_Actual_Range"] = worker_sop.apply(
+    worker_sop["Final_Visc_P25_P75"] = worker_sop.apply(
         lambda row: format_actual_range(
             row["Final_Visc_P25"],
             row["Final_Visc_P75"]
@@ -1238,9 +1246,9 @@ with tab4:
         how="left"
     )
 
-    # If no clear saturation point is detected:
-    # P90 = warning ratio
-    # P95 = stop ratio
+    # When no statistically clear saturation point is found:
+    # P90 = warning guardrail
+    # P95 = stop guardrail
     worker_sop["Saturation_Warning_Ratio"] = (
         worker_sop["Saturation_Warning_Ratio"]
         .fillna(worker_sop["Ratio_P90"])
@@ -1267,15 +1275,13 @@ with tab4:
             "Initial_Viscosity_Zone",
 
             "History_Batches",
-
             "Ref_Start_Visc",
 
             "Ref_Paint_Weight_kg",
             "Ref_Solvent_Add_kg",
             "Ref_Solvent_Ratio",
 
-            "Final_Visc_Actual_Range",
-            "Ref_Final_Visc",
+            "Final_Visc_P25_P75",
 
             "Saturation_Warning_Ratio",
             "Saturation_Stop_Ratio"
@@ -1290,15 +1296,13 @@ with tab4:
             "Initial_Viscosity_Zone": "初始黏度區間",
 
             "History_Batches": "歷史批數",
-
             "Ref_Start_Visc": "參考起始黏度(秒)",
 
             "Ref_Paint_Weight_kg": "參考塗料使用量(kg)",
             "Ref_Solvent_Add_kg": "參考稀釋劑添加量(kg)",
             "Ref_Solvent_Ratio": "參考稀釋劑添加比例(%)",
 
-            "Final_Visc_Actual_Range": "最終黏度實際範圍",
-            "Ref_Final_Visc": "參考最終黏度(秒)",
+            "Final_Visc_P25_P75": "歷史最終黏度範圍 (P25–P75)",
 
             "Saturation_Warning_Ratio": "飽和警戒比例(%)",
             "Saturation_Stop_Ratio": "飽和停止比例(%)"
@@ -1338,10 +1342,6 @@ with tab4:
                 format="%.2f%%"
             ),
 
-            "參考最終黏度(秒)": st.column_config.NumberColumn(
-                format="%.1f 秒"
-            ),
-
             "飽和警戒比例(%)": st.column_config.NumberColumn(
                 format="%.2f%%"
             ),
@@ -1355,9 +1355,8 @@ with tab4:
     )
 
     st.caption(
-        "最終黏度實際範圍為歷史資料P25-P75；若資料只有單一值，"
-        "將直接顯示該實際值。參考稀釋劑添加比例與Tab 1的"
-        "Solvent Blending Ratio一致。"
+        "「歷史最終黏度範圍 (P25–P75)」表示相同條件下歷史最終黏度的中間50%分布，"
+        "非產品規格上下限。參考稀釋劑添加比例與Tab 1的Solvent Blending Ratio一致。"
     )
 
     csv_export = worker_output.to_csv(
