@@ -1,8 +1,8 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
+from io import BytesIO
+from docx import Document
+from docx.shared import Inches, Pt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.section import WD_ORIENT
 
 # --- 1. PAGE CONFIGURATION ---
 st.set_page_config(page_title="Intelligent SOP System", page_icon="⚙️", layout="wide")
@@ -155,15 +155,221 @@ with tab1:
         hovertemplate='<b>Zone: %{customdata[2]}</b><br>Solvent Ratio: %{x:.2f}%<br>Initial Visc (Before): %{customdata[0]:.1f}s<br>Final Visc (After): %{y:.1f}s 🌟<br>Viscosity Drop (Delta V): %{customdata[1]:.1f}s<extra></extra>'
     ))
 
-    fig_scatter.update_layout(
-        plot_bgcolor='white', height=550, margin=dict(l=40, r=40, t=30, b=30),
-        xaxis=dict(title="Solvent Blending Ratio (%)", showgrid=True, gridcolor='#EAEAEA', linecolor='black'),
-        yaxis=dict(title="Viscosity (seconds)", showgrid=True, gridcolor='#EAEAEA', linecolor='black'),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
-        hovermode='closest'
-    )
-    st.plotly_chart(fig_scatter, use_container_width=True)
+    chart_title = (
+    f"Viscosity Transition by Solvent Ratio<br>"
+    f"<sup>Resin: {selected_resin} | "
+    f"Vendor: {selected_vendor} | "
+    f"Solvent: {selected_solvent}</sup>"
+)
 
+fig_scatter.update_layout(
+    title=dict(
+        text=chart_title,
+        x=0.5,
+        xanchor="center",
+        y=0.97,
+        yanchor="top",
+        font=dict(size=18, color="#1F3855")
+    ),
+    plot_bgcolor="white",
+    paper_bgcolor="white",
+    height=620,
+    margin=dict(l=70, r=50, t=95, b=70),
+
+    xaxis=dict(
+        title="Solvent Blending Ratio (%)",
+        showgrid=True,
+        gridcolor="#EAEAEA",
+        linecolor="black",
+        linewidth=1.5,
+        showline=True,
+        mirror=True,
+        ticks="outside"
+    ),
+
+    yaxis=dict(
+        title="Viscosity (seconds)",
+        showgrid=True,
+        gridcolor="#EAEAEA",
+        linecolor="black",
+        linewidth=1.5,
+        showline=True,
+        mirror=True,
+        ticks="outside"
+    ),
+
+    legend=dict(
+        orientation="h",
+        yanchor="bottom",
+        y=1.07,
+        xanchor="center",
+        x=0.5
+    ),
+
+    hovermode="closest",
+
+    # Khung bao quanh vùng biểu đồ
+    shapes=[
+        dict(
+            type="rect",
+            xref="paper",
+            yref="paper",
+            x0=0,
+            y0=0,
+            x1=1,
+            y1=1,
+            line=dict(
+                color="#1F3855",
+                width=1.5
+            ),
+            fillcolor="rgba(0,0,0,0)"
+        )
+    ]
+)
+    st.plotly_chart(fig_scatter, use_container_width=True)
+# =========================================================
+# EXPORT HISTORICAL CHART TO WORD
+# =========================================================
+def export_chart_to_word(
+    fig,
+    selected_resin,
+    selected_vendor,
+    selected_solvent,
+    system_df
+):
+    doc = Document()
+
+    # Landscape page
+    section = doc.sections[0]
+    section.orientation = WD_ORIENT.LANDSCAPE
+    section.page_width = Inches(11.69)
+    section.page_height = Inches(8.27)
+
+    section.top_margin = Inches(0.45)
+    section.bottom_margin = Inches(0.45)
+    section.left_margin = Inches(0.45)
+    section.right_margin = Inches(0.45)
+
+    # Main title
+    title = doc.add_paragraph()
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    title_run = title.add_run(
+        "Historical Viscosity Transition Analysis"
+    )
+    title_run.bold = True
+    title_run.font.size = Pt(18)
+
+    # Subtitle
+    subtitle = doc.add_paragraph()
+    subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    subtitle_run = subtitle.add_run(
+        f"Resin: {selected_resin} | "
+        f"Vendor: {selected_vendor} | "
+        f"Solvent Type: {selected_solvent}"
+    )
+    subtitle_run.font.size = Pt(10)
+
+    doc.add_paragraph("")
+
+    # Summary table
+    table = doc.add_table(rows=2, cols=4)
+    table.style = "Table Grid"
+
+    headers = [
+        "Valid Batches",
+        "Median Sensitivity",
+        "P10-P90 Ratio Range",
+        "Maximum Viscosity Drop"
+    ]
+
+    values = [
+        f"{len(system_df):,}",
+        f"{system_df['Sensitivity'].median():.2f} s/%",
+        (
+            f"{system_df['Solvent_Ratio_Percent'].quantile(0.10):.1f}%"
+            f" - "
+            f"{system_df['Solvent_Ratio_Percent'].quantile(0.90):.1f}%"
+        ),
+        f"{system_df['Delta_V'].max():.1f} s"
+    ]
+
+    for i, header in enumerate(headers):
+        cell = table.cell(0, i)
+        cell.text = header
+
+        for paragraph in cell.paragraphs:
+            for run in paragraph.runs:
+                run.bold = True
+                run.font.size = Pt(9)
+
+    for i, value in enumerate(values):
+        cell = table.cell(1, i)
+        cell.text = value
+
+        for paragraph in cell.paragraphs:
+            for run in paragraph.runs:
+                run.font.size = Pt(9)
+
+    doc.add_paragraph("")
+
+    # Export Plotly chart to PNG
+    chart_png = fig.to_image(
+        format="png",
+        width=1500,
+        height=850,
+        scale=2
+    )
+
+    chart_stream = BytesIO(chart_png)
+
+    chart_paragraph = doc.add_paragraph()
+    chart_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    chart_paragraph.add_run().add_picture(
+        chart_stream,
+        width=Inches(10.4)
+    )
+
+    note = doc.add_paragraph()
+    note_run = note.add_run(
+        "Note: Orange points represent viscosity before solvent addition. "
+        "Blue points represent viscosity after solvent addition. "
+        "The dotted line connects the same mixing batch."
+    )
+    note_run.italic = True
+    note_run.font.size = Pt(9)
+
+    output = BytesIO()
+    doc.save(output)
+    output.seek(0)
+
+    return output.getvalue()
+
+
+word_data = export_chart_to_word(
+    fig=fig_scatter,
+    selected_resin=selected_resin,
+    selected_vendor=selected_vendor,
+    selected_solvent=selected_solvent,
+    system_df=system_df
+)
+
+file_name = (
+    f"Viscosity_Transition_"
+    f"{selected_resin}_{selected_vendor}_{selected_solvent}.docx"
+)
+
+st.download_button(
+    label="📄 Export Historical Chart to Word",
+    data=word_data,
+    file_name=file_name,
+    mime=(
+        "application/vnd.openxmlformats-officedocument."
+        "wordprocessingml.document"
+    )
+)
 
 # ==========================================
 # TAB 2: SOP RECOMMENDATION (Execution Engine)
