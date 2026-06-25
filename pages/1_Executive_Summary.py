@@ -480,23 +480,7 @@ with tab1:
             xanchor="center",
             x=0.5
         ),
-        hovermode="closest",
-        shapes=[
-            dict(
-                type="rect",
-                xref="paper",
-                yref="paper",
-                x0=0,
-                y0=0,
-                x1=1,
-                y1=1,
-                line=dict(
-                    color="#1F3855",
-                    width=1.5
-                ),
-                fillcolor="rgba(0,0,0,0)"
-            )
-        ]
+        hovermode="closest",        
     )
 
     st.plotly_chart(fig_scatter, use_container_width=True)
