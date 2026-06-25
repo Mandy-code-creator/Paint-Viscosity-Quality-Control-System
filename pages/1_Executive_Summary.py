@@ -335,7 +335,7 @@ with tab_sop:
 # =========================================================
 # [S12] SOP RECOMMENDATION
 # =========================================================
-with tab_recommend:
+with tab_sop:
     st.markdown("### 🧠 Solvent Recommendation")
 
     if filtered_data.empty or filtered_sop.empty:
