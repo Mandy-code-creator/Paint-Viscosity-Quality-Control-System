@@ -1113,8 +1113,18 @@ with tab4:
         "Do not multiply by Order Weight alone."
     )
 
+    st.warning(
+        "⚠️ **Operator Rule:** When the accumulated solvent ratio reaches "
+        "**Warning Ratio**, stop and re-measure viscosity. When it reaches "
+        "**Stop / Engineer Approval Ratio**, do not add more solvent without "
+        "Process Engineer approval."
+    )
+
     matrix_df = master_df.copy()
 
+    # -----------------------------------------------------
+    # 1. ORIGINAL SOP MATRIX LOGIC
+    # -----------------------------------------------------
     sop_grouped = matrix_df.groupby(
         [
             "Resin",
@@ -1133,12 +1143,94 @@ with tab4:
     sop_grouped = sop_grouped[
         (sop_grouped["Valid_Batches"] >= 5)
         & (sop_grouped["Optimal_Sens"] > 0)
-    ]
+    ].copy()
 
     sop_grouped["Practical_Factor"] = (
         10.0 / sop_grouped["Optimal_Sens"]
     )
 
+    # -----------------------------------------------------
+    # 2. BUILD SATURATION THRESHOLDS
+    #    Per Resin + Vendor + Solvent
+    # -----------------------------------------------------
+    saturation_summary = []
+
+    system_keys = matrix_df[
+        ["Resin", "Vendor", "Solvent_Type"]
+    ].drop_duplicates()
+
+    for _, system_row in system_keys.iterrows():
+        resin_value = system_row["Resin"]
+        vendor_value = system_row["Vendor"]
+        solvent_value = system_row["Solvent_Type"]
+
+        temp_system_df = matrix_df[
+            (matrix_df["Resin"] == resin_value)
+            & (matrix_df["Vendor"] == vendor_value)
+            & (matrix_df["Solvent_Type"] == solvent_value)
+        ].copy()
+
+        temp_saturation_result = build_saturation_profile(
+            temp_system_df
+        )
+
+        warning_ratio = temp_saturation_result["warning_ratio"]
+        saturation_limit = temp_saturation_result["saturation_ratio"]
+
+        saturation_summary.append({
+            "Resin": resin_value,
+            "Vendor": vendor_value,
+            "Solvent_Type": solvent_value,
+            "Warning_Ratio": warning_ratio,
+            "Saturation_Stop_Limit": saturation_limit
+        })
+
+    saturation_summary_df = pd.DataFrame(saturation_summary)
+
+    # -----------------------------------------------------
+    # 3. MERGE SATURATION LIMITS INTO SOP TABLE
+    # -----------------------------------------------------
+    sop_grouped = sop_grouped.merge(
+        saturation_summary_df,
+        on=["Resin", "Vendor", "Solvent_Type"],
+        how="left"
+    )
+
+    # If no saturation threshold was found,
+    # use P90 as warning and P95 as stop safeguard.
+    system_ratio_limits = matrix_df.groupby(
+        ["Resin", "Vendor", "Solvent_Type"],
+        observed=False
+    ).agg(
+        Fallback_P90=(
+            "Solvent_Ratio_Percent",
+            lambda x: x.quantile(0.90)
+        ),
+        Fallback_P95=(
+            "Solvent_Ratio_Percent",
+            lambda x: x.quantile(0.95)
+        )
+    ).reset_index()
+
+    sop_grouped = sop_grouped.merge(
+        system_ratio_limits,
+        on=["Resin", "Vendor", "Solvent_Type"],
+        how="left"
+    )
+
+    sop_grouped["Warning_Ratio"] = (
+        sop_grouped["Warning_Ratio"]
+        .fillna(sop_grouped["Fallback_P90"])
+    )
+
+    sop_grouped["Saturation_Stop_Limit"] = (
+        sop_grouped["Saturation_Stop_Limit"]
+        .fillna(sop_grouped["Fallback_P95"])
+    )
+
+    # -----------------------------------------------------
+    # 4. FINAL OPERATOR SOP TABLE
+    # -----------------------------------------------------
     sop_output = sop_grouped[
         [
             "Resin",
@@ -1148,6 +1240,8 @@ with tab4:
             "Valid_Batches",
             "Target_Visc",
             "Practical_Factor",
+            "Warning_Ratio",
+            "Saturation_Stop_Limit",
             "Max_Safe_Ratio"
         ]
     ].copy()
@@ -1161,20 +1255,26 @@ with tab4:
             "Practical_Factor": (
                 "Add kg (per 100kg Dilution Base / 10s drop)"
             ),
-            "Max_Safe_Ratio": "Max Safe Limit (%)"
+            "Warning_Ratio": "Warning Ratio (%)",
+            "Saturation_Stop_Limit": (
+                "Stop / Engineer Approval (%)"
+            ),
+            "Max_Safe_Ratio": "Historical Max Ratio (%)"
         },
         inplace=True
     )
 
+    sop_output = sop_output.sort_values(
+        by=[
+            "Resin",
+            "Vendor",
+            "Solvent",
+            "Input Viscosity Range"
+        ]
+    )
+
     st.dataframe(
-        sop_output.sort_values(
-            by=[
-                "Resin",
-                "Vendor",
-                "Solvent",
-                "Input Viscosity Range"
-            ]
-        ),
+        sop_output,
         column_config={
             "Valid Batches": st.column_config.NumberColumn(
                 format="%d"
@@ -1183,9 +1283,19 @@ with tab4:
                 format="%.1f"
             ),
             "Add kg (per 100kg Dilution Base / 10s drop)": (
-                st.column_config.NumberColumn(format="%.2f kg")
+                st.column_config.NumberColumn(
+                    format="%.2f kg"
+                )
             ),
-            "Max Safe Limit (%)": st.column_config.NumberColumn(
+            "Warning Ratio (%)": st.column_config.NumberColumn(
+                format="%.1f%%"
+            ),
+            "Stop / Engineer Approval (%)": (
+                st.column_config.NumberColumn(
+                    format="%.1f%%"
+                )
+            ),
+            "Historical Max Ratio (%)": st.column_config.NumberColumn(
                 format="%.1f%%"
             )
         },
@@ -1193,7 +1303,7 @@ with tab4:
         hide_index=True
     )
 
-    csv_export = sop_output.to_csv(index=False).encode("utf-8")
+    csv_export = sop_output.to_csv(index=False).encode("utf-8-sig")
 
     st.download_button(
         "📥 Download Printable SOP Matrix (CSV)",
