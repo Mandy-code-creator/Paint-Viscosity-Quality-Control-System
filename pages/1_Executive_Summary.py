@@ -51,22 +51,29 @@ def process_data(df):
         else: return '>130 s'
     data['Initial_Viscosity_Zone'] = data['黏度(秒)'].apply(assign_zone)
     
-    # Logic: P1-P99 Outlier Filtering (Per Group, n>=30)
-    group_counts = data.groupby(['Resin', 'Vendor', 'Solvent_Type'])['Sensitivity'].transform('count')
+    # 🚨 STRICT STATISTICAL RULE: n >= 30 BATCHES 🚨
+    # Count unique valid batches per system (Resin + Vendor + Solvent)
+    system_batch_counts = data.groupby(['Resin', 'Vendor', 'Solvent_Type'])['塗料批號'].transform('nunique')
+    
+    # Purge any system with less than 30 batches (Statistically Insignificant)
+    data = data[system_batch_counts >= 30].copy()
+    
+    if data.empty: 
+        return data
+
+    # Logic: P1-P99 Outlier Filtering 
+    # (Safe to apply globally now since ALL remaining groups strictly have >= 30 batches)
     q01 = data.groupby(['Resin', 'Vendor', 'Solvent_Type'])['Sensitivity'].transform(lambda x: x.quantile(0.01))
     q99 = data.groupby(['Resin', 'Vendor', 'Solvent_Type'])['Sensitivity'].transform(lambda x: x.quantile(0.99))
     
-    mask_large_group = group_counts >= 30
-    mask_in_bounds = data['Sensitivity'].between(q01, q99)
-    
-    data_clean = data[(~mask_large_group) | (mask_large_group & mask_in_bounds)].copy()
+    data_clean = data[data['Sensitivity'].between(q01, q99)].copy()
     
     return data_clean
 
 master_df = process_data(st.session_state['group_a_data'])
 
 if master_df.empty or 'Resin' not in master_df.columns:
-    st.error("⚠️ No valid historical data available after processing.")
+    st.error("⚠️ No valid historical data available. All systems failed to meet the strict statistical requirement (n ≥ 30 batches) or basic SOP logic constraints.")
     st.stop()
 
 # --- STATE MANAGEMENT ---
@@ -79,7 +86,7 @@ def reset_execution_states():
 
 # --- GLOBAL FILTERS ---
 st.title("⚙️ AI-Assisted Viscosity Optimization System")
-st.markdown("Automated recommendation engine governed by historical safety thresholds and approved target specifications.")
+st.markdown("Automated recommendation engine governed by historical safety thresholds, strictly filtered for statistical significance (n ≥ 30).")
 st.markdown("---")
 
 col_f1, col_f2, col_f3 = st.columns(3)
@@ -113,7 +120,7 @@ with tab1:
     st.markdown("Validate data stability before enforcing automated SOPs. *Hover over points to trace individual batches from their Initial (Orange) to Final (Blue) state.*")
     
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Valid Batches", len(system_df))
+    c1.metric("Valid Batches (n ≥ 30)", len(system_df))
     c2.metric("Median Sensitivity", f"{system_df['Sensitivity'].median():.2f} s/%")
     c3.metric("P10 - P90 Ratio Range", f"{system_df['Solvent_Ratio_Percent'].quantile(0.1):.1f}% - {system_df['Solvent_Ratio_Percent'].quantile(0.9):.1f}%")
     c4.metric("Max Drop (Delta V)", f"{system_df['Delta_V'].max():.1f} s")
@@ -318,60 +325,49 @@ with tab3:
         use_container_width=True, hide_index=True
     )
 
+
 # ==========================================
 # TAB 4: MASTER SHOP FLOOR SOP (Printable Table)
 # ==========================================
 with tab4:
     st.markdown("### 🖨️ Master Shop Floor SOP Matrix")
-    st.markdown("*A simplified, global lookup table covering ALL approved systems. Designed to be printed and attached to mixing stations for quick operator reference.*")
+    st.markdown("*A simplified, global lookup table covering ALL statistically validated systems (n ≥ 30). Designed to be printed and attached to mixing stations for quick operator reference.*")
+    
+    st.info("💡 **DILUTION BASE RULE:** Always calculate solvent based on **Dilution Base (Order Weight + 120kg minimum operating paint)**. Do not multiply by Order Weight alone.")
 
+    # Tận dụng dữ liệu đã được thanh lọc n>=30 và P1-P99
     matrix_df = master_df.copy()
 
-    # Clean Application
-    def get_clean_app(code_str):
-        if not isinstance(code_str, str) or len(str(code_str).strip()) < 4: return 'General Usage'
-        char_4 = str(code_str).strip().upper()[3]
-        f_map = {'B': 'Anti-Bacteria', 'C': 'High-Corrosion', 'D': 'Anti-Dust', 'E': 'Anti-Electrostatics', 'F': 'High Formability', 'H': 'Thermal Insulation', 'K': 'Anti-Stain', 'L': 'Whiteboard', 'M': 'Mirror', 'N': 'Neo Matt', 'P': 'Primer', 'R': 'Repaint', 'S': 'Shutter', 'T': 'Texture', 'V': 'Variety', 'U': 'Ultra-High Formability', 'W': 'Wrinkle'}
-        return 'General Usage' if char_4.isdigit() else f_map.get(char_4, 'General Usage')
-
-    if '塗料代碼' in matrix_df.columns:
-        matrix_df['Application'] = matrix_df['塗料代碼'].apply(get_clean_app)
-    else:
-        matrix_df['Application'] = 'General Usage'
-
     # Group and aggregate
-    sop_grouped = matrix_df.groupby(['Resin', 'Vendor', 'Application', 'Solvent_Type', 'Initial_Viscosity_Zone'], observed=False).agg(
+    sop_grouped = matrix_df.groupby(['Resin', 'Vendor', 'Solvent_Type', 'Initial_Viscosity_Zone'], observed=False).agg(
         Valid_Batches=('塗料批號', 'nunique'),
         Target_Visc=('黏度(秒)_1', 'median'),
         Optimal_Sens=('Sensitivity', 'median'),
         Max_Safe_Ratio=('Solvent_Ratio_Percent', 'max')
     ).reset_index()
 
-    # Safety Filter: Only show reliably modeled groups
+    # Safety Filter: Only show reliably modeled zones within the validated systems
     sop_grouped = sop_grouped[(sop_grouped['Valid_Batches'] >= 5) & (sop_grouped['Optimal_Sens'] > 0)]
 
     # Calculate Practical Shop-Floor Factor:
-    # How many kg of solvent to add per 100kg of base paint to drop exactly 10 seconds of viscosity.
-    # Logic: Required Ratio (%) = Drop / Sensitivity = 10 / S
-    # Solvent (kg) for 100kg paint = 100 * (10 / S) / 100 = 10 / S
     sop_grouped['Practical_Factor'] = 10.0 / sop_grouped['Optimal_Sens']
 
     # Format output table
-    sop_output = sop_grouped[['Resin', 'Vendor', 'Application', 'Solvent_Type', 'Initial_Viscosity_Zone', 'Target_Visc', 'Practical_Factor', 'Max_Safe_Ratio']].copy()
+    sop_output = sop_grouped[['Resin', 'Vendor', 'Solvent_Type', 'Initial_Viscosity_Zone', 'Target_Visc', 'Practical_Factor', 'Max_Safe_Ratio']].copy()
     
     sop_output.rename(columns={
         'Solvent_Type': 'Solvent',
         'Initial_Viscosity_Zone': 'Input Viscosity Range',
         'Target_Visc': 'Typical Target (s)',
-        'Practical_Factor': 'Add kg (per 100kg paint / 10s drop)',
+        'Practical_Factor': 'Add kg (per 100kg Dilution Base / 10s drop)',
         'Max_Safe_Ratio': 'Max Safe Limit (%)'
     }, inplace=True)
 
     st.dataframe(
-        sop_output.sort_values(by=['Resin', 'Vendor', 'Input Viscosity Range']),
+        sop_output.sort_values(by=['Resin', 'Vendor', 'Solvent', 'Input Viscosity Range']),
         column_config={
             "Typical Target (s)": st.column_config.NumberColumn(format="%.1f"),
-            "Add kg (per 100kg paint / 10s drop)": st.column_config.NumberColumn(format="%.2f kg"),
+            "Add kg (per 100kg Dilution Base / 10s drop)": st.column_config.NumberColumn(format="%.2f kg"),
             "Max Safe Limit (%)": st.column_config.NumberColumn(format="%.1f%%")
         },
         use_container_width=True, hide_index=True
@@ -381,6 +377,6 @@ with tab4:
     st.download_button(
         "📥 Download Printable SOP Matrix (CSV)", 
         data=csv_export, 
-        file_name="Shop_Floor_Master_SOP.csv", 
+        file_name="Shop_Floor_Master_SOP_Validated.csv", 
         mime='text/csv'
     )
