@@ -249,7 +249,7 @@ tab_analysis, tab_sop, tab_matrix, tab_worker_sop = st.tabs([
 # [S11] HISTORICAL ANALYSIS
 # No boxplots: Scatter + Median/P10-P90 bar charts
 # =========================================================
-with tab_analysis:
+with tab_sop:
     st.markdown("### 📊 Historical Dilution Behavior")
     if filtered_data.empty:
         st.info("No valid records for the selected group.")
