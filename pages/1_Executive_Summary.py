@@ -1097,15 +1097,14 @@ with tab3:
 
 # =========================================================
 # =========================================================
-# =========================================================
 # TAB 4: MASTER SHOP FLOOR REFERENCE TABLE
 # =========================================================
 with tab4:
     st.markdown("### 🖨️ 現場歷史加料參考表")
 
     st.warning(
-        "請依樹脂種類、塗料供應商、稀釋劑種類及初始黏度區間查詢。"
-        "添加後請混合5分鐘並量測黏度，不得超過飽和停止比例。"
+        "依相同條件查詢 → 添加參考稀釋劑量 → 混合5分鐘 → 量測黏度。"
+        "不得超過飽和停止比例。"
     )
 
     st.caption(
@@ -1117,7 +1116,6 @@ with tab4:
 
     # =====================================================
     # 1. HELPER: DISPLAY ACTUAL RANGE
-    # If P25 = P75, show only one actual value.
     # =====================================================
     def format_actual_range(p25, p75, unit="秒"):
         if pd.isna(p25) or pd.isna(p75):
@@ -1155,7 +1153,7 @@ with tab4:
         Final_Visc_P25=("黏度(秒)_1", lambda x: x.quantile(0.25)),
         Final_Visc_P75=("黏度(秒)_1", lambda x: x.quantile(0.75)),
 
-        # Historical median actual solvent quantity
+        # Historical median actual solvent addition
         Ref_Solvent_Add_kg=("添加重量", "median"),
 
         # Same definition as Tab 1:
@@ -1189,7 +1187,7 @@ with tab4:
         st.stop()
 
     # =====================================================
-    # 3. ACTUAL BEFORE / AFTER REFERENCE RANGE
+    # 3. ACTUAL BEFORE / AFTER RANGE
     # =====================================================
     worker_sop["Start_Visc_Actual_Range"] = worker_sop.apply(
         lambda row: format_actual_range(
@@ -1265,19 +1263,7 @@ with tab4:
     )
 
     # =====================================================
-    # 5. OPERATION GUIDANCE
-    # =====================================================
-    worker_sop["Operation_Instruction"] = (
-        "依參考添加量添加 → 混合5分鐘 → 量測黏度"
-    )
-
-    worker_sop["Result_Check"] = (
-        "量測後黏度應接近參考最終黏度；"
-        "偏差過大時請確認後再追加。"
-    )
-
-    # =====================================================
-    # 6. FINAL OUTPUT TABLE
+    # 5. FINAL OUTPUT TABLE
     # =====================================================
     worker_output = worker_sop[
         [
@@ -1298,10 +1284,7 @@ with tab4:
             "Ref_Final_Visc",
 
             "Saturation_Warning_Ratio",
-            "Saturation_Stop_Ratio",
-
-            "Operation_Instruction",
-            "Result_Check"
+            "Saturation_Stop_Ratio"
         ]
     ].copy()
 
@@ -1324,10 +1307,7 @@ with tab4:
             "Ref_Final_Visc": "參考最終黏度(秒)",
 
             "Saturation_Warning_Ratio": "飽和警戒比例(%)",
-            "Saturation_Stop_Ratio": "飽和停止比例(%)",
-
-            "Operation_Instruction": "操作指示",
-            "Result_Check": "結果判定"
+            "Saturation_Stop_Ratio": "飽和停止比例(%)"
         },
         inplace=True
     )
@@ -1377,9 +1357,9 @@ with tab4:
     )
 
     st.caption(
-        "最終黏度實際範圍為歷史資料P25-P75；"
-        "若資料只有單一值，將直接顯示該實際值。"
-        "參考稀釋劑添加比例與Tab 1的Solvent Blending Ratio一致。"
+        "最終黏度實際範圍為歷史資料P25-P75；若資料只有單一值，"
+        "將直接顯示該實際值。參考稀釋劑添加比例與Tab 1的"
+        "Solvent Blending Ratio一致。"
     )
 
     csv_export = worker_output.to_csv(
