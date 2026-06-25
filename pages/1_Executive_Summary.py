@@ -12,7 +12,7 @@ if 'raw_data_loaded' not in st.session_state or not st.session_state['raw_data_l
     st.warning("⚠️ Please upload data on the main page first.")
     st.stop()
 
-# --- 2. DATA PROCESSING & CLEANSING (LOGIC 2 & 4 & 6) ---
+# --- 2. DATA PROCESSING & CLEANSING ---
 @st.cache_data
 def process_data(df):
     data = df.copy()
@@ -20,7 +20,7 @@ def process_data(df):
     if data.empty: 
         return data
 
-    # Logic 2: Filter Valid Group A Records
+    # Logic: Filter Valid Group A Records
     data = data[
         (data['添加重量'] > 0) & 
         (data['塗料重量'] > 0) & 
@@ -37,13 +37,12 @@ def process_data(df):
     if data.empty: 
         return data
     
-    # Logic 4: Standard Formulas for Historical Data
-    # Minimum Operating Paint = 120 kg
-    data['Dilution_Base'] = data['塗料重量'] + 120
+    # Logic: Standard Formulas for Historical Data
+    data['Dilution_Base'] = data['塗料重量'] + 120 # Operating paint minimum
     data['Solvent_Ratio_Percent'] = (data['添加重量'] / data['Dilution_Base']) * 100
     data['Sensitivity'] = data['Delta_V'] / data['Solvent_Ratio_Percent'].replace(0, np.nan)
     
-    # Logic 3: Viscosity Zones
+    # Logic: Viscosity Zones
     def assign_zone(v):
         if v <= 70: return '<=70 s'
         elif v <= 90: return '71-90 s'
@@ -52,8 +51,7 @@ def process_data(df):
         else: return '>130 s'
     data['Initial_Viscosity_Zone'] = data['黏度(秒)'].apply(assign_zone)
     
-    # Logic 6: P1-P99 Outlier Filtering (Per Group, n>=30)
-    # ĐÃ SỬA LỖI PANDAS: Dùng transform() thay vì apply() để chống mất cột (KeyError)
+    # Logic: P1-P99 Outlier Filtering (Per Group, n>=30)
     group_counts = data.groupby(['Resin', 'Vendor', 'Solvent_Type'])['Sensitivity'].transform('count')
     q01 = data.groupby(['Resin', 'Vendor', 'Solvent_Type'])['Sensitivity'].transform(lambda x: x.quantile(0.01))
     q99 = data.groupby(['Resin', 'Vendor', 'Solvent_Type'])['Sensitivity'].transform(lambda x: x.quantile(0.99))
@@ -61,19 +59,17 @@ def process_data(df):
     mask_large_group = group_counts >= 30
     mask_in_bounds = data['Sensitivity'].between(q01, q99)
     
-    # Chỉ lọc Outlier ở các nhóm có >= 30 record, các nhóm nhỏ giữ nguyên
     data_clean = data[(~mask_large_group) | (mask_large_group & mask_in_bounds)].copy()
     
     return data_clean
 
 master_df = process_data(st.session_state['group_a_data'])
 
-# Safety Check để chặn hoàn toàn lỗi KeyError nếu file tải lên bị rỗng sau khi lọc
 if master_df.empty or 'Resin' not in master_df.columns:
-    st.error("⚠️ No valid historical data available after processing. Please verify that your dataset meets all SOP logic requirements.")
+    st.error("⚠️ No valid historical data available after processing.")
     st.stop()
 
-# --- 12. SESSION STATE MANAGEMENT ---
+# --- STATE MANAGEMENT ---
 def reset_execution_states():
     st.session_state['exec_curr_visc'] = 0.0
     st.session_state['exec_lsl'] = 0.0
@@ -94,7 +90,6 @@ with col_f2:
 with col_f3:
     selected_solvent = st.selectbox("Select Solvent Type:", sorted(master_df[(master_df['Resin'] == selected_resin) & (master_df['Vendor'] == selected_vendor)]['Solvent_Type'].unique()), on_change=reset_execution_states)
 
-# Get filtered system data
 system_df = master_df[(master_df['Resin'] == selected_resin) & (master_df['Vendor'] == selected_vendor) & (master_df['Solvent_Type'] == selected_solvent)]
 
 if system_df.empty:
@@ -102,12 +97,12 @@ if system_df.empty:
     st.stop()
 
 
-# --- 11. TABS ARCHITECTURE ---
+# --- TABS ARCHITECTURE ---
 tab1, tab2, tab3, tab4 = st.tabs([
     "📊 Tab 1: Historical Analysis", 
     "🎯 Tab 2: SOP Recommendation", 
-    "📚 Tab 3: Engineering Matrix",
-    "📋 Tab 4: Work Instruction"
+    "🔬 Tab 3: Engineering Matrix",
+    "🖨️ Tab 4: Master Shop Floor SOP"
 ])
 
 # ==========================================
@@ -123,10 +118,8 @@ with tab1:
     c3.metric("P10 - P90 Ratio Range", f"{system_df['Solvent_Ratio_Percent'].quantile(0.1):.1f}% - {system_df['Solvent_Ratio_Percent'].quantile(0.9):.1f}%")
     c4.metric("Max Drop (Delta V)", f"{system_df['Delta_V'].max():.1f} s")
 
-    # ĐÃ XÓA BOXPLOT & PHÓNG TO BIỂU ĐỒ BEFORE VS AFTER TRÀN VIỀN
     fig_scatter = go.Figure()
 
-    # 1. Dotted lines (Nối điểm Trước và Sau)
     x_lines = []
     y_lines = []
     for _, row in system_df.iterrows():
@@ -139,30 +132,20 @@ with tab1:
         hoverinfo='skip', showlegend=False
     ))
 
-    # 2. Before Points (Màu Cam)
     fig_scatter.add_trace(go.Scatter(
         x=system_df['Solvent_Ratio_Percent'], y=system_df['黏度(秒)'], mode='markers',
         name="Initial Viscosity (Before)", 
         marker=dict(color='#ED7D31', size=9, line=dict(width=1, color='white')),
         customdata=system_df[['黏度(秒)_1', 'Delta_V', 'Initial_Viscosity_Zone']].values,
-        hovertemplate='<b>Zone: %{customdata[2]}</b><br>' +
-                      'Solvent Ratio: %{x:.2f}%<br>' +
-                      'Initial Visc (Before): %{y:.1f}s 🌟<br>' +
-                      'Final Visc (After): %{customdata[0]:.1f}s<br>' +
-                      'Viscosity Drop (Delta V): %{customdata[1]:.1f}s<extra></extra>'
+        hovertemplate='<b>Zone: %{customdata[2]}</b><br>Solvent Ratio: %{x:.2f}%<br>Initial Visc (Before): %{y:.1f}s 🌟<br>Final Visc (After): %{customdata[0]:.1f}s<br>Viscosity Drop (Delta V): %{customdata[1]:.1f}s<extra></extra>'
     ))
     
-    # 3. After Points (Màu Xanh Dương)
     fig_scatter.add_trace(go.Scatter(
         x=system_df['Solvent_Ratio_Percent'], y=system_df['黏度(秒)_1'], mode='markers',
         name="Final Viscosity (After)", 
         marker=dict(color='#4472C4', size=9, line=dict(width=1, color='white')),
         customdata=system_df[['黏度(秒)', 'Delta_V', 'Initial_Viscosity_Zone']].values,
-        hovertemplate='<b>Zone: %{customdata[2]}</b><br>' +
-                      'Solvent Ratio: %{x:.2f}%<br>' +
-                      'Initial Visc (Before): %{customdata[0]:.1f}s<br>' +
-                      'Final Visc (After): %{y:.1f}s 🌟<br>' +
-                      'Viscosity Drop (Delta V): %{customdata[1]:.1f}s<extra></extra>'
+        hovertemplate='<b>Zone: %{customdata[2]}</b><br>Solvent Ratio: %{x:.2f}%<br>Initial Visc (Before): %{customdata[0]:.1f}s<br>Final Visc (After): %{y:.1f}s 🌟<br>Viscosity Drop (Delta V): %{customdata[1]:.1f}s<extra></extra>'
     ))
 
     fig_scatter.update_layout(
@@ -172,7 +155,6 @@ with tab1:
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
         hovermode='closest'
     )
-    
     st.plotly_chart(fig_scatter, use_container_width=True)
 
 
@@ -182,7 +164,6 @@ with tab1:
 with tab2:
     st.markdown("### Process Parameter Configuration")
     
-    # Initialize inputs in session state if not exist
     for key in ['exec_curr_visc', 'exec_lsl', 'exec_usl', 'exec_order_weight']:
         if key not in st.session_state: st.session_state[key] = 0.0
 
@@ -200,7 +181,6 @@ with tab2:
         elif app_lsl >= app_usl:
             st.error("⚠️ LSL must be strictly less than USL.")
         else:
-            # 5. Target Center
             target_center = (app_lsl + app_usl) / 2
             required_drop = curr_visc - target_center
             
@@ -208,7 +188,6 @@ with tab2:
                 st.success("✅ Current viscosity is already within or below the target range. No solvent required.")
                 st.session_state['calculation_done'] = False
             else:
-                # 3 & 7. Dynamic Reference Logic
                 def get_zone_str(v):
                     if v <= 70: return '<=70 s'
                     elif v <= 90: return '71-90 s'
@@ -218,10 +197,6 @@ with tab2:
                 
                 curr_zone = get_zone_str(curr_visc)
                 zone_data = system_df[system_df['Initial_Viscosity_Zone'] == curr_zone]
-                
-                # Logic 7: Fallback and Confidence
-                ref_data = None
-                confidence = ""
                 
                 if len(zone_data) >= 5:
                     ref_data = zone_data
@@ -246,13 +221,11 @@ with tab2:
                     ref_drop_p90 = ref_data['Delta_V'].quantile(0.9)
                     ref_drop_max = ref_data['Delta_V'].max()
                     
-                    # Core Calculations
                     dilution_base = order_weight + 120
                     required_ratio = required_drop / ref_sensitivity
                     recommended_solvent = dilution_base * (required_ratio / 100)
                     max_total_solvent = dilution_base * (ref_ratio_p90 / 100)
                     
-                    # 8. Risk Control Logic
                     risk_status = ""
                     risk_color = ""
                     blocked = False
@@ -274,12 +247,6 @@ with tab2:
                         st.error("Execution automatically blocked by Safety Constraints. Please escalate to Process Engineer.")
                         st.session_state['calculation_done'] = False
                     else:
-                        # 9. Multi-stage Addition
-                        stage1 = recommended_solvent * 0.60
-                        stage2 = recommended_solvent * 0.25
-                        fine_adj = recommended_solvent * 0.15
-                        
-                        # Store in session state for Tab 4 (Worker Instruction)
                         st.session_state.update({
                             'calculation_done': True,
                             'calc_curr_visc': curr_visc,
@@ -294,16 +261,12 @@ with tab2:
                             'calc_records': record_count,
                             'calc_rec_solvent': recommended_solvent,
                             'calc_max_solvent': max_total_solvent,
-                            'calc_s1': stage1,
-                            'calc_s2': stage2,
-                            'calc_fa': fine_adj,
                             'sys_resin': selected_resin,
                             'sys_vendor': selected_vendor,
                             'sys_solvent': selected_solvent,
                             'calc_risk': risk_status
                         })
                         
-                        # Display Summary in Tab 2
                         col_r1, col_r2, col_r3 = st.columns(3)
                         col_r1.metric("Required Viscosity Drop", f"{required_drop:.1f} s")
                         col_r2.metric("Reference Sensitivity", f"{ref_sensitivity:.2f} s/%", help=f"Source: {ref_source} (n={record_count})")
@@ -311,13 +274,20 @@ with tab2:
                         
                         st.success(f"**Calculated Total Recommendation:** `{recommended_solvent:.2f} kg` (Absolute Limit: {max_total_solvent:.2f} kg)")
 
+                        st.markdown("### 🛠️ Execution Protocol (3-Stage Addition)")
+                        st.markdown(f"""
+                        * **Step 1 (60%):** Add `{recommended_solvent * 0.60:.2f} kg` -> Agitate & Measure.
+                        * **Step 2 (25%):** Add `{recommended_solvent * 0.25:.2f} kg` -> Only if > USL.
+                        * **Step 3 (15%):** Add up to `{recommended_solvent * 0.15:.2f} kg` -> Fine Micro-Adjustment.
+                        """)
+
 
 # ==========================================
 # TAB 3: ENGINEERING MATRIX (For Process Engineers)
 # ==========================================
 with tab3:
-    st.markdown("### 📚 Comprehensive Engineering Matrix")
-    st.markdown("Full operational baseline matrix for SOP documentation and safety boundary definitions.")
+    st.markdown("### 🔬 Comprehensive Engineering Matrix")
+    st.markdown("Full operational baseline matrix for safety boundary definitions. Filtered by selected Resin & Vendor.")
     
     def generate_matrix(df):
         grouped = df.groupby('Initial_Viscosity_Zone', observed=False).agg(
@@ -330,9 +300,6 @@ with tab3:
             Drop_P90=('Delta_V', lambda x: x.quantile(0.9)),
             Drop_Max=('Delta_V', 'max')
         ).reset_index()
-        
-        # Calculate Factor kg/100kg/1s
-        grouped['Factor (kg/100kg/1s)'] = grouped['Sensitivity_Median'].apply(lambda x: (1.0/x) if x>0 else 0)
         return grouped
         
     eng_matrix = generate_matrix(system_df)
@@ -346,60 +313,74 @@ with tab3:
             "Ratio_P95": st.column_config.NumberColumn("P95 Ratio %", format="%.2f"),
             "Drop_Median": st.column_config.NumberColumn("Median Drop (s)", format="%.1f"),
             "Drop_P90": st.column_config.NumberColumn("P90 Drop (s)", format="%.1f"),
-            "Drop_Max": st.column_config.NumberColumn("Max Drop (s)", format="%.1f"),
-            "Factor (kg/100kg/1s)": st.column_config.NumberColumn(format="%.3f")
+            "Drop_Max": st.column_config.NumberColumn("Max Drop (s)", format="%.1f")
         },
         use_container_width=True, hide_index=True
     )
-    
-    csv_export = eng_matrix.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Download Engineering Matrix", data=csv_export, file_name=f"Engineering_Matrix_{selected_resin}_{selected_vendor}.csv", mime='text/csv')
-
 
 # ==========================================
-# TAB 4: WORK INSTRUCTION (Shop Floor Operator View)
+# TAB 4: MASTER SHOP FLOOR SOP (Printable Table)
 # ==========================================
 with tab4:
-    if not st.session_state.get('calculation_done', False):
-        st.info("⚠️ Please generate and validate the SOP in **Tab 2** before issuing the Work Instruction.")
-    else:
-        st.markdown("## 🏭 Standard Dilution Work Instruction")
-        st.markdown(f"**Execution Material:** {st.session_state['sys_resin']} | {st.session_state['sys_vendor']} | Solvent: {st.session_state['sys_solvent']}")
-        
-        # Current status read-only
-        c_status1, c_status2, c_status3, c_status4 = st.columns(4)
-        c_status1.metric("Current Viscosity", f"{st.session_state['calc_curr_visc']:.1f} s")
-        c_status2.metric("Approved Target", f"{st.session_state['calc_lsl']:.1f} - {st.session_state['calc_usl']:.1f} s")
-        c_status3.metric("Order Paint Weight", f"{st.session_state['calc_order_weight']:.1f} kg")
-        c_status4.metric("Dilution Base", f"{st.session_state['calc_base']:.1f} kg")
+    st.markdown("### 🖨️ Master Shop Floor SOP Matrix")
+    st.markdown("*A simplified, global lookup table covering ALL approved systems. Designed to be printed and attached to mixing stations for quick operator reference.*")
 
-        st.markdown("---")
-        st.markdown("### 🛠️ Execution Protocol (3-Stage Addition)")
-        
-        st.markdown(f"""
-        <div style='background-color: #F0F8FF; padding: 20px; border-radius: 10px; border-left: 8px solid #0066CC; margin-bottom: 20px;'>
-            <h4 style='margin-top:0;'>STEP 1: Primary Addition (60%)</h4>
-            <h2>Add <span style='color: #0066CC;'>{st.session_state['calc_s1']:.2f} kg</span> of Solvent</h2>
-            <p><i>Action: Agitate under standard conditions, then re-measure viscosity.</i></p>
-        </div>
-        
-        <div style='background-color: #F5FFFA; padding: 20px; border-radius: 10px; border-left: 8px solid #00CC66; margin-bottom: 20px;'>
-            <h4 style='margin-top:0;'>STEP 2: Secondary Addition (25%)</h4>
-            <h2>Add <span style='color: #00CC66;'>{st.session_state['calc_s2']:.2f} kg</span> of Solvent</h2>
-            <p><i>Action: Only execute if viscosity is still > USL. Agitate and re-measure.</i></p>
-        </div>
-        
-        <div style='background-color: #FFF5EE; padding: 20px; border-radius: 10px; border-left: 8px solid #FF9933; margin-bottom: 20px;'>
-            <h4 style='margin-top:0;'>STEP 3: Fine Micro-Adjustment (15%)</h4>
-            <h2>Gradually add up to <span style='color: #FF9933;'>{st.session_state['calc_fa']:.2f} kg</span></h2>
-            <p><i>Action: Add incrementally until the target range is perfectly achieved.</i></p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown("---")
-        st.markdown("### 🛑 Safety & Escalation Constraints")
-        st.error(f"**ABSOLUTE MAXIMUM SOLVENT LIMIT:** `{st.session_state['calc_max_solvent']:.2f} kg`")
-        st.warning("**ESCALATION RULE:** If viscosity remains above USL after reaching the Absolute Maximum Limit, STOP operation immediately and contact the Quality Engineer (QE).")
-        
-        if "WARNING" in st.session_state['calc_risk']:
-            st.warning(f"**QE NOTICE FOR THIS BATCH:** {st.session_state['calc_risk']}")
+    matrix_df = master_df.copy()
+
+    # Clean Application
+    def get_clean_app(code_str):
+        if not isinstance(code_str, str) or len(str(code_str).strip()) < 4: return 'General Usage'
+        char_4 = str(code_str).strip().upper()[3]
+        f_map = {'B': 'Anti-Bacteria', 'C': 'High-Corrosion', 'D': 'Anti-Dust', 'E': 'Anti-Electrostatics', 'F': 'High Formability', 'H': 'Thermal Insulation', 'K': 'Anti-Stain', 'L': 'Whiteboard', 'M': 'Mirror', 'N': 'Neo Matt', 'P': 'Primer', 'R': 'Repaint', 'S': 'Shutter', 'T': 'Texture', 'V': 'Variety', 'U': 'Ultra-High Formability', 'W': 'Wrinkle'}
+        return 'General Usage' if char_4.isdigit() else f_map.get(char_4, 'General Usage')
+
+    if '塗料代碼' in matrix_df.columns:
+        matrix_df['Application'] = matrix_df['塗料代碼'].apply(get_clean_app)
+    else:
+        matrix_df['Application'] = 'General Usage'
+
+    # Group and aggregate
+    sop_grouped = matrix_df.groupby(['Resin', 'Vendor', 'Application', 'Solvent_Type', 'Initial_Viscosity_Zone'], observed=False).agg(
+        Valid_Batches=('塗料批號', 'nunique'),
+        Target_Visc=('黏度(秒)_1', 'median'),
+        Optimal_Sens=('Sensitivity', 'median'),
+        Max_Safe_Ratio=('Solvent_Ratio_Percent', 'max')
+    ).reset_index()
+
+    # Safety Filter: Only show reliably modeled groups
+    sop_grouped = sop_grouped[(sop_grouped['Valid_Batches'] >= 5) & (sop_grouped['Optimal_Sens'] > 0)]
+
+    # Calculate Practical Shop-Floor Factor:
+    # How many kg of solvent to add per 100kg of base paint to drop exactly 10 seconds of viscosity.
+    # Logic: Required Ratio (%) = Drop / Sensitivity = 10 / S
+    # Solvent (kg) for 100kg paint = 100 * (10 / S) / 100 = 10 / S
+    sop_grouped['Practical_Factor'] = 10.0 / sop_grouped['Optimal_Sens']
+
+    # Format output table
+    sop_output = sop_grouped[['Resin', 'Vendor', 'Application', 'Solvent_Type', 'Initial_Viscosity_Zone', 'Target_Visc', 'Practical_Factor', 'Max_Safe_Ratio']].copy()
+    
+    sop_output.rename(columns={
+        'Solvent_Type': 'Solvent',
+        'Initial_Viscosity_Zone': 'Input Viscosity Range',
+        'Target_Visc': 'Typical Target (s)',
+        'Practical_Factor': 'Add kg (per 100kg paint / 10s drop)',
+        'Max_Safe_Ratio': 'Max Safe Limit (%)'
+    }, inplace=True)
+
+    st.dataframe(
+        sop_output.sort_values(by=['Resin', 'Vendor', 'Input Viscosity Range']),
+        column_config={
+            "Typical Target (s)": st.column_config.NumberColumn(format="%.1f"),
+            "Add kg (per 100kg paint / 10s drop)": st.column_config.NumberColumn(format="%.2f kg"),
+            "Max Safe Limit (%)": st.column_config.NumberColumn(format="%.1f%%")
+        },
+        use_container_width=True, hide_index=True
+    )
+
+    csv_export = sop_output.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        "📥 Download Printable SOP Matrix (CSV)", 
+        data=csv_export, 
+        file_name="Shop_Floor_Master_SOP.csv", 
+        mime='text/csv'
+    )
