@@ -1,1101 +1,3 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
-
-from io import BytesIO
-from docx import Document
-from docx.shared import Inches, Pt
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.section import WD_ORIENT
-
-
-# =========================================================
-# EXPORT HISTORICAL CHART TO WORD (ROBUST SAFE VERSION)
-# =========================================================
-def export_chart_to_word(
-    fig,
-    selected_resin,
-    selected_vendor,
-    selected_solvent,
-    system_df
-):
-    doc = Document()
-
-    section = doc.sections[0]
-    section.orientation = WD_ORIENT.LANDSCAPE
-    section.page_width = Inches(11.69)
-    section.page_height = Inches(8.27)
-
-    section.top_margin = Inches(0.45)
-    section.bottom_margin = Inches(0.45)
-    section.left_margin = Inches(0.45)
-    section.right_margin = Inches(0.45)
-
-    title = doc.add_paragraph()
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-    title_run = title.add_run("Historical Viscosity Transition Analysis")
-    title_run.bold = True
-    title_run.font.size = Pt(18)
-
-    subtitle = doc.add_paragraph()
-    subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-    subtitle_run = subtitle.add_run(
-        f"Resin: {selected_resin} | "
-        f"Vendor: {selected_vendor} | "
-        f"Solvent Type: {selected_solvent}"
-    )
-    subtitle_run.font.size = Pt(10)
-
-    doc.add_paragraph("")
-
-    table = doc.add_table(rows=2, cols=4)
-    table.style = "Table Grid"
-
-    headers = [
-        "Valid Batches",
-        "Median Sensitivity",
-        "P10-P90 Ratio Range",
-        "Maximum Viscosity Drop"
-    ]
-
-    values = [
-        f"{len(system_df):,}",
-        f"{system_df['Sensitivity'].median():.2f} s/%",
-        (
-            f"{system_df['Solvent_Ratio_Percent'].quantile(0.10):.1f}%"
-            f" - "
-            f"{system_df['Solvent_Ratio_Percent'].quantile(0.90):.1f}%"
-        ),
-        f"{system_df['Delta_V'].max():.1f} s"
-    ]
-
-    for i, header in enumerate(headers):
-        cell = table.cell(0, i)
-        cell.text = header
-
-        for paragraph in cell.paragraphs:
-            for run in paragraph.runs:
-                run.bold = True
-                run.font.size = Pt(9)
-
-    for i, value in enumerate(values):
-        cell = table.cell(1, i)
-        cell.text = value
-
-        for paragraph in cell.paragraphs:
-            for run in paragraph.runs:
-                run.font.size = Pt(9)
-
-    doc.add_paragraph("")
-
-    try:
-        chart_png = fig.to_image(
-            format="png",
-            width=1500,
-            height=850,
-            scale=2
-        )
-
-        chart_stream = BytesIO(chart_png)
-
-        chart_paragraph = doc.add_paragraph()
-        chart_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-        chart_paragraph.add_run().add_picture(
-            chart_stream,
-            width=Inches(10.4)
-        )
-
-    except Exception as e:
-        error_paragraph = doc.add_paragraph()
-        error_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-        error_run = error_paragraph.add_run(
-            "\n[⚠️ CHART IMAGE EXPORT FAILED]\n"
-            "Server environment is missing 'kaleido' library to render dynamic charts into static PNGs.\n"
-            "Please add 'kaleido==0.1.0.post1' to your requirements.txt."
-        )
-        error_run.bold = True
-
-    note = doc.add_paragraph()
-
-    note_run = note.add_run(
-        "Note: Orange points represent viscosity before solvent addition. "
-        "Blue points represent viscosity after solvent addition. "
-        "The dotted line connects the same mixing batch."
-    )
-
-    note_run.italic = True
-    note_run.font.size = Pt(9)
-
-    output = BytesIO()
-    doc.save(output)
-    output.seek(0)
-
-    return output.getvalue()
-
-
-# =========================================================
-# PAGE CONFIGURATION
-# =========================================================
-st.set_page_config(
-    page_title="Intelligent SOP System",
-    page_icon="⚙️",
-    layout="wide"
-)
-
-if (
-    "raw_data_loaded" not in st.session_state
-    or not st.session_state["raw_data_loaded"]
-):
-    st.warning("⚠️ Please upload data on the main page first.")
-    st.stop()
-
-
-# =========================================================
-# DATA PROCESSING & CLEANSING
-# =========================================================
-@st.cache_data
-def process_data(df):
-    data = df.copy()
-
-    if data.empty:
-        return data
-
-    data = data[
-        (data["添加重量"] > 0)
-        & (data["塗料重量"] > 0)
-        & (data["黏度(秒)"] > data["黏度(秒)_1"])
-        & (data["Resin"].notna())
-        & (data["Vendor"].notna())
-        & (data["Solvent_Type"].notna())
-    ]
-
-    if data.empty:
-        return data
-
-    data["Delta_V"] = data["黏度(秒)"] - data["黏度(秒)_1"]
-    data = data[data["Delta_V"] > 0]
-
-    if data.empty:
-        return data
-
-    data["Dilution_Base"] = data["塗料重量"] + 120
-
-    data["Solvent_Ratio_Percent"] = (
-        data["添加重量"] / data["Dilution_Base"]
-    ) * 100
-
-    data["Sensitivity"] = (
-        data["Delta_V"]
-        / data["Solvent_Ratio_Percent"].replace(0, np.nan)
-    )
-
-    def assign_zone(v):
-        if v <= 70:
-            return "<=70 s"
-        elif v <= 90:
-            return "71-90 s"
-        elif v <= 110:
-            return "91-110 s"
-        elif v <= 130:
-            return "111-130 s"
-        else:
-            return ">130 s"
-
-    data["Initial_Viscosity_Zone"] = data["黏度(秒)"].apply(assign_zone)
-
-    system_batch_counts = (
-        data.groupby(
-            ["Resin", "Vendor", "Solvent_Type"]
-        )["塗料批號"]
-        .transform("nunique")
-    )
-
-    data = data[system_batch_counts >= 30].copy()
-
-    if data.empty:
-        return data
-
-    q01 = (
-        data.groupby(
-            ["Resin", "Vendor", "Solvent_Type"]
-        )["Sensitivity"]
-        .transform(lambda x: x.quantile(0.01))
-    )
-
-    q99 = (
-        data.groupby(
-            ["Resin", "Vendor", "Solvent_Type"]
-        )["Sensitivity"]
-        .transform(lambda x: x.quantile(0.99))
-    )
-
-    data_clean = data[
-        data["Sensitivity"].between(q01, q99)
-    ].copy()
-
-    return data_clean
-
-
-# =========================================================
-# SATURATION / DIMINISHING RETURNS ANALYSIS
-# =========================================================
-def build_saturation_profile(df):
-
-    ratio_bins = [0, 3, 5, 7, 9, 11, np.inf]
-
-    ratio_labels = [
-        "0-3%",
-        "3-5%",
-        "5-7%",
-        "7-9%",
-        "9-11%",
-        ">11%"
-    ]
-
-    sat_df = df.copy()
-
-    sat_df["Ratio_Zone"] = pd.cut(
-        sat_df["Solvent_Ratio_Percent"],
-        bins=ratio_bins,
-        labels=ratio_labels,
-        include_lowest=True,
-        right=False
-    )
-
-    profile = sat_df.groupby(
-        "Ratio_Zone",
-        observed=False
-    ).agg(
-        Records=("塗料批號", "nunique"),
-        Ratio_Median=("Solvent_Ratio_Percent", "median"),
-        Ratio_Min=("Solvent_Ratio_Percent", "min"),
-        Ratio_Max=("Solvent_Ratio_Percent", "max"),
-        DeltaV_Median=("Delta_V", "median"),
-        Sensitivity_Median=("Sensitivity", "median"),
-        Sensitivity_P25=("Sensitivity", lambda x: x.quantile(0.25)),
-        Sensitivity_P75=("Sensitivity", lambda x: x.quantile(0.75))
-    ).reset_index()
-
-    valid_profile = profile[
-        (profile["Records"] >= 5)
-        & (profile["Sensitivity_Median"] > 0)
-    ].copy()
-
-    profile["Efficiency_vs_Baseline_%"] = np.nan
-    profile["Saturation_Status"] = "Insufficient Data"
-
-    warning_ratio = np.nan
-    saturation_ratio = np.nan
-    baseline_sensitivity = np.nan
-
-    if not valid_profile.empty:
-        baseline_row = valid_profile.iloc[0]
-
-        baseline_sensitivity = baseline_row["Sensitivity_Median"]
-
-        profile["Efficiency_vs_Baseline_%"] = (
-            profile["Sensitivity_Median"]
-            / baseline_sensitivity
-            * 100
-        )
-
-        for idx, row in profile.iterrows():
-
-            if (
-                row["Records"] < 5
-                or pd.isna(row["Efficiency_vs_Baseline_%"])
-            ):
-                continue
-
-            efficiency = row["Efficiency_vs_Baseline_%"]
-
-            if efficiency <= 50:
-                profile.loc[idx, "Saturation_Status"] = (
-                    "🔴 Saturation Zone"
-                )
-
-                if pd.isna(saturation_ratio):
-                    saturation_ratio = row["Ratio_Min"]
-
-            elif efficiency <= 70:
-                profile.loc[idx, "Saturation_Status"] = (
-                    "🟠 Diminishing Returns"
-                )
-
-                if pd.isna(warning_ratio):
-                    warning_ratio = row["Ratio_Min"]
-
-            else:
-                profile.loc[idx, "Saturation_Status"] = (
-                    "🟢 Normal Efficiency"
-                )
-
-    return {
-        "profile": profile,
-        "baseline_sensitivity": baseline_sensitivity,
-        "warning_ratio": warning_ratio,
-        "saturation_ratio": saturation_ratio
-    }
-
-
-# =========================================================
-# LOAD DATA
-# =========================================================
-master_df = process_data(st.session_state["group_a_data"])
-
-if master_df.empty or "Resin" not in master_df.columns:
-    st.error(
-        "⚠️ No valid historical data available. All systems failed to meet "
-        "the strict statistical requirement (n ≥ 30 batches) or basic SOP "
-        "logic constraints."
-    )
-    st.stop()
-
-
-# =========================================================
-# STATE MANAGEMENT
-# =========================================================
-def reset_execution_states():
-    st.session_state["exec_curr_visc"] = 0.0
-    st.session_state["exec_lsl"] = 0.0
-    st.session_state["exec_usl"] = 0.0
-    st.session_state["exec_order_weight"] = 0.0
-    st.session_state["calculation_done"] = False
-
-
-# =========================================================
-# GLOBAL FILTERS
-# =========================================================
-st.title("⚙️ AI-Assisted Viscosity Optimization System")
-
-st.markdown(
-    "Automated recommendation engine governed by historical safety thresholds, "
-    "strictly filtered for statistical significance (n ≥ 30)."
-)
-
-st.markdown("---")
-
-col_f1, col_f2, col_f3 = st.columns(3)
-
-with col_f1:
-    selected_resin = st.selectbox(
-        "Select Resin:",
-        sorted(master_df["Resin"].unique()),
-        on_change=reset_execution_states
-    )
-
-with col_f2:
-    selected_vendor = st.selectbox(
-        "Select Vendor:",
-        sorted(
-            master_df[
-                master_df["Resin"] == selected_resin
-            ]["Vendor"].unique()
-        ),
-        on_change=reset_execution_states
-    )
-
-with col_f3:
-    selected_solvent = st.selectbox(
-        "Select Solvent Type:",
-        sorted(
-            master_df[
-                (master_df["Resin"] == selected_resin)
-                & (master_df["Vendor"] == selected_vendor)
-            ]["Solvent_Type"].unique()
-        ),
-        on_change=reset_execution_states
-    )
-
-system_df = master_df[
-    (master_df["Resin"] == selected_resin)
-    & (master_df["Vendor"] == selected_vendor)
-    & (master_df["Solvent_Type"] == selected_solvent)
-]
-
-if system_df.empty:
-    st.error("No valid historical data available for this configuration.")
-    st.stop()
-
-
-# =========================================================
-# SATURATION ANALYSIS RESULT FOR SELECTED SYSTEM
-# =========================================================
-saturation_result = build_saturation_profile(system_df)
-
-saturation_profile = saturation_result["profile"]
-baseline_sensitivity = saturation_result["baseline_sensitivity"]
-saturation_warning_ratio = saturation_result["warning_ratio"]
-saturation_limit_ratio = saturation_result["saturation_ratio"]
-
-
-# =========================================================
-# TABS
-# =========================================================
-tab1, tab2, tab3, tab4 = st.tabs([
-    "📊 Tab 1: Historical Analysis",
-    "🎯 Tab 2: SOP Recommendation",
-    "🔬 Tab 3: Engineering Matrix",
-    "🖨️ Tab 4: Master Shop Floor SOP"
-])
-
-
-# =========================================================
-# TAB 1: HISTORICAL ANALYSIS
-# =========================================================
-with tab1:
-    st.markdown("### Historical Performance Review")
-
-    st.markdown(
-        "Validate data stability before enforcing automated SOPs. "
-        "*Hover over points to trace individual batches from their "
-        "Initial (Orange) to Final (Blue) state.*"
-    )
-
-    c1, c2, c3, c4 = st.columns(4)
-
-    c1.metric("Valid Batches (n ≥ 30)", len(system_df))
-
-    c2.metric(
-        "Median Sensitivity",
-        f"{system_df['Sensitivity'].median():.2f} s/%"
-    )
-
-    c3.metric(
-        "P10 - P90 Ratio Range",
-        f"{system_df['Solvent_Ratio_Percent'].quantile(0.1):.1f}% - "
-        f"{system_df['Solvent_Ratio_Percent'].quantile(0.9):.1f}%"
-    )
-
-    c4.metric(
-        "Max Drop (Delta V)",
-        f"{system_df['Delta_V'].max():.1f} s"
-    )
-
-    fig_scatter = go.Figure()
-
-    x_lines = []
-    y_lines = []
-
-    for _, row in system_df.iterrows():
-        x_lines.extend([
-            row["Solvent_Ratio_Percent"],
-            row["Solvent_Ratio_Percent"],
-            None
-        ])
-
-        y_lines.extend([
-            row["黏度(秒)"],
-            row["黏度(秒)_1"],
-            None
-        ])
-
-    fig_scatter.add_trace(
-        go.Scatter(
-            x=x_lines,
-            y=y_lines,
-            mode="lines",
-            line=dict(
-                color="lightgray",
-                width=1.5,
-                dash="dot"
-            ),
-            hoverinfo="skip",
-            showlegend=False
-        )
-    )
-
-    fig_scatter.add_trace(
-        go.Scatter(
-            x=system_df["Solvent_Ratio_Percent"],
-            y=system_df["黏度(秒)"],
-            mode="markers",
-            name="Initial Viscosity (Before)",
-            marker=dict(
-                color="#ED7D31",
-                size=9,
-                line=dict(width=1, color="white")
-            ),
-            customdata=system_df[
-                [
-                    "黏度(秒)_1",
-                    "Delta_V",
-                    "Initial_Viscosity_Zone"
-                ]
-            ].values,
-            hovertemplate=(
-                "<b>Zone: %{customdata[2]}</b><br>"
-                "Solvent Ratio: %{x:.2f}%<br>"
-                "Initial Visc (Before): %{y:.1f}s 🌟<br>"
-                "Final Visc (After): %{customdata[0]:.1f}s<br>"
-                "Viscosity Drop (Delta V): %{customdata[1]:.1f}s"
-                "<extra></extra>"
-            )
-        )
-    )
-
-    fig_scatter.add_trace(
-        go.Scatter(
-            x=system_df["Solvent_Ratio_Percent"],
-            y=system_df["黏度(秒)_1"],
-            mode="markers",
-            name="Final Viscosity (After)",
-            marker=dict(
-                color="#4472C4",
-                size=9,
-                line=dict(width=1, color="white")
-            ),
-            customdata=system_df[
-                [
-                    "黏度(秒)",
-                    "Delta_V",
-                    "Initial_Viscosity_Zone"
-                ]
-            ].values,
-            hovertemplate=(
-                "<b>Zone: %{customdata[2]}</b><br>"
-                "Solvent Ratio: %{x:.2f}%<br>"
-                "Initial Visc (Before): %{customdata[0]:.1f}s<br>"
-                "Final Visc (After): %{y:.1f}s 🌟<br>"
-                "Viscosity Drop (Delta V): %{customdata[1]:.1f}s"
-                "<extra></extra>"
-            )
-        )
-    )
-
-    chart_title = (
-        f"Viscosity Transition by Solvent Ratio<br>"
-        f"<sup>Resin: {selected_resin} | "
-        f"Vendor: {selected_vendor} | "
-        f"Solvent: {selected_solvent}</sup>"
-    )
-
-    fig_scatter.update_layout(
-        title=dict(
-            text=chart_title,
-            x=0.5,
-            xanchor="center",
-            y=0.97,
-            yanchor="top",
-            font=dict(size=18, color="#1F3855")
-        ),
-        plot_bgcolor="white",
-        paper_bgcolor="white",
-        height=620,
-        margin=dict(l=70, r=50, t=95, b=70),
-        xaxis=dict(
-            title="Solvent Blending Ratio (%)",
-            showgrid=True,
-            gridcolor="#EAEAEA",
-            linecolor="black",
-            linewidth=1.5,
-            showline=True,
-            mirror=True,
-            ticks="outside"
-        ),
-        yaxis=dict(
-            title="Viscosity (seconds)",
-            showgrid=True,
-            gridcolor="#EAEAEA",
-            linecolor="black",
-            linewidth=1.5,
-            showline=True,
-            mirror=True,
-            ticks="outside"
-        ),
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.07,
-            xanchor="center",
-            x=0.5
-        ),
-        hovermode="closest"
-    )
-
-    st.plotly_chart(fig_scatter, use_container_width=True)
-
-    word_data = export_chart_to_word(
-        fig=fig_scatter,
-        selected_resin=selected_resin,
-        selected_vendor=selected_vendor,
-        selected_solvent=selected_solvent,
-        system_df=system_df
-    )
-
-    file_name = (
-        f"Viscosity_Transition_"
-        f"{selected_resin}_{selected_vendor}_{selected_solvent}.docx"
-    )
-
-    st.download_button(
-        label="📄 Export Historical Chart to Word",
-        data=word_data,
-        file_name=file_name,
-        mime=(
-            "application/vnd.openxmlformats-officedocument."
-            "wordprocessingml.document"
-        )
-    )
-
-
-# =========================================================
-# TAB 2: SOP RECOMMENDATION
-# =========================================================
-with tab2:
-    st.markdown("### Process Parameter Configuration")
-
-    for key in [
-        "exec_curr_visc",
-        "exec_lsl",
-        "exec_usl",
-        "exec_order_weight"
-    ]:
-        if key not in st.session_state:
-            st.session_state[key] = 0.0
-
-    col_i1, col_i2, col_i3, col_i4 = st.columns(4)
-
-    with col_i1:
-        curr_visc = st.number_input(
-            "Current Viscosity (s)",
-            value=st.session_state["exec_curr_visc"],
-            step=1.0,
-            key="iv"
-        )
-
-    with col_i2:
-        app_lsl = st.number_input(
-            "Approved Target LSL (s)",
-            value=st.session_state["exec_lsl"],
-            step=1.0,
-            key="ilsl"
-        )
-
-    with col_i3:
-        app_usl = st.number_input(
-            "Approved Target USL (s)",
-            value=st.session_state["exec_usl"],
-            step=1.0,
-            key="iusl"
-        )
-
-    with col_i4:
-        order_weight = st.number_input(
-            "Order Paint Weight (kg)",
-            value=st.session_state["exec_order_weight"],
-            step=10.0,
-            key="iow"
-        )
-
-    st.markdown("---")
-
-    if st.button("🚀 Calculate Optimized SOP", type="primary"):
-
-        if (
-            curr_visc <= 0
-            or app_lsl <= 0
-            or app_usl <= 0
-            or order_weight <= 0
-        ):
-            st.error("⚠️ All input parameters must be strictly greater than 0.")
-
-        elif app_lsl >= app_usl:
-            st.error("⚠️ LSL must be strictly less than USL.")
-
-        else:
-            target_center = (app_lsl + app_usl) / 2
-            required_drop = curr_visc - target_center
-
-            if required_drop <= 0:
-                st.success(
-                    "✅ Current viscosity is already within or below the target range. "
-                    "No solvent required."
-                )
-
-                st.session_state["calculation_done"] = False
-
-            else:
-
-                def get_zone_str(v):
-                    if v <= 70:
-                        return "<=70 s"
-                    elif v <= 90:
-                        return "71-90 s"
-                    elif v <= 110:
-                        return "91-110 s"
-                    elif v <= 130:
-                        return "111-130 s"
-                    else:
-                        return ">130 s"
-
-                curr_zone = get_zone_str(curr_visc)
-
-                zone_data = system_df[
-                    system_df["Initial_Viscosity_Zone"] == curr_zone
-                ]
-
-                if len(zone_data) >= 5:
-                    ref_data = zone_data
-                    record_count = len(zone_data)
-                    ref_source = f"Zone-Specific ({curr_zone})"
-
-                else:
-                    ref_data = system_df
-                    record_count = len(system_df)
-                    ref_source = "Overall System Fallback"
-
-                if record_count >= 10:
-                    conf_msg = "🟢 Reliable"
-
-                elif record_count >= 5:
-                    conf_msg = "🟡 Usable with Caution"
-
-                else:
-                    conf_msg = "🔴 Insufficient Data"
-
-                if record_count < 5:
-                    st.error(
-                        "🚨 **SYSTEM BLOCKED:** Insufficient historical data "
-                        "(<5 records) to generate safe automation. Manual "
-                        "Process Engineer verification required."
-                    )
-
-                    st.session_state["calculation_done"] = False
-
-                else:
-                    ref_sensitivity = ref_data["Sensitivity"].median()
-
-                    ref_ratio_p90 = ref_data[
-                        "Solvent_Ratio_Percent"
-                    ].quantile(0.9)
-
-                    ref_ratio_p95 = ref_data[
-                        "Solvent_Ratio_Percent"
-                    ].quantile(0.95)
-
-                    ref_drop_p90 = ref_data["Delta_V"].quantile(0.9)
-                    ref_drop_max = ref_data["Delta_V"].max()
-
-                    dilution_base = order_weight + 120
-                    required_ratio = required_drop / ref_sensitivity
-
-                    recommended_solvent = (
-                        dilution_base * (required_ratio / 100)
-                    )
-
-                    max_total_solvent = (
-                        dilution_base * (ref_ratio_p90 / 100)
-                    )
-
-                    risk_status = ""
-                    risk_color = ""
-                    blocked = False
-                    saturation_note = ""
-
-                    # Existing P90 / P95 / Max Drop safety logic
-                    if (
-                        required_ratio > ref_ratio_p95
-                        or required_drop > ref_drop_max
-                    ):
-                        risk_status = (
-                            "🚨 CRITICAL OVERLOAD: Target exceeds P95 Safe Limits."
-                        )
-                        risk_color = "red"
-                        blocked = True
-
-                    elif (
-                        ref_ratio_p90 < required_ratio <= ref_ratio_p95
-                    ) or (
-                        ref_drop_p90 < required_drop <= ref_drop_max
-                    ):
-                        risk_status = (
-                            "⚠️ DIMINISHING RETURNS WARNING: Target exceeds "
-                            "P90 Optimal Zone. Extra supervision required."
-                        )
-                        risk_color = "orange"
-
-                    else:
-                        risk_status = (
-                            "✅ NORMAL OPERATION: Target within P90 "
-                            "historical bounds."
-                        )
-                        risk_color = "green"
-
-                    # New saturation screening logic
-                    if (
-                        not pd.isna(saturation_limit_ratio)
-                        and required_ratio >= saturation_limit_ratio
-                    ):
-                        risk_status = (
-                            "🚨 SATURATION LIMIT REACHED: Historical data shows "
-                            "very low dilution efficiency in this range."
-                        )
-                        risk_color = "red"
-                        blocked = True
-
-                        saturation_note = (
-                            f"Required ratio: {required_ratio:.2f}% | "
-                            f"Historical saturation limit: "
-                            f"{saturation_limit_ratio:.2f}%"
-                        )
-
-                    elif (
-                        not blocked
-                        and not pd.isna(saturation_warning_ratio)
-                        and required_ratio >= saturation_warning_ratio
-                    ):
-                        risk_status = (
-                            "⚠️ DIMINISHING RETURNS WARNING: Historical dilution "
-                            "efficiency has started declining."
-                        )
-                        risk_color = "orange"
-
-                        saturation_note = (
-                            f"Required ratio: {required_ratio:.2f}% | "
-                            f"Diminishing-return threshold: "
-                            f"{saturation_warning_ratio:.2f}%"
-                        )
-
-                    st.markdown(
-                        f"### Assessment: "
-                        f"<span style='color:{risk_color}'>{risk_status}</span>",
-                        unsafe_allow_html=True
-                    )
-
-                    if saturation_note:
-                        st.warning(
-                            f"📉 Saturation screening: {saturation_note}"
-                        )
-
-                    if blocked:
-                        st.error(
-                            "Execution automatically blocked by Safety Constraints. "
-                            "Please escalate to Process Engineer."
-                        )
-
-                        st.session_state["calculation_done"] = False
-
-                    else:
-                        st.session_state.update({
-                            "calculation_done": True,
-                            "calc_curr_visc": curr_visc,
-                            "calc_lsl": app_lsl,
-                            "calc_usl": app_usl,
-                            "calc_order_weight": order_weight,
-                            "calc_base": dilution_base,
-                            "calc_req_drop": required_drop,
-                            "calc_sensitivity": ref_sensitivity,
-                            "calc_ref_source": ref_source,
-                            "calc_conf": conf_msg,
-                            "calc_records": record_count,
-                            "calc_rec_solvent": recommended_solvent,
-                            "calc_max_solvent": max_total_solvent,
-                            "sys_resin": selected_resin,
-                            "sys_vendor": selected_vendor,
-                            "sys_solvent": selected_solvent,
-                            "calc_risk": risk_status
-                        })
-
-                        col_r1, col_r2, col_r3 = st.columns(3)
-
-                        col_r1.metric(
-                            "Required Viscosity Drop",
-                            f"{required_drop:.1f} s"
-                        )
-
-                        col_r2.metric(
-                            "Reference Sensitivity",
-                            f"{ref_sensitivity:.2f} s/%",
-                            help=f"Source: {ref_source} (n={record_count})"
-                        )
-
-                        col_r3.metric(
-                            "Data Confidence",
-                            conf_msg
-                        )
-
-                        st.success(
-                            f"**Calculated Total Recommendation:** "
-                            f"`{recommended_solvent:.2f} kg` "
-                            f"(Absolute Limit: {max_total_solvent:.2f} kg)"
-                        )
-
-                        st.markdown(
-                            "### 🛠️ Execution Protocol (3-Stage Addition)"
-                        )
-
-                        st.markdown(
-                            f"""
-                            * **Step 1 (60%):** Add `{recommended_solvent * 0.60:.2f} kg` -> Agitate & Measure.
-                            * **Step 2 (25%):** Add `{recommended_solvent * 0.25:.2f} kg` -> Only if > USL.
-                            * **Step 3 (15%):** Add up to `{recommended_solvent * 0.15:.2f} kg` -> Fine Micro-Adjustment.
-                            """
-                        )
-
-
-# =========================================================
-# TAB 3: ENGINEERING MATRIX
-# =========================================================
-with tab3:
-    st.markdown("### 🔬 Comprehensive Engineering Matrix")
-
-    st.markdown(
-        "Full operational baseline matrix for safety boundary definitions. "
-        "Filtered by selected Resin & Vendor."
-    )
-
-    def generate_matrix(df):
-        grouped = df.groupby(
-            "Initial_Viscosity_Zone",
-            observed=False
-        ).agg(
-            Records=("塗料批號", "nunique"),
-            Sensitivity_Median=("Sensitivity", "median"),
-            Ratio_Median=("Solvent_Ratio_Percent", "median"),
-            Ratio_P90=(
-                "Solvent_Ratio_Percent",
-                lambda x: x.quantile(0.9)
-            ),
-            Ratio_P95=(
-                "Solvent_Ratio_Percent",
-                lambda x: x.quantile(0.95)
-            ),
-            Drop_Median=("Delta_V", "median"),
-            Drop_P90=("Delta_V", lambda x: x.quantile(0.9)),
-            Drop_Max=("Delta_V", "max")
-        ).reset_index()
-
-        return grouped
-
-    eng_matrix = generate_matrix(system_df)
-
-    st.dataframe(
-        eng_matrix,
-        column_config={
-            "Records": st.column_config.NumberColumn(format="%d"),
-            "Sensitivity_Median": st.column_config.NumberColumn(
-                "Median Sensitivity (s/%)",
-                format="%.2f"
-            ),
-            "Ratio_Median": st.column_config.NumberColumn(
-                "Median Ratio %",
-                format="%.2f"
-            ),
-            "Ratio_P90": st.column_config.NumberColumn(
-                "P90 Ratio %",
-                format="%.2f"
-            ),
-            "Ratio_P95": st.column_config.NumberColumn(
-                "P95 Ratio %",
-                format="%.2f"
-            ),
-            "Drop_Median": st.column_config.NumberColumn(
-                "Median Drop (s)",
-                format="%.1f"
-            ),
-            "Drop_P90": st.column_config.NumberColumn(
-                "P90 Drop (s)",
-                format="%.1f"
-            ),
-            "Drop_Max": st.column_config.NumberColumn(
-                "Max Drop (s)",
-                format="%.1f"
-            )
-        },
-        use_container_width=True,
-        hide_index=True
-    )
-
-    st.markdown("---")
-    st.markdown("### 📉 Solvent Saturation / Diminishing Returns Analysis")
-
-    st.markdown(
-        "This analysis checks whether higher solvent ratios still deliver "
-        "proportional viscosity reduction."
-    )
-
-    if pd.isna(baseline_sensitivity):
-        st.warning(
-            "⚠️ Insufficient zone-level data for saturation analysis. "
-            "Each ratio zone needs at least 5 valid batches."
-        )
-
-    else:
-        col_sat1, col_sat2, col_sat3 = st.columns(3)
-
-        col_sat1.metric(
-            "Baseline Sensitivity",
-            f"{baseline_sensitivity:.2f} s/%"
-        )
-
-        col_sat2.metric(
-            "Diminishing Returns Threshold",
-            (
-                f"{saturation_warning_ratio:.2f}%"
-                if not pd.isna(saturation_warning_ratio)
-                else "Not Detected"
-            )
-        )
-
-        col_sat3.metric(
-            "Saturation Limit",
-            (
-                f"{saturation_limit_ratio:.2f}%"
-                if not pd.isna(saturation_limit_ratio)
-                else "Not Detected"
-            )
-        )
-
-        st.dataframe(
-            saturation_profile,
-            column_config={
-                "Records": st.column_config.NumberColumn(format="%d"),
-                "Ratio_Median": st.column_config.NumberColumn(
-                    "Median Ratio (%)",
-                    format="%.2f"
-                ),
-                "Ratio_Min": st.column_config.NumberColumn(
-                    "Min Ratio (%)",
-                    format="%.2f"
-                ),
-                "Ratio_Max": st.column_config.NumberColumn(
-                    "Max Ratio (%)",
-                    format="%.2f"
-                ),
-                "DeltaV_Median": st.column_config.NumberColumn(
-                    "Median Delta V (s)",
-                    format="%.2f"
-                ),
-                "Sensitivity_Median": st.column_config.NumberColumn(
-                    "Median Sensitivity (s/%)",
-                    format="%.2f"
-                ),
-                "Sensitivity_P25": st.column_config.NumberColumn(
-                    "Sensitivity P25",
-                    format="%.2f"
-                ),
-                "Sensitivity_P75": st.column_config.NumberColumn(
-                    "Sensitivity P75",
-                    format="%.2f"
-                ),
-                "Efficiency_vs_Baseline_%": st.column_config.NumberColumn(
-                    "Efficiency vs Baseline (%)",
-                    format="%.1f%%"
-                )
-            },
-            use_container_width=True,
-            hide_index=True
-        )
-
-
-# =========================================================
 # =========================================================
 # TAB 4: PRINTED WORKER LOOKUP SOP
 # =========================================================
@@ -1114,16 +16,26 @@ with tab4:
     )
 
     st.info(
-        "💡 Historical solvent quantities below already follow the factory "
-        "Dilution Base rule: **Paint Weight + 120 kg**."
+        "💡 **Calculation Method Used in This Table:** "
+        "Operating Dilution Base = Typical Paint Weight + 120 kg. "
+        "Historical Total Solvent = median actual solvent addition from "
+        "similar historical batches. "
+        "Stage 1 = Historical Total Solvent × 60%; "
+        "Stage 2 = Historical Total Solvent × 25%; "
+        "Stage 3 = Historical Total Solvent × 15%."
+    )
+
+    st.caption(
+        "⚠️ The displayed solvent dose is a historical lookup value for the "
+        "specified Resin + Vendor + Solvent + Viscosity Range + Paint Weight Range. "
+        "Do not multiply the dose directly by viscosity-drop seconds, because "
+        "dilution efficiency may decrease at higher solvent ratios."
     )
 
     matrix_df = master_df.copy()
 
     # =====================================================
-    # 1. CREATE PAINT WEIGHT RANGE FOR PRINTED LOOKUP
-    # Adjust these bands later if your factory uses
-    # different standard mixing quantities.
+    # 1. PAINT WEIGHT RANGE FOR PRINTED LOOKUP
     # =====================================================
     weight_bins = [0, 25, 50, 80, 120, 200, np.inf]
 
@@ -1145,9 +57,7 @@ with tab4:
     )
 
     # =====================================================
-    # 2. BUILD OPERATOR LOOKUP TABLE
-    # Stage 1 / 2 / 3 are based on actual historical
-    # solvent additions, not a linear "per 10s" extrapolation.
+    # 2. OPERATOR LOOKUP TABLE
     # =====================================================
     worker_sop = matrix_df.groupby(
         [
@@ -1181,16 +91,21 @@ with tab4:
         )
     ).reset_index()
 
-    # Only keep statistically usable lookup rows
     worker_sop = worker_sop[
         (worker_sop["Valid_Batches"] >= 5)
         & (worker_sop["Historical_Total_Solvent"] > 0)
     ].copy()
 
     # =====================================================
-    # 3. STAGED ADDITION QUANTITIES
-    # These are based on actual historical total solvent,
-    # not direct linear multiplication by viscosity drop.
+    # 3. OPERATING DILUTION BASE
+    # =====================================================
+    worker_sop["Operating_Dilution_Base"] = (
+        worker_sop["Typical_Paint_Weight"] + 120
+    )
+
+    # =====================================================
+    # 4. STAGED ADDITION QUANTITIES
+    # Based on median historical total solvent
     # =====================================================
     worker_sop["Stage_1_Add_kg"] = (
         worker_sop["Historical_Total_Solvent"] * 0.60
@@ -1204,9 +119,16 @@ with tab4:
         worker_sop["Historical_Total_Solvent"] * 0.15
     )
 
+    worker_sop["Calculation_Basis"] = (
+        "Median historical solvent addition"
+    )
+
+    worker_sop["Stage_Split_Formula"] = (
+        "Stage 1: 60% | Stage 2: 25% | Stage 3: 15%"
+    )
+
     # =====================================================
-    # 4. BUILD SATURATION THRESHOLDS
-    # Per Resin + Vendor + Solvent
+    # 5. SATURATION THRESHOLDS
     # =====================================================
     saturation_summary = []
 
@@ -1225,9 +147,7 @@ with tab4:
             & (matrix_df["Solvent_Type"] == solvent_value)
         ].copy()
 
-        temp_saturation = build_saturation_profile(
-            temp_system_df
-        )
+        temp_saturation = build_saturation_profile(temp_system_df)
 
         saturation_summary.append({
             "Resin": resin_value,
@@ -1241,9 +161,7 @@ with tab4:
             )
         })
 
-    saturation_summary_df = pd.DataFrame(
-        saturation_summary
-    )
+    saturation_summary_df = pd.DataFrame(saturation_summary)
 
     worker_sop = worker_sop.merge(
         saturation_summary_df,
@@ -1251,8 +169,8 @@ with tab4:
         how="left"
     )
 
-    # If saturation detection is unavailable,
-    # retain P90/P95 as operational safeguards.
+    # No clear saturation pattern:
+    # use P90 as warning and P95 as stop safeguard.
     worker_sop["Warning_Ratio"] = (
         worker_sop["Saturation_Warning_Ratio"]
         .fillna(worker_sop["P90_Solvent_Ratio"])
@@ -1264,7 +182,7 @@ with tab4:
     )
 
     # =====================================================
-    # 5. RECHECK AND ESCALATION INSTRUCTIONS
+    # 6. OPERATOR INSTRUCTIONS
     # =====================================================
     worker_sop["Stage_1_Instruction"] = (
         "Add Stage 1 → Mix 5 min → Measure"
@@ -1279,7 +197,7 @@ with tab4:
     )
 
     # =====================================================
-    # 6. FINAL PRINTED SOP TABLE
+    # 7. FINAL PRINTED SOP TABLE
     # =====================================================
     worker_output = worker_sop[
         [
@@ -1290,7 +208,11 @@ with tab4:
             "Paint_Weight_Range",
             "Valid_Batches",
             "Typical_Paint_Weight",
+            "Operating_Dilution_Base",
             "Typical_Target_Visc",
+            "Historical_Total_Solvent",
+            "Calculation_Basis",
+            "Stage_Split_Formula",
             "Stage_1_Add_kg",
             "Stage_1_Instruction",
             "Stage_2_Max_Add_kg",
@@ -1309,7 +231,13 @@ with tab4:
             "Paint_Weight_Range": "Paint Weight Range",
             "Valid_Batches": "Valid Batches",
             "Typical_Paint_Weight": "Typical Paint Weight (kg)",
+            "Operating_Dilution_Base": (
+                "Operating Dilution Base (Paint + 120 kg)"
+            ),
             "Typical_Target_Visc": "Typical Target (s)",
+            "Historical_Total_Solvent": "Historical Total Solvent (kg)",
+            "Calculation_Basis": "Calculation Basis",
+            "Stage_Split_Formula": "Stage Split Formula",
             "Stage_1_Add_kg": "Stage 1 Add (kg)",
             "Stage_1_Instruction": "Stage 1 Action",
             "Stage_2_Max_Add_kg": "Stage 2 Max Add (kg)",
@@ -1341,8 +269,16 @@ with tab4:
             "Typical Paint Weight (kg)": st.column_config.NumberColumn(
                 format="%.1f kg"
             ),
+            "Operating Dilution Base (Paint + 120 kg)": (
+                st.column_config.NumberColumn(
+                    format="%.1f kg"
+                )
+            ),
             "Typical Target (s)": st.column_config.NumberColumn(
                 format="%.1f s"
+            ),
+            "Historical Total Solvent (kg)": st.column_config.NumberColumn(
+                format="%.2f kg"
             ),
             "Stage 1 Add (kg)": st.column_config.NumberColumn(
                 format="%.2f kg"
@@ -1367,19 +303,28 @@ with tab4:
     )
 
     st.markdown("---")
-
-    st.markdown("### Operator Usage Rule")
+    st.markdown("### Manual Calculation Note")
 
     st.markdown(
         """
-        1. Select the correct Resin, Vendor and Solvent.  
-        2. Find the Initial Viscosity Range and Paint Weight Range.  
-        3. Add **Stage 1 only**.  
-        4. Mix for 5 minutes and measure viscosity again.  
-        5. Add Stage 2 only when viscosity is still above the approved USL.  
-        6. Stage 3 is a micro-adjustment only.  
-        7. If Warning Ratio is reached, stop and re-measure.  
-        8. If Stop / Engineer Approval Ratio is reached, do not add more solvent.  
+        **Operating Dilution Base**  
+        `= Typical Paint Weight + 120 kg`
+
+        **Historical Total Solvent**  
+        `= Median actual solvent added in similar historical batches`
+
+        **Stage 1 Addition**  
+        `= Historical Total Solvent × 60%`
+
+        **Stage 2 Maximum Addition**  
+        `= Historical Total Solvent × 25%`
+
+        **Stage 3 Maximum Addition**  
+        `= Historical Total Solvent × 15%`
+
+        **Important:** The Stage 1 / 2 / 3 values are historical lookup values,
+        not a linear viscosity-reduction formula. Always measure viscosity after
+        every addition.
         """
     )
 
