@@ -238,9 +238,12 @@ filtered_sop = sop_matrix[
 # =========================================================
 # [S10] TABS
 # =========================================================
-tab_analysis, tab_recommend, tab_matrix = st.tabs(
-    ["📊 Historical Analysis", "🧠 SOP Recommendation", "📚 SOP Matrix"]
-)
+tab_analysis, tab_sop, tab_matrix, tab_worker_sop = st.tabs([
+    "📊 Historical Analysis",
+    "🧠 SOP Recommendation",
+    "📚 Engineering Matrix",
+    "📄 Worker SOP"
+])
 
 # =========================================================
 # [S11] HISTORICAL ANALYSIS
@@ -501,4 +504,116 @@ with tab_matrix:
             data=export_df.to_csv(index=False).encode("utf-8-sig"),
             file_name="All_Resin_Vendor_Solvent_SOP_Matrix.csv",
             mime="text/csv",
+        )
+# =========================================================
+# [S14] TAB 4 - WORKER SOP EXPORT
+# =========================================================
+with tab_worker_sop:
+    st.markdown("### 📄 塗料稀釋作業標準書")
+
+    worker_col1, worker_col2 = st.columns(2)
+
+    with worker_col1:
+        worker_zone = st.selectbox(
+            "稀釋前黏度範圍",
+            VISCOSITY_ZONE_ORDER
+        )
+
+    with worker_col2:
+        worker_order_paint = st.number_input(
+            "訂單塗料重量 (kg)",
+            min_value=0.0,
+            value=80.0,
+            step=1.0,
+            format="%.2f"
+        )
+
+    worker_sop_row = sop_matrix[
+        (sop_matrix["Resin"] == selected_resin) &
+        (sop_matrix["Vendor"] == selected_vendor) &
+        (sop_matrix["Solvent_Type"] == selected_solvent) &
+        (sop_matrix["Viscosity_Zone"].astype(str) == worker_zone)
+    ].copy()
+
+    if worker_sop_row.empty:
+        st.warning("⚠️ 此條件尚無足夠歷史資料可建立 SOP。")
+
+    else:
+        selected_sop = worker_sop_row.iloc[0]
+
+        calculation_total_paint = (
+            worker_order_paint + MIN_OPERATING_PAINT_KG
+        )
+
+        stage_1_kg = (
+            calculation_total_paint
+            * selected_sop["Draft_Stage_1_Coeff_kg_per_100kg"]
+            / 100
+        )
+
+        fine_adjust_kg = (
+            calculation_total_paint
+            * selected_sop["Draft_Fine_Adjust_Coeff_kg_per_100kg"]
+            / 100
+        )
+
+        max_total_kg = (
+            calculation_total_paint
+            * selected_sop["Draft_Max_Total_Coeff_kg_per_100kg"]
+            / 100
+        )
+
+        worker_sop_display = pd.DataFrame({
+            "項目": [
+                "樹脂種類",
+                "塗料供應商",
+                "指定稀釋劑",
+                "稀釋前黏度範圍",
+                "核准稀釋後黏度範圍",
+                "訂單塗料重量",
+                "設備最低運轉塗料量",
+                "稀釋計算總塗料量",
+                "第一次添加量",
+                "每次微調量",
+                "最大總添加量"
+            ],
+            "作業標準": [
+                selected_resin,
+                selected_vendor,
+                selected_solvent,
+                worker_zone,
+                (
+                    f"{selected_sop['Historical_Low_V_P10']:.2f}"
+                    f"–{selected_sop['Historical_High_V_P90']:.2f} 秒"
+                ),
+                f"{worker_order_paint:.2f} kg",
+                f"{MIN_OPERATING_PAINT_KG:.2f} kg",
+                f"{calculation_total_paint:.2f} kg",
+                f"{stage_1_kg:.2f} kg",
+                f"{fine_adjust_kg:.2f} kg",
+                f"{max_total_kg:.2f} kg"
+            ]
+        })
+
+        st.dataframe(
+            worker_sop_display,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.warning(
+            "注意：先添加第一次添加量，依核准攪拌條件完成混合後再量測黏度。"
+            "若未達核准範圍，只可依每次微調量逐次添加；"
+            "不得超過最大總添加量。"
+        )
+
+        worker_csv = worker_sop_display.to_csv(
+            index=False
+        ).encode("utf-8-sig")
+
+        st.download_button(
+            label="📥 Download Worker SOP",
+            data=worker_csv,
+            file_name="Worker_Paint_Dilution_SOP.csv",
+            mime="text/csv"
         )
