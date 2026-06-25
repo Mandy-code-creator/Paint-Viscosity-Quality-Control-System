@@ -17,6 +17,9 @@ if 'raw_data_loaded' not in st.session_state or not st.session_state['raw_data_l
 def process_data(df):
     data = df.copy()
     
+    if data.empty: 
+        return data
+
     # Logic 2: Filter Valid Group A Records
     data = data[
         (data['添加重量'] > 0) & 
@@ -24,8 +27,15 @@ def process_data(df):
         (data['黏度(秒)'] > data['黏度(秒)_1']) &
         (data['Resin'].notna()) & (data['Vendor'].notna()) & (data['Solvent_Type'].notna())
     ]
+    
+    if data.empty: 
+        return data
+        
     data['Delta_V'] = data['黏度(秒)'] - data['黏度(秒)_1']
     data = data[data['Delta_V'] > 0]
+    
+    if data.empty: 
+        return data
     
     # Logic 4: Standard Formulas for Historical Data
     # Minimum Operating Paint = 120 kg
@@ -43,17 +53,25 @@ def process_data(df):
     data['Initial_Viscosity_Zone'] = data['黏度(秒)'].apply(assign_zone)
     
     # Logic 6: P1-P99 Outlier Filtering (Per Group, n>=30)
-    def filter_outliers(group):
-        if len(group) >= 30:
-            low_limit = group['Sensitivity'].quantile(0.01)
-            high_limit = group['Sensitivity'].quantile(0.99)
-            return group[group['Sensitivity'].between(low_limit, high_limit)]
-        return group
-        
-    data_clean = data.groupby(['Resin', 'Vendor', 'Solvent_Type'], group_keys=False).apply(filter_outliers).copy()
+    # ĐÃ SỬA LỖI PANDAS: Dùng transform() thay vì apply() để chống mất cột (KeyError)
+    group_counts = data.groupby(['Resin', 'Vendor', 'Solvent_Type'])['Sensitivity'].transform('count')
+    q01 = data.groupby(['Resin', 'Vendor', 'Solvent_Type'])['Sensitivity'].transform(lambda x: x.quantile(0.01))
+    q99 = data.groupby(['Resin', 'Vendor', 'Solvent_Type'])['Sensitivity'].transform(lambda x: x.quantile(0.99))
+    
+    mask_large_group = group_counts >= 30
+    mask_in_bounds = data['Sensitivity'].between(q01, q99)
+    
+    # Chỉ lọc Outlier ở các nhóm có >= 30 record, các nhóm nhỏ giữ nguyên
+    data_clean = data[(~mask_large_group) | (mask_large_group & mask_in_bounds)].copy()
+    
     return data_clean
 
 master_df = process_data(st.session_state['group_a_data'])
+
+# Safety Check để chặn hoàn toàn lỗi KeyError nếu file tải lên bị rỗng sau khi lọc
+if master_df.empty or 'Resin' not in master_df.columns:
+    st.error("⚠️ No valid historical data available after processing. Please verify that your dataset meets all SOP logic requirements.")
+    st.stop()
 
 # --- 12. SESSION STATE MANAGEMENT ---
 def reset_execution_states():
@@ -105,10 +123,10 @@ with tab1:
     c3.metric("P10 - P90 Ratio Range", f"{system_df['Solvent_Ratio_Percent'].quantile(0.1):.1f}% - {system_df['Solvent_Ratio_Percent'].quantile(0.9):.1f}%")
     c4.metric("Max Drop (Delta V)", f"{system_df['Delta_V'].max():.1f} s")
 
-    # ĐÃ THAY ĐỔI: Biểu đồ Before vs After thay vì Scatter/Boxplot rối mắt
+    # ĐÃ XÓA BOXPLOT & PHÓNG TO BIỂU ĐỒ BEFORE VS AFTER TRÀN VIỀN
     fig_scatter = go.Figure()
 
-    # 1. Vẽ các đường nối dọc (Dotted lines)
+    # 1. Dotted lines (Nối điểm Trước và Sau)
     x_lines = []
     y_lines = []
     for _, row in system_df.iterrows():
@@ -121,7 +139,7 @@ with tab1:
         hoverinfo='skip', showlegend=False
     ))
 
-    # 2. Điểm TRƯỚC khi châm (Màu Cam)
+    # 2. Before Points (Màu Cam)
     fig_scatter.add_trace(go.Scatter(
         x=system_df['Solvent_Ratio_Percent'], y=system_df['黏度(秒)'], mode='markers',
         name="Initial Viscosity (Before)", 
@@ -134,7 +152,7 @@ with tab1:
                       'Viscosity Drop (Delta V): %{customdata[1]:.1f}s<extra></extra>'
     ))
     
-    # 3. Điểm SAU khi châm (Màu Xanh)
+    # 3. After Points (Màu Xanh Dương)
     fig_scatter.add_trace(go.Scatter(
         x=system_df['Solvent_Ratio_Percent'], y=system_df['黏度(秒)_1'], mode='markers',
         name="Final Viscosity (After)", 
