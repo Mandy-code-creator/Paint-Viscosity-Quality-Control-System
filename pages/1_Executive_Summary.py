@@ -1098,53 +1098,23 @@ with tab3:
 # =========================================================
 # =========================================================
 # =========================================================
-# TAB 4: PRINTED WORKER LOOKUP SOP
+# TAB 4: SHOP FLOOR QUICK SOP
 # =========================================================
 with tab4:
-    st.markdown("### 🖨️ Master Shop Floor SOP")
-
-    st.markdown(
-        """
-        Bảng tra cứu nhanh cho công nhân không sử dụng dashboard.
-
-        **Cách tra:** Chọn đúng Resin + Vendor + Solvent + khoảng độ nhớt ban đầu
-        + khoảng khối lượng sơn đơn hàng.
-
-        **Lưu ý quan trọng:** Cột `Order Paint Weight` chỉ là lượng sơn của đơn hàng.
-        Hệ thống luôn tính thêm **120 kg sơn vận hành còn tồn trong line** khi quy đổi
-        tỷ lệ dung môi sang kg.
-        """
-    )
+    st.markdown("### 🖨️ Shop Floor Quick SOP")
 
     st.warning(
-        """
-        ⚠️ **Quy tắc bắt buộc**
-
-        1. Chỉ thêm **Stage 1**, sau đó khuấy hoàn toàn tối thiểu 5 phút và đo lại độ nhớt.  
-        2. Chỉ thêm Stage 2 khi độ nhớt sau đo vẫn lớn hơn USL.  
-        3. Chỉ thêm Stage 3 khi được phép và tổng dung môi chưa vượt giới hạn Stop.  
-        4. Khi đạt vùng Saturation / Stop Ratio: **dừng thêm dung môi và liên hệ Process Engineer**.
-        """
-    )
-
-    st.info(
-        """
-        **Cơ sở tính toán**
-
-        `Operating Dilution Base = Order Paint Weight + 120 kg line hold-up`
-
-        `Typical Total Solvent = Operating Dilution Base × Median Historical Solvent Ratio`
-
-        Các mức dung môi Stage 1 / 2 / 3 được giới hạn bởi vùng giảm hiệu suất
-        và ngưỡng bão hòa đã được phân tích từ dữ liệu lịch sử.
-        """
+        "Add Stage 1 only → Mix 5 min → Measure viscosity. "
+        "Stage 2 only if viscosity is still above USL. "
+        "Never exceed Stop Total."
     )
 
     matrix_df = master_df.copy()
 
     # =====================================================
     # 1. ORDER PAINT WEIGHT RANGE
-    # 塗料重量 = lượng sơn đơn hàng, chưa bao gồm 120 kg trong line
+    # 塗料重量 = order paint weight only
+    # Actual dilution base = order paint weight + 120 kg in line
     # =====================================================
     weight_bins = [0, 25, 50, 80, 120, 200, np.inf]
 
@@ -1166,7 +1136,7 @@ with tab4:
     )
 
     # =====================================================
-    # 2. WORKER LOOKUP BASE TABLE
+    # 2. BUILD BASE LOOKUP TABLE
     # =====================================================
     worker_sop = matrix_df.groupby(
         [
@@ -1180,13 +1150,11 @@ with tab4:
     ).agg(
         Valid_Batches=("塗料批號", "nunique"),
 
-        # 塗料重量 chỉ là khối lượng sơn đơn hàng
-        Typical_Order_Paint_Weight=("塗料重量", "median"),
+        Typical_Order_Paint_Weight=(
+            "塗料重量",
+            "median"
+        ),
 
-        # Độ nhớt sau pha lịch sử tham khảo
-        Typical_Target_Visc=("黏度(秒)_1", "median"),
-
-        # Tỷ lệ được tính theo Dilution_Base = 塗料重量 + 120
         Median_Solvent_Ratio=(
             "Solvent_Ratio_Percent",
             "median"
@@ -1200,57 +1168,38 @@ with tab4:
         P95_Solvent_Ratio=(
             "Solvent_Ratio_Percent",
             lambda x: x.quantile(0.95)
-        ),
-
-        Median_Viscosity_Drop=("Delta_V", "median"),
-        P90_Viscosity_Drop=(
-            "Delta_V",
-            lambda x: x.quantile(0.90)
-        ),
-        Max_Viscosity_Drop=("Delta_V", "max")
+        )
     ).reset_index()
 
-    # Giữ lại các nhóm có dữ liệu đủ dùng cho công nhân
+    # At least 5 historical batches for a worker lookup row
     worker_sop = worker_sop[
         worker_sop["Valid_Batches"] >= 5
     ].copy()
 
     if worker_sop.empty:
         st.warning(
-            "⚠️ Không có nhóm dữ liệu nào đủ tối thiểu 5 batch để tạo bảng SOP công nhân."
+            "No valid worker SOP rows available. "
+            "Each row requires at least 5 historical batches."
         )
         st.stop()
 
     # =====================================================
     # 3. OPERATING DILUTION BASE
-    # Order Paint Weight + 120 kg paint remaining in line
+    # Order paint + 120 kg line hold-up
     # =====================================================
     worker_sop["Operating_Dilution_Base"] = (
         worker_sop["Typical_Order_Paint_Weight"] + 120
     )
 
-    # Quy đổi tỷ lệ dung môi lịch sử thành kg
-    # Dùng Operating Dilution Base để đảm bảo luôn tính 120 kg line hold-up
+    # Historical planned total solvent based on median ratio
     worker_sop["Typical_Total_Solvent_kg"] = (
         worker_sop["Operating_Dilution_Base"]
         * worker_sop["Median_Solvent_Ratio"]
         / 100
     )
 
-    worker_sop["P90_Total_Solvent_kg"] = (
-        worker_sop["Operating_Dilution_Base"]
-        * worker_sop["P90_Solvent_Ratio"]
-        / 100
-    )
-
-    worker_sop["P95_Total_Solvent_kg"] = (
-        worker_sop["Operating_Dilution_Base"]
-        * worker_sop["P95_Solvent_Ratio"]
-        / 100
-    )
-
     # =====================================================
-    # 4. BUILD SATURATION THRESHOLD BY SYSTEM
+    # 4. SATURATION THRESHOLDS BY RESIN + VENDOR + SOLVENT
     # =====================================================
     saturation_summary = []
 
@@ -1288,8 +1237,9 @@ with tab4:
         how="left"
     )
 
-    # Nếu chưa phát hiện saturation rõ ràng:
-    # P90 = cảnh báo, P95 = dừng / cần phê duyệt kỹ sư
+    # If no clear saturation pattern:
+    # P90 = warning limit
+    # P95 = stop / engineer approval limit
     worker_sop["Warning_Ratio"] = (
         worker_sop["Saturation_Warning_Ratio"]
         .fillna(worker_sop["P90_Solvent_Ratio"])
@@ -1300,14 +1250,14 @@ with tab4:
         .fillna(worker_sop["P95_Solvent_Ratio"])
     )
 
-    # Bảo đảm Stop Ratio không nhỏ hơn Warning Ratio
+    # Ensure stop ratio is never below warning ratio
     worker_sop["Stop_Ratio"] = np.maximum(
         worker_sop["Stop_Ratio"],
         worker_sop["Warning_Ratio"]
     )
 
     # =====================================================
-    # 5. CONVERT SATURATION RATIO INTO MAXIMUM KG
+    # 5. CONVERT LIMIT RATIOS TO KG
     # =====================================================
     worker_sop["Warning_Max_Solvent_kg"] = (
         worker_sop["Operating_Dilution_Base"]
@@ -1321,57 +1271,36 @@ with tab4:
         / 100
     )
 
-    # Lượng lịch sử được phép dùng để lên kế hoạch:
-    # Không vượt ngưỡng Warning ngay từ đầu.
+    # Do not plan initial addition beyond warning level
     worker_sop["Safe_Planned_Total_kg"] = np.minimum(
         worker_sop["Typical_Total_Solvent_kg"],
         worker_sop["Warning_Max_Solvent_kg"]
     )
 
     # =====================================================
-    # 6. STAGED ADDITION WITH SATURATION GUARDRAIL
+    # 6. 3-STAGE ADDITION WITH SATURATION GUARDRAIL
     # =====================================================
-
-    # Stage 1: 60% của lượng an toàn, không được vượt Warning Max
-    worker_sop["Stage_1_Add_kg"] = np.minimum(
-        worker_sop["Safe_Planned_Total_kg"] * 0.60,
-        worker_sop["Warning_Max_Solvent_kg"]
-    )
-
-    # Stage 2: Chỉ được thêm đến ngưỡng Warning
-    stage2_planned = worker_sop["Safe_Planned_Total_kg"] * 0.25
-    stage2_remaining = (
-        worker_sop["Warning_Max_Solvent_kg"]
-        - worker_sop["Stage_1_Add_kg"]
+    worker_sop["Stage_1_Add_kg"] = (
+        worker_sop["Safe_Planned_Total_kg"] * 0.60
     )
 
     worker_sop["Stage_2_Max_Add_kg"] = np.minimum(
-        stage2_planned,
-        stage2_remaining
+        worker_sop["Safe_Planned_Total_kg"] * 0.25,
+        worker_sop["Warning_Max_Solvent_kg"]
+        - worker_sop["Stage_1_Add_kg"]
     ).clip(lower=0)
 
-    # Stage 3: chỉ được dùng khi đo lại vẫn > USL
-    # Tổng Stage 1+2+3 tuyệt đối không vượt Stop Max.
-    stage3_planned = worker_sop["Safe_Planned_Total_kg"] * 0.15
-    stage3_remaining = (
+    worker_sop["Stage_3_Max_Add_kg"] = np.minimum(
+        worker_sop["Safe_Planned_Total_kg"] * 0.15,
         worker_sop["Stop_Max_Solvent_kg"]
         - worker_sop["Stage_1_Add_kg"]
         - worker_sop["Stage_2_Max_Add_kg"]
-    )
-
-    worker_sop["Stage_3_Max_Add_kg"] = np.minimum(
-        stage3_planned,
-        stage3_remaining
     ).clip(lower=0)
 
-    worker_sop["Maximum_Allowed_Total_kg"] = (
-        worker_sop["Stop_Max_Solvent_kg"]
-    )
-
     # =====================================================
-    # 7. SATURATION STATUS / INSTRUCTION
+    # 7. SIMPLE WORKER ACTION
     # =====================================================
-    worker_sop["Saturation_Control_Status"] = np.select(
+    worker_sop["Worker_Action"] = np.select(
         [
             worker_sop["Typical_Total_Solvent_kg"]
             >= worker_sop["Stop_Max_Solvent_kg"],
@@ -1380,33 +1309,14 @@ with tab4:
             >= worker_sop["Warning_Max_Solvent_kg"]
         ],
         [
-            "🔴 STOP: Historical demand reaches saturation limit",
-            "🟠 CAUTION: Historical demand enters diminishing-return zone"
+            "STOP - Call Process Engineer",
+            "CAUTION - Measure before Stage 2"
         ],
-        default="🟢 NORMAL: Historical demand within efficient operating zone"
-    )
-
-    worker_sop["Stage_1_Action"] = (
-        "Add Stage 1 → Mix ≥5 min → Measure viscosity"
-    )
-
-    worker_sop["Stage_2_Condition"] = (
-        "Only if measured viscosity remains above USL "
-        "and total solvent stays ≤ Warning Max"
-    )
-
-    worker_sop["Stage_3_Condition"] = (
-        "Only if still above USL after Stage 2; "
-        "never exceed Stop Max"
-    )
-
-    worker_sop["Escalation_Rule"] = (
-        "If viscosity is still above USL at Stop Max: "
-        "STOP and contact Process Engineer"
+        default="Add Stage 1 → Mix 5 min → Measure"
     )
 
     # =====================================================
-    # 8. FINAL WORKER SOP OUTPUT
+    # 8. SHORT OUTPUT FOR OPERATORS
     # =====================================================
     worker_output = worker_sop[
         [
@@ -1416,73 +1326,23 @@ with tab4:
             "Initial_Viscosity_Zone",
             "Order_Paint_Weight_Range",
             "Valid_Batches",
-
-            "Typical_Order_Paint_Weight",
-            "Operating_Dilution_Base",
-
-            "Typical_Target_Visc",
-            "Median_Viscosity_Drop",
-            "P90_Viscosity_Drop",
-            "Max_Viscosity_Drop",
-
-            "Median_Solvent_Ratio",
-            "Warning_Ratio",
-            "Stop_Ratio",
-
-            "Typical_Total_Solvent_kg",
-            "Warning_Max_Solvent_kg",
-            "Maximum_Allowed_Total_kg",
-
             "Stage_1_Add_kg",
-            "Stage_1_Action",
-
             "Stage_2_Max_Add_kg",
-            "Stage_2_Condition",
-
-            "Stage_3_Max_Add_kg",
-            "Stage_3_Condition",
-
-            "Saturation_Control_Status",
-            "Escalation_Rule"
+            "Stop_Max_Solvent_kg",
+            "Worker_Action"
         ]
     ].copy()
 
     worker_output.rename(
         columns={
             "Solvent_Type": "Solvent",
-            "Initial_Viscosity_Zone": "Initial Viscosity Range",
-            "Order_Paint_Weight_Range": "Order Paint Weight Range",
-            "Valid_Batches": "Valid Batches",
-
-            "Typical_Order_Paint_Weight": "Typical Order Paint Weight (kg)",
-            "Operating_Dilution_Base": (
-                "Operating Dilution Base (Order + 120 kg Line Hold-up)"
-            ),
-
-            "Typical_Target_Visc": "Typical After Viscosity (s)",
-            "Median_Viscosity_Drop": "Median Viscosity Drop (s)",
-            "P90_Viscosity_Drop": "P90 Viscosity Drop (s)",
-            "Max_Viscosity_Drop": "Maximum Historical Drop (s)",
-
-            "Median_Solvent_Ratio": "Median Solvent Ratio (%)",
-            "Warning_Ratio": "Warning Ratio (%)",
-            "Stop_Ratio": "Stop Ratio (%)",
-
-            "Typical_Total_Solvent_kg": "Typical Planned Total Solvent (kg)",
-            "Warning_Max_Solvent_kg": "Warning Max Total Solvent (kg)",
-            "Maximum_Allowed_Total_kg": "Stop Max Total Solvent (kg)",
-
+            "Initial_Viscosity_Zone": "Initial Viscosity",
+            "Order_Paint_Weight_Range": "Order Weight",
+            "Valid_Batches": "History n",
             "Stage_1_Add_kg": "Stage 1 Add (kg)",
-            "Stage_1_Action": "Stage 1 Action",
-
-            "Stage_2_Max_Add_kg": "Stage 2 Max Add (kg)",
-            "Stage_2_Condition": "Stage 2 Condition",
-
-            "Stage_3_Max_Add_kg": "Stage 3 Max Add (kg)",
-            "Stage_3_Condition": "Stage 3 Condition",
-
-            "Saturation_Control_Status": "Saturation Control",
-            "Escalation_Rule": "Escalation Rule"
+            "Stage_2_Max_Add_kg": "Stage 2 Max (kg)",
+            "Stop_Max_Solvent_kg": "Stop Total (kg)",
+            "Worker_Action": "Action"
         },
         inplace=True
     )
@@ -1492,77 +1352,24 @@ with tab4:
             "Resin",
             "Vendor",
             "Solvent",
-            "Initial Viscosity Range",
-            "Order Paint Weight Range"
+            "Initial Viscosity",
+            "Order Weight"
         ]
     )
 
     st.dataframe(
         worker_output,
         column_config={
-            "Valid Batches": st.column_config.NumberColumn(
+            "History n": st.column_config.NumberColumn(
                 format="%d"
             ),
-
-            "Typical Order Paint Weight (kg)": st.column_config.NumberColumn(
-                format="%.1f kg"
-            ),
-
-            "Operating Dilution Base (Order + 120 kg Line Hold-up)": (
-                st.column_config.NumberColumn(
-                    format="%.1f kg"
-                )
-            ),
-
-            "Typical After Viscosity (s)": st.column_config.NumberColumn(
-                format="%.1f s"
-            ),
-
-            "Median Viscosity Drop (s)": st.column_config.NumberColumn(
-                format="%.1f s"
-            ),
-
-            "P90 Viscosity Drop (s)": st.column_config.NumberColumn(
-                format="%.1f s"
-            ),
-
-            "Maximum Historical Drop (s)": st.column_config.NumberColumn(
-                format="%.1f s"
-            ),
-
-            "Median Solvent Ratio (%)": st.column_config.NumberColumn(
-                format="%.2f%%"
-            ),
-
-            "Warning Ratio (%)": st.column_config.NumberColumn(
-                format="%.2f%%"
-            ),
-
-            "Stop Ratio (%)": st.column_config.NumberColumn(
-                format="%.2f%%"
-            ),
-
-            "Typical Planned Total Solvent (kg)": st.column_config.NumberColumn(
-                format="%.2f kg"
-            ),
-
-            "Warning Max Total Solvent (kg)": st.column_config.NumberColumn(
-                format="%.2f kg"
-            ),
-
-            "Stop Max Total Solvent (kg)": st.column_config.NumberColumn(
-                format="%.2f kg"
-            ),
-
             "Stage 1 Add (kg)": st.column_config.NumberColumn(
                 format="%.2f kg"
             ),
-
-            "Stage 2 Max Add (kg)": st.column_config.NumberColumn(
+            "Stage 2 Max (kg)": st.column_config.NumberColumn(
                 format="%.2f kg"
             ),
-
-            "Stage 3 Max Add (kg)": st.column_config.NumberColumn(
+            "Stop Total (kg)": st.column_config.NumberColumn(
                 format="%.2f kg"
             )
         },
@@ -1570,32 +1377,9 @@ with tab4:
         hide_index=True
     )
 
-    st.markdown("---")
-    st.markdown("### 📘 Manual Calculation Note")
-
-    st.markdown(
-        """
-        **1. Operating Dilution Base**  
-        `= Order Paint Weight + 120 kg line hold-up`
-
-        **2. Typical Planned Total Solvent**  
-        `= Operating Dilution Base × Median Historical Solvent Ratio`
-
-        **3. Warning Maximum Total Solvent**  
-        `= Operating Dilution Base × Warning Ratio`
-
-        **4. Stop Maximum Total Solvent**  
-        `= Operating Dilution Base × Stop Ratio`
-
-        **5. Staged Addition**  
-        `Stage 1 = 60% of safe planned solvent`  
-        `Stage 2 = up to 25%, only below Warning Max`  
-        `Stage 3 = up to 15%, only below Stop Max`
-
-        **Important:** Khi đã đạt Stop Max mà độ nhớt vẫn vượt USL, không được tiếp tục
-        thêm dung môi. Cần kiểm tra nhiệt độ, thời gian khuấy, batch sơn, dung môi,
-        điều kiện line hoặc liên hệ Process Engineer.
-        """
+    st.caption(
+        "Order Weight + 120 kg line hold-up is used internally. "
+        "Do not exceed Stop Total."
     )
 
     csv_export = worker_output.to_csv(
@@ -1603,8 +1387,8 @@ with tab4:
     ).encode("utf-8-sig")
 
     st.download_button(
-        "📥 Download Printable Worker SOP (CSV)",
+        "Download Worker SOP CSV",
         data=csv_export,
-        file_name="Master_Shop_Floor_Viscosity_SOP.csv",
+        file_name="Worker_Viscosity_SOP.csv",
         mime="text/csv"
     )
