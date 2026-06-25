@@ -1145,9 +1145,10 @@ with tab4:
     ).agg(
         History_Batches=("塗料批號", "nunique"),
 
+        # Historical paint quantity for similar batches
+        Ref_Paint_Weight_kg=("塗料重量", "median"),
+
         Ref_Start_Visc=("黏度(秒)", "median"),
-        Start_Visc_P25=("黏度(秒)", lambda x: x.quantile(0.25)),
-        Start_Visc_P75=("黏度(秒)", lambda x: x.quantile(0.75)),
 
         Ref_Final_Visc=("黏度(秒)_1", "median"),
         Final_Visc_P25=("黏度(秒)_1", lambda x: x.quantile(0.25)),
@@ -1187,16 +1188,9 @@ with tab4:
         st.stop()
 
     # =====================================================
-    # 3. ACTUAL BEFORE / AFTER RANGE
+    # 3. FINAL VISCOSITY ACTUAL RANGE
+    # P25-P75; if identical, show one actual value only
     # =====================================================
-    worker_sop["Start_Visc_Actual_Range"] = worker_sop.apply(
-        lambda row: format_actual_range(
-            row["Start_Visc_P25"],
-            row["Start_Visc_P75"]
-        ),
-        axis=1
-    )
-
     worker_sop["Final_Visc_Actual_Range"] = worker_sop.apply(
         lambda row: format_actual_range(
             row["Final_Visc_P25"],
@@ -1274,9 +1268,9 @@ with tab4:
 
             "History_Batches",
 
-            "Start_Visc_Actual_Range",
             "Ref_Start_Visc",
 
+            "Ref_Paint_Weight_kg",
             "Ref_Solvent_Add_kg",
             "Ref_Solvent_Ratio",
 
@@ -1297,9 +1291,9 @@ with tab4:
 
             "History_Batches": "歷史批數",
 
-            "Start_Visc_Actual_Range": "初始黏度實際範圍",
             "Ref_Start_Visc": "參考起始黏度(秒)",
 
+            "Ref_Paint_Weight_kg": "參考塗料使用量(kg)",
             "Ref_Solvent_Add_kg": "參考稀釋劑添加量(kg)",
             "Ref_Solvent_Ratio": "參考稀釋劑添加比例(%)",
 
@@ -1330,6 +1324,10 @@ with tab4:
 
             "參考起始黏度(秒)": st.column_config.NumberColumn(
                 format="%.1f 秒"
+            ),
+
+            "參考塗料使用量(kg)": st.column_config.NumberColumn(
+                format="%.2f kg"
             ),
 
             "參考稀釋劑添加量(kg)": st.column_config.NumberColumn(
