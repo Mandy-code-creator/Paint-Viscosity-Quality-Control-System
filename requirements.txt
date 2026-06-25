@@ -7,3 +7,4 @@ statsmodels
 graphviz
 streamlit-agraph
 python-docx
+kaleido
