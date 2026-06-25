@@ -1103,108 +1103,90 @@ with tab4:
     st.markdown("### 🖨️ 現場快速加料SOP")
 
     st.warning(
-        "操作順序：查詢相同條件 → 添加參考稀釋劑量 → 混合5分鐘 → "
-        "量測黏度 → 與參考範圍比較。不得超過飽和停止添加量。"
+        "操作順序：選擇相同條件 → 輸入本次訂單塗料重量 → "
+        "依建議添加稀釋劑 → 混合5分鐘 → 量測黏度 → "
+        "與參考最終黏度範圍比較。不得超過飽和停止添加量。"
     )
 
     st.caption(
-        "註：系統內部計算已包含管線內120 kg運轉塗料；"
-        "表中「訂單塗料重量」僅為本次訂單塗料重量。"
+        "註：系統計算基準 = 訂單塗料重量 + 120 kg 管線內運轉塗料。"
     )
 
     matrix_df = master_df.copy()
 
     # =====================================================
-    # 1. ORDER PAINT WEIGHT RANGE
-    # 塗料重量 = 訂單塗料重量
-    # Operating Base = 訂單塗料重量 + 120 kg line hold-up
+    # 1. CREATE FINAL VISCOSITY ZONE
     # =====================================================
-    weight_bins = [0, 25, 50, 80, 120, 200, np.inf]
+    def assign_final_zone(v):
+        if v <= 30:
+            return "<=30 s"
+        elif v <= 50:
+            return "31-50 s"
+        elif v <= 70:
+            return "51-70 s"
+        elif v <= 90:
+            return "71-90 s"
+        else:
+            return ">90 s"
 
-    weight_labels = [
-        "0-25 kg",
-        "26-50 kg",
-        "51-80 kg",
-        "81-120 kg",
-        "121-200 kg",
-        ">200 kg"
-    ]
-
-    matrix_df["Order_Paint_Weight_Range"] = pd.cut(
-        matrix_df["塗料重量"],
-        bins=weight_bins,
-        labels=weight_labels,
-        include_lowest=True,
-        right=True
+    matrix_df["Final_Viscosity_Zone"] = (
+        matrix_df["黏度(秒)_1"]
+        .apply(assign_final_zone)
     )
 
     # =====================================================
-    # 2. HISTORICAL LOOKUP TABLE
+    # 2. BUILD HISTORICAL REFERENCE TABLE
+    # Group only by Resin + Vendor + Solvent + Initial Viscosity Range
+    # No Order Weight Range
     # =====================================================
     worker_sop = matrix_df.groupby(
         [
             "Resin",
             "Vendor",
             "Solvent_Type",
-            "Initial_Viscosity_Zone",
-            "Order_Paint_Weight_Range"
+            "Initial_Viscosity_Zone"
         ],
         observed=False
     ).agg(
-        Valid_Batches=("塗料批號", "nunique"),
+        歷史批數=("塗料批號", "nunique"),
 
-        Typical_Order_Paint_Weight=(
-            "塗料重量",
-            "median"
-        ),
+        參考起始黏度=("黏度(秒)", "median"),
+        起始黏度P25=("黏度(秒)", lambda x: x.quantile(0.25)),
+        起始黏度P75=("黏度(秒)", lambda x: x.quantile(0.75)),
 
-        Ref_Start_Visc=(
-            "黏度(秒)",
-            "median"
-        ),
+        參考最終黏度=("黏度(秒)_1", "median"),
+        最終黏度P25=("黏度(秒)_1", lambda x: x.quantile(0.25)),
+        最終黏度P75=("黏度(秒)_1", lambda x: x.quantile(0.75)),
 
-        Ref_Final_Visc=(
-            "黏度(秒)_1",
-            "median"
-        ),
-
-        Final_Visc_P25=(
-            "黏度(秒)_1",
-            lambda x: x.quantile(0.25)
-        ),
-
-        Final_Visc_P75=(
-            "黏度(秒)_1",
-            lambda x: x.quantile(0.75)
-        ),
-
-        # Historical median actual solvent addition in kg
-        Ref_Solvent_Add_kg=(
-            "添加重量",
-            "median"
-        ),
-
-        # Same definition as Tab 1:
-        # 添加重量 / (塗料重量 + 120) × 100
-        Median_Solvent_Ratio=(
+        參考稀釋劑添加比例=(
             "Solvent_Ratio_Percent",
             "median"
         ),
 
-        P90_Solvent_Ratio=(
+        稀釋劑比例P25=(
+            "Solvent_Ratio_Percent",
+            lambda x: x.quantile(0.25)
+        ),
+
+        稀釋劑比例P75=(
+            "Solvent_Ratio_Percent",
+            lambda x: x.quantile(0.75)
+        ),
+
+        稀釋劑比例P90=(
             "Solvent_Ratio_Percent",
             lambda x: x.quantile(0.90)
         ),
 
-        P95_Solvent_Ratio=(
+        稀釋劑比例P95=(
             "Solvent_Ratio_Percent",
             lambda x: x.quantile(0.95)
         )
     ).reset_index()
 
-    # Require enough historical data for an operator lookup row
+    # Minimum data requirement
     worker_sop = worker_sop[
-        worker_sop["Valid_Batches"] >= 5
+        worker_sop["歷史批數"] >= 5
     ].copy()
 
     if worker_sop.empty:
@@ -1214,14 +1196,7 @@ with tab4:
         st.stop()
 
     # =====================================================
-    # 3. OPERATING DILUTION BASE
-    # =====================================================
-    worker_sop["Operating_Dilution_Base"] = (
-        worker_sop["Typical_Order_Paint_Weight"] + 120
-    )
-
-    # =====================================================
-    # 4. SATURATION LIMITS BY RESIN + VENDOR + SOLVENT
+    # 3. SATURATION LIMITS BY RESIN + VENDOR + SOLVENT
     # =====================================================
     saturation_summary = []
 
@@ -1246,8 +1221,8 @@ with tab4:
             "Resin": resin_value,
             "Vendor": vendor_value,
             "Solvent_Type": solvent_value,
-            "Saturation_Warning_Ratio": temp_saturation["warning_ratio"],
-            "Saturation_Stop_Ratio": temp_saturation["saturation_ratio"]
+            "飽和警戒比例": temp_saturation["warning_ratio"],
+            "飽和停止比例": temp_saturation["saturation_ratio"]
         })
 
     saturation_summary_df = pd.DataFrame(saturation_summary)
@@ -1258,109 +1233,138 @@ with tab4:
         how="left"
     )
 
-    # No clear saturation pattern:
-    # P90 = warning; P95 = maximum allowed ratio
-    worker_sop["Warning_Ratio"] = (
-        worker_sop["Saturation_Warning_Ratio"]
-        .fillna(worker_sop["P90_Solvent_Ratio"])
+    # If no clear saturation pattern:
+    # P90 = warning ratio
+    # P95 = stop ratio
+    worker_sop["飽和警戒比例"] = (
+        worker_sop["飽和警戒比例"]
+        .fillna(worker_sop["稀釋劑比例P90"])
     )
 
-    worker_sop["Stop_Ratio"] = (
-        worker_sop["Saturation_Stop_Ratio"]
-        .fillna(worker_sop["P95_Solvent_Ratio"])
+    worker_sop["飽和停止比例"] = (
+        worker_sop["飽和停止比例"]
+        .fillna(worker_sop["稀釋劑比例P95"])
     )
 
-    worker_sop["Stop_Ratio"] = np.maximum(
-        worker_sop["Stop_Ratio"],
-        worker_sop["Warning_Ratio"]
+    worker_sop["飽和停止比例"] = np.maximum(
+        worker_sop["飽和停止比例"],
+        worker_sop["飽和警戒比例"]
     )
 
-    # Convert percentage limits back into kg
-    worker_sop["Saturation_Warning_kg"] = (
-        worker_sop["Operating_Dilution_Base"]
-        * worker_sop["Warning_Ratio"]
+    # =====================================================
+    # 4. QUICK CALCULATOR
+    # =====================================================
+    st.markdown("#### 本次訂單快速計算")
+
+    calc_col1, calc_col2 = st.columns(2)
+
+    with calc_col1:
+        input_order_weight = st.number_input(
+            "本次訂單塗料重量 (kg)",
+            min_value=1.0,
+            value=100.0,
+            step=10.0
+        )
+
+    with calc_col2:
+        operating_base = input_order_weight + 120
+
+        st.metric(
+            "實際稀釋計算基準 (kg)",
+            f"{operating_base:.1f} kg"
+        )
+
+    # Convert historical ratios into actual kg for this order
+    worker_sop["建議稀釋劑添加量(kg)"] = (
+        operating_base
+        * worker_sop["參考稀釋劑添加比例"]
         / 100
     )
 
-    worker_sop["Saturation_Stop_kg"] = (
-        worker_sop["Operating_Dilution_Base"]
-        * worker_sop["Stop_Ratio"]
+    worker_sop["飽和警戒添加量(kg)"] = (
+        operating_base
+        * worker_sop["飽和警戒比例"]
+        / 100
+    )
+
+    worker_sop["飽和停止添加量(kg)"] = (
+        operating_base
+        * worker_sop["飽和停止比例"]
         / 100
     )
 
     # =====================================================
-    # 5. OPERATION GUIDANCE
+    # 5. CREATE BEFORE / AFTER RANGE TEXT
     # =====================================================
-    worker_sop["Operation_Instruction"] = (
-        "添加參考稀釋劑量 → 混合5分鐘 → 量測黏度"
+    worker_sop["起始黏度參考範圍"] = (
+        worker_sop["起始黏度P25"].round(1).astype(str)
+        + " - "
+        + worker_sop["起始黏度P75"].round(1).astype(str)
+        + " 秒"
     )
 
-    worker_sop["Result_Check"] = (
-        "量測結果應落於參考最終黏度範圍內"
+    worker_sop["最終黏度參考範圍"] = (
+        worker_sop["最終黏度P25"].round(1).astype(str)
+        + " - "
+        + worker_sop["最終黏度P75"].round(1).astype(str)
+        + " 秒"
     )
 
     # =====================================================
-    # 6. FINAL OPERATOR TABLE
+    # 6. SHORT OPERATION INSTRUCTION
+    # =====================================================
+    worker_sop["操作指示"] = (
+        "添加建議量 → 混合5分鐘 → 量測黏度"
+    )
+
+    worker_sop["結果判定"] = (
+        "量測最終黏度應落於最終黏度參考範圍；"
+        "若高於範圍，追加前請確認；"
+        "若低於範圍，停止追加。"
+    )
+
+    # =====================================================
+    # 7. FINAL WORKER TABLE
     # =====================================================
     worker_output = worker_sop[
         [
             "Resin",
             "Vendor",
             "Solvent_Type",
+
             "Initial_Viscosity_Zone",
-            "Order_Paint_Weight_Range",
-            "Valid_Batches",
+            "起始黏度參考範圍",
 
-            "Ref_Start_Visc",
-            "Ref_Solvent_Add_kg",
-            "Median_Solvent_Ratio",
-            "Ref_Final_Visc",
-            "Final_Visc_P25",
-            "Final_Visc_P75",
+            "Final_Viscosity_Zone",
+            "最終黏度參考範圍",
 
-            "Saturation_Warning_kg",
-            "Saturation_Stop_kg",
+            "歷史批數",
 
-            "Operation_Instruction",
-            "Result_Check"
+            "參考稀釋劑添加比例",
+            "建議稀釋劑添加量(kg)",
+
+            "飽和警戒比例",
+            "飽和警戒添加量(kg)",
+
+            "飽和停止比例",
+            "飽和停止添加量(kg)",
+
+            "操作指示",
+            "結果判定"
         ]
     ].copy()
-
-    worker_output["Final_Viscosity_Reference_Range"] = (
-        worker_output["Final_Visc_P25"].round(1).astype(str)
-        + " - "
-        + worker_output["Final_Visc_P75"].round(1).astype(str)
-        + " 秒"
-    )
-
-    worker_output.drop(
-        columns=[
-            "Final_Visc_P25",
-            "Final_Visc_P75"
-        ],
-        inplace=True
-    )
 
     worker_output.rename(
         columns={
             "Resin": "樹脂種類",
             "Vendor": "塗料供應商",
             "Solvent_Type": "稀釋劑種類",
-            "Initial_Viscosity_Zone": "初始黏度範圍",
-            "Order_Paint_Weight_Range": "訂單塗料重量範圍",
-            "Valid_Batches": "歷史批數",
 
-            "Ref_Start_Visc": "參考起始黏度(秒)",
-            "Ref_Solvent_Add_kg": "參考稀釋劑添加量(kg)",
-            "Median_Solvent_Ratio": "參考稀釋劑添加比例(%)",
-            "Ref_Final_Visc": "參考最終黏度(秒)",
-            "Final_Viscosity_Reference_Range": "最終黏度參考範圍",
+            "Initial_Viscosity_Zone": "初始黏度區間",
+            "起始黏度參考範圍": "初始黏度參考範圍",
 
-            "Saturation_Warning_kg": "飽和警戒添加量(kg)",
-            "Saturation_Stop_kg": "飽和停止添加量(kg)",
-
-            "Operation_Instruction": "操作指示",
-            "Result_Check": "結果判定"
+            "Final_Viscosity_Zone": "最終黏度區間",
+            "最終黏度參考範圍": "最終黏度參考範圍"
         },
         inplace=True
     )
@@ -1370,8 +1374,7 @@ with tab4:
             "樹脂種類",
             "塗料供應商",
             "稀釋劑種類",
-            "初始黏度範圍",
-            "訂單塗料重量範圍"
+            "初始黏度區間"
         ]
     )
 
@@ -1382,24 +1385,24 @@ with tab4:
                 format="%d"
             ),
 
-            "參考起始黏度(秒)": st.column_config.NumberColumn(
-                format="%.1f 秒"
-            ),
-
-            "參考稀釋劑添加量(kg)": st.column_config.NumberColumn(
-                format="%.2f kg"
-            ),
-
-            "參考稀釋劑添加比例(%)": st.column_config.NumberColumn(
+            "參考稀釋劑添加比例": st.column_config.NumberColumn(
                 format="%.2f%%"
             ),
 
-            "參考最終黏度(秒)": st.column_config.NumberColumn(
-                format="%.1f 秒"
+            "建議稀釋劑添加量(kg)": st.column_config.NumberColumn(
+                format="%.2f kg"
+            ),
+
+            "飽和警戒比例": st.column_config.NumberColumn(
+                format="%.2f%%"
             ),
 
             "飽和警戒添加量(kg)": st.column_config.NumberColumn(
                 format="%.2f kg"
+            ),
+
+            "飽和停止比例": st.column_config.NumberColumn(
+                format="%.2f%%"
             ),
 
             "飽和停止添加量(kg)": st.column_config.NumberColumn(
@@ -1411,8 +1414,8 @@ with tab4:
     )
 
     st.caption(
-        "判定原則：量測黏度高於參考範圍時，稀釋效果不足，追加前請確認；"
-        "低於參考範圍時，停止追加。任何情況不得超過飽和停止添加量。"
+        "建議添加量依歷史中位稀釋劑比例計算。"
+        "飽和警戒/停止比例依歷史效率下降分析或P90/P95保護界限計算。"
     )
 
     csv_export = worker_output.to_csv(
