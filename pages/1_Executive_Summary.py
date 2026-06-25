@@ -1,4 +1,3 @@
-```python
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -1227,4 +1226,3 @@ with tab_matrix:
             file_name="Resin_Vendor_Solvent_SOP_Matrix.csv",
             mime="text/csv"
         )
-```
