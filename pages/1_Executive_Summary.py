@@ -12,7 +12,7 @@ from docx.enum.section import WD_ORIENT
 
 
 # =========================================================
-# EXPORT HISTORICAL CHART TO WORD
+# EXPORT HISTORICAL CHART TO WORD (ROBUST SAFE VERSION)
 # =========================================================
 def export_chart_to_word(
     fig,
@@ -36,9 +36,7 @@ def export_chart_to_word(
     title = doc.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    title_run = title.add_run(
-        "Historical Viscosity Transition Analysis"
-    )
+    title_run = title.add_run("Historical Viscosity Transition Analysis")
     title_run.bold = True
     title_run.font.size = Pt(18)
 
@@ -78,7 +76,6 @@ def export_chart_to_word(
     for i, header in enumerate(headers):
         cell = table.cell(0, i)
         cell.text = header
-
         for paragraph in cell.paragraphs:
             for run in paragraph.runs:
                 run.bold = True
@@ -87,29 +84,36 @@ def export_chart_to_word(
     for i, value in enumerate(values):
         cell = table.cell(1, i)
         cell.text = value
-
         for paragraph in cell.paragraphs:
             for run in paragraph.runs:
                 run.font.size = Pt(9)
 
     doc.add_paragraph("")
 
-    chart_png = fig.to_image(
-        format="png",
-        width=1500,
-        height=850,
-        scale=2
-    )
-
-    chart_stream = BytesIO(chart_png)
-
-    chart_paragraph = doc.add_paragraph()
-    chart_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-    chart_paragraph.add_run().add_picture(
-        chart_stream,
-        width=Inches(10.4)
-    )
+    # --- ĐÃ SỬA: BỌC TRY-EXCEPT ĐỂ BẢO VỆ APP KHỎI CRASH KHI SERVER THIẾU KALEIDO ---
+    try:
+        chart_png = fig.to_image(
+            format="png",
+            width=1500,
+            height=850,
+            scale=2
+        )
+        chart_stream = BytesIO(chart_png)
+        chart_paragraph = doc.add_paragraph()
+        chart_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        chart_paragraph.add_run().add_picture(
+            chart_stream,
+            width=Inches(10.4)
+        )
+    except Exception as e:
+        error_paragraph = doc.add_paragraph()
+        error_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        error_run = error_paragraph.add_run(
+            "\n[⚠️ CHART IMAGE EXPORT FAILED]\n"
+            "Server environment is missing 'kaleido' library to render dynamic charts into static PNGs.\n"
+            "Please add 'kaleido==0.1.0.post1' to your requirements.txt."
+        )
+        error_run.bold = True
 
     note = doc.add_paragraph()
     note_run = note.add_run(
