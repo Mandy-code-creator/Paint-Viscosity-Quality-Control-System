@@ -1097,23 +1097,28 @@ with tab3:
 
 # =========================================================
 # =========================================================
+# =========================================================
 # TAB 4: SHOP FLOOR QUICK SOP
 # =========================================================
 with tab4:
-    st.markdown("### 🖨️ Shop Floor Quick SOP")
+    st.markdown("### 🖨️ 現場快速加料SOP")
 
     st.warning(
-        "Stage 1 → Mix 5 min → Measure. "
-        "Stage 2 only if viscosity is still above the expected Stage 1 range. "
-        "Never exceed Stop Total."
+        "操作順序：第一次添加 → 混合5分鐘 → 量測黏度 → "
+        "必要時追加保留量。不得超過最大允許總添加量。"
+    )
+
+    st.caption(
+        "註：系統內部計算已包含管線內120 kg運轉塗料；"
+        "表中「訂單塗料重量」僅為本次訂單塗料重量。"
     )
 
     matrix_df = master_df.copy()
 
     # =====================================================
     # 1. ORDER PAINT WEIGHT RANGE
-    # 塗料重量 = order paint weight only
-    # Actual operating base = order paint weight + 120 kg in line
+    # 塗料重量 = 訂單塗料重量
+    # Operating Base = 訂單塗料重量 + 120 kg line hold-up
     # =====================================================
     weight_bins = [0, 25, 50, 80, 120, 200, np.inf]
 
@@ -1135,7 +1140,7 @@ with tab4:
     )
 
     # =====================================================
-    # 2. BUILD WORKER LOOKUP TABLE
+    # 2. BASE LOOKUP TABLE
     # =====================================================
     worker_sop = matrix_df.groupby(
         [
@@ -1164,11 +1169,6 @@ with tab4:
             "median"
         ),
 
-        Median_Viscosity_Drop=(
-            "Delta_V",
-            "median"
-        ),
-
         Median_Solvent_Ratio=(
             "Solvent_Ratio_Percent",
             "median"
@@ -1185,33 +1185,32 @@ with tab4:
         )
     ).reset_index()
 
+    # Worker table requires at least 5 historical batches
     worker_sop = worker_sop[
         worker_sop["Valid_Batches"] >= 5
     ].copy()
 
     if worker_sop.empty:
         st.warning(
-            "No valid worker SOP rows available. "
-            "Each row requires at least 5 historical batches."
+            "無足夠歷史資料可建立現場SOP。每個條件組合至少需要5筆有效資料。"
         )
         st.stop()
 
     # =====================================================
-    # 3. OPERATING BASE
-    # Order Paint + 120 kg line hold-up
+    # 3. OPERATING BASE AND REFERENCE SOLVENT
     # =====================================================
     worker_sop["Operating_Dilution_Base"] = (
         worker_sop["Typical_Order_Paint_Weight"] + 120
     )
 
-    worker_sop["Typical_Total_Solvent_kg"] = (
+    worker_sop["Reference_Total_Solvent_kg"] = (
         worker_sop["Operating_Dilution_Base"]
         * worker_sop["Median_Solvent_Ratio"]
         / 100
     )
 
     # =====================================================
-    # 4. SATURATION THRESHOLDS
+    # 4. SATURATION LIMIT BY RESIN + VENDOR + SOLVENT
     # =====================================================
     saturation_summary = []
 
@@ -1249,9 +1248,8 @@ with tab4:
         how="left"
     )
 
-    # No detected saturation pattern:
-    # P90 = warning threshold
-    # P95 = stop threshold
+    # If saturation is not statistically detected:
+    # P90 = caution limit; P95 = absolute stop limit
     worker_sop["Warning_Ratio"] = (
         worker_sop["Saturation_Warning_Ratio"]
         .fillna(worker_sop["P90_Solvent_Ratio"])
@@ -1279,97 +1277,80 @@ with tab4:
         / 100
     )
 
-    # Planned total must not exceed warning level
-    worker_sop["Safe_Planned_Total_kg"] = np.minimum(
-        worker_sop["Typical_Total_Solvent_kg"],
-        worker_sop["Warning_Max_Solvent_kg"]
-    )
-
     # =====================================================
-    # 5. STAGE ADDITION QUANTITIES
+    # 5. OPERATION MODE
+    # NORMAL: fast operation, 85% first dose
+    # CAUTION: close to saturation, 70% first dose
+    # STOP: reference dose reaches/exceeds absolute stop limit
     # =====================================================
-    worker_sop["Stage_1_Add_kg"] = (
-        worker_sop["Safe_Planned_Total_kg"] * 0.60
-    )
-
-    worker_sop["Stage_2_Max_Add_kg"] = np.minimum(
-        worker_sop["Safe_Planned_Total_kg"] * 0.25,
-        worker_sop["Warning_Max_Solvent_kg"]
-        - worker_sop["Stage_1_Add_kg"]
-    ).clip(lower=0)
-
-    worker_sop["Stage_3_Max_Add_kg"] = np.minimum(
-        worker_sop["Safe_Planned_Total_kg"] * 0.15,
-        worker_sop["Stop_Max_Solvent_kg"]
-        - worker_sop["Stage_1_Add_kg"]
-        - worker_sop["Stage_2_Max_Add_kg"]
-    ).clip(lower=0)
-
-    # =====================================================
-    # 6. EXPECTED VISCOSITY AFTER EACH STAGE
-    # Historical final drop is divided using the staged plan:
-    # Stage 1 = 60% of historical median drop
-    # Stage 2 = cumulative 85%
-    # Stage 3 = cumulative 100%
-    # =====================================================
-    worker_sop["Expected_V_After_Stage_1"] = (
-        worker_sop["Typical_Initial_Visc"]
-        - worker_sop["Median_Viscosity_Drop"] * 0.60
-    )
-
-    worker_sop["Expected_V_After_Stage_2"] = (
-        worker_sop["Typical_Initial_Visc"]
-        - worker_sop["Median_Viscosity_Drop"] * 0.85
-    )
-
-    worker_sop["Expected_V_After_Stage_3"] = (
-        worker_sop["Typical_Final_Visc"]
-    )
-
-    # Prevent unrealistic negative values
-    for col in [
-        "Expected_V_After_Stage_1",
-        "Expected_V_After_Stage_2",
-        "Expected_V_After_Stage_3"
-    ]:
-        worker_sop[col] = worker_sop[col].clip(lower=0)
-
-    # =====================================================
-    # 7. WORKER ACTION / SATURATION BLOCK
-    # =====================================================
-    worker_sop["Worker_Action"] = np.select(
+    worker_sop["Operation_Mode"] = np.select(
         [
-            worker_sop["Typical_Total_Solvent_kg"]
+            worker_sop["Reference_Total_Solvent_kg"]
             >= worker_sop["Stop_Max_Solvent_kg"],
 
-            worker_sop["Typical_Total_Solvent_kg"]
+            worker_sop["Reference_Total_Solvent_kg"]
             >= worker_sop["Warning_Max_Solvent_kg"]
         ],
         [
-            "STOP - Call Process Engineer",
-            "CAUTION - Check before Stage 2"
+            "停止",
+            "注意"
         ],
-        default="Stage 1 → Mix → Measure"
+        default="一般"
     )
 
-    # If historical demand is already at Stop Limit,
-    # do not show solvent instructions to the operator.
-    stop_mask = (
-        worker_sop["Typical_Total_Solvent_kg"]
-        >= worker_sop["Stop_Max_Solvent_kg"]
+    worker_sop["First_Dose_Ratio"] = np.select(
+        [
+            worker_sop["Operation_Mode"] == "停止",
+            worker_sop["Operation_Mode"] == "注意"
+        ],
+        [
+            0.00,
+            0.70
+        ],
+        default=0.85
     )
+
+    # =====================================================
+    # 6. FIRST DOSE + RESERVE DOSE
+    # Reference Total = historical median total solvent
+    # First Dose is optimized for faster operation.
+    # Reserve is only added after re-measurement.
+    # =====================================================
+    worker_sop["First_Dose_kg"] = (
+        worker_sop["Reference_Total_Solvent_kg"]
+        * worker_sop["First_Dose_Ratio"]
+    )
+
+    worker_sop["Reserve_Dose_kg"] = (
+        worker_sop["Reference_Total_Solvent_kg"]
+        - worker_sop["First_Dose_kg"]
+    ).clip(lower=0)
+
+    # Do not show automatic addition for STOP rows
+    stop_mask = worker_sop["Operation_Mode"] == "停止"
 
     worker_sop.loc[
         stop_mask,
-        [
-            "Stage_1_Add_kg",
-            "Stage_2_Max_Add_kg",
-            "Stage_3_Max_Add_kg"
-        ]
+        ["First_Dose_kg", "Reserve_Dose_kg"]
     ] = np.nan
 
     # =====================================================
-    # 8. SHORT TABLE FOR OPERATORS
+    # 7. OPERATOR ACTION
+    # =====================================================
+    worker_sop["Worker_Action"] = np.select(
+        [
+            worker_sop["Operation_Mode"] == "停止",
+            worker_sop["Operation_Mode"] == "注意"
+        ],
+        [
+            "停止添加，通知製程工程師",
+            "先添加第一次添加量，混合後量測，再決定是否追加"
+        ],
+        default="添加第一次添加量 → 混合5分鐘 → 量測黏度"
+    )
+
+    # =====================================================
+    # 8. SHORT OUTPUT TABLE FOR OPERATORS
     # =====================================================
     worker_output = worker_sop[
         [
@@ -1378,83 +1359,71 @@ with tab4:
             "Solvent_Type",
             "Initial_Viscosity_Zone",
             "Order_Paint_Weight_Range",
-            "Valid_Batches",
 
-            "Stage_1_Add_kg",
-            "Expected_V_After_Stage_1",
+            "Typical_Initial_Visc",
+            "Typical_Final_Visc",
 
-            "Stage_2_Max_Add_kg",
-            "Expected_V_After_Stage_2",
-
-            "Stage_3_Max_Add_kg",
-            "Expected_V_After_Stage_3",
-
+            "Reference_Total_Solvent_kg",
+            "First_Dose_kg",
+            "Reserve_Dose_kg",
             "Stop_Max_Solvent_kg",
+
+            "Operation_Mode",
             "Worker_Action"
         ]
     ].copy()
 
     worker_output.rename(
         columns={
-            "Solvent_Type": "Solvent",
-            "Initial_Viscosity_Zone": "Initial Viscosity",
-            "Order_Paint_Weight_Range": "Order Weight",
-            "Valid_Batches": "History n",
+            "Resin": "樹脂種類",
+            "Vendor": "塗料供應商",
+            "Solvent_Type": "稀釋劑種類",
+            "Initial_Viscosity_Zone": "初始黏度範圍",
+            "Order_Paint_Weight_Range": "訂單塗料重量範圍",
 
-            "Stage_1_Add_kg": "Stage 1 Add (kg)",
-            "Expected_V_After_Stage_1": "Expected V After S1 (s)",
+            "Typical_Initial_Visc": "參考起始黏度(秒)",
+            "Typical_Final_Visc": "參考最終黏度(秒)",
 
-            "Stage_2_Max_Add_kg": "Stage 2 Max (kg)",
-            "Expected_V_After_Stage_2": "Expected V After S2 (s)",
+            "Reference_Total_Solvent_kg": "參考稀釋劑總量(kg)",
+            "First_Dose_kg": "第一次添加量(kg)",
+            "Reserve_Dose_kg": "保留追加量(kg)",
+            "Stop_Max_Solvent_kg": "最大允許總添加量(kg)",
 
-            "Stage_3_Max_Add_kg": "Stage 3 Max (kg)",
-            "Expected_V_After_Stage_3": "Expected V After S3 (s)",
-
-            "Stop_Max_Solvent_kg": "Stop Total (kg)",
-            "Worker_Action": "Action"
+            "Operation_Mode": "操作模式",
+            "Worker_Action": "操作指示"
         },
         inplace=True
     )
 
     worker_output = worker_output.sort_values(
         by=[
-            "Resin",
-            "Vendor",
-            "Solvent",
-            "Initial Viscosity",
-            "Order Weight"
+            "樹脂種類",
+            "塗料供應商",
+            "稀釋劑種類",
+            "初始黏度範圍",
+            "訂單塗料重量範圍"
         ]
     )
 
     st.dataframe(
         worker_output,
         column_config={
-            "History n": st.column_config.NumberColumn(
-                format="%d"
+            "參考起始黏度(秒)": st.column_config.NumberColumn(
+                format="%.1f 秒"
             ),
-
-            "Stage 1 Add (kg)": st.column_config.NumberColumn(
+            "參考最終黏度(秒)": st.column_config.NumberColumn(
+                format="%.1f 秒"
+            ),
+            "參考稀釋劑總量(kg)": st.column_config.NumberColumn(
                 format="%.2f kg"
             ),
-            "Expected V After S1 (s)": st.column_config.NumberColumn(
-                format="%.1f s"
-            ),
-
-            "Stage 2 Max (kg)": st.column_config.NumberColumn(
+            "第一次添加量(kg)": st.column_config.NumberColumn(
                 format="%.2f kg"
             ),
-            "Expected V After S2 (s)": st.column_config.NumberColumn(
-                format="%.1f s"
-            ),
-
-            "Stage 3 Max (kg)": st.column_config.NumberColumn(
+            "保留追加量(kg)": st.column_config.NumberColumn(
                 format="%.2f kg"
             ),
-            "Expected V After S3 (s)": st.column_config.NumberColumn(
-                format="%.1f s"
-            ),
-
-            "Stop Total (kg)": st.column_config.NumberColumn(
+            "最大允許總添加量(kg)": st.column_config.NumberColumn(
                 format="%.2f kg"
             )
         },
@@ -1462,19 +1431,13 @@ with tab4:
         hide_index=True
     )
 
-    st.caption(
-        "Expected V = historical estimate only. "
-        "Always measure viscosity after each stage. "
-        "Order Weight + 120 kg line hold-up is used internally."
-    )
-
     csv_export = worker_output.to_csv(
         index=False
     ).encode("utf-8-sig")
 
     st.download_button(
-        "Download Worker SOP CSV",
+        "下載現場快速SOP CSV",
         data=csv_export,
-        file_name="Worker_Viscosity_SOP.csv",
+        file_name="現場黏度快速SOP.csv",
         mime="text/csv"
     )
