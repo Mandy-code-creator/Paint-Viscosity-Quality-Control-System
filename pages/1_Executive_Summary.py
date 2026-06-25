@@ -1096,63 +1096,118 @@ with tab3:
 
 
 # =========================================================
-# TAB 4: MASTER SHOP FLOOR SOP
+# =========================================================
+# TAB 4: PRINTED WORKER LOOKUP SOP
 # =========================================================
 with tab4:
-    st.markdown("### 🖨️ Master Shop Floor SOP Matrix")
+    st.markdown("### 🖨️ Printed Worker Lookup SOP")
 
     st.markdown(
-        "*A simplified, global lookup table covering ALL statistically "
-        "validated systems (n ≥ 30). Designed to be printed and attached "
-        "to mixing stations for quick operator reference.*"
-    )
-
-    st.info(
-        "💡 **DILUTION BASE RULE:** Always calculate solvent based on "
-        "**Dilution Base (Order Weight + 120kg minimum operating paint)**. "
-        "Do not multiply by Order Weight alone."
+        "Quick-reference SOP for operators without dashboard access. "
+        "Select the correct Resin, Vendor, Solvent, Initial Viscosity Range "
+        "and Paint Weight Range. Add Stage 1 only, then mix and re-measure."
     )
 
     st.warning(
-        "⚠️ **Operator Rule:** When the accumulated solvent ratio reaches "
-        "**Warning Ratio**, stop and re-measure viscosity. When it reaches "
-        "**Stop / Engineer Approval Ratio**, do not add more solvent without "
-        "Process Engineer approval."
+        "⚠️ **Mandatory Rule:** Do NOT add Stage 2 or Stage 3 continuously. "
+        "After every addition, mix completely and measure viscosity again."
+    )
+
+    st.info(
+        "💡 Historical solvent quantities below already follow the factory "
+        "Dilution Base rule: **Paint Weight + 120 kg**."
     )
 
     matrix_df = master_df.copy()
 
-    # -----------------------------------------------------
-    # 1. ORIGINAL SOP MATRIX LOGIC
-    # -----------------------------------------------------
-    sop_grouped = matrix_df.groupby(
+    # =====================================================
+    # 1. CREATE PAINT WEIGHT RANGE FOR PRINTED LOOKUP
+    # Adjust these bands later if your factory uses
+    # different standard mixing quantities.
+    # =====================================================
+    weight_bins = [0, 25, 50, 80, 120, 200, np.inf]
+
+    weight_labels = [
+        "0-25 kg",
+        "26-50 kg",
+        "51-80 kg",
+        "81-120 kg",
+        "121-200 kg",
+        ">200 kg"
+    ]
+
+    matrix_df["Paint_Weight_Range"] = pd.cut(
+        matrix_df["塗料重量"],
+        bins=weight_bins,
+        labels=weight_labels,
+        include_lowest=True,
+        right=True
+    )
+
+    # =====================================================
+    # 2. BUILD OPERATOR LOOKUP TABLE
+    # Stage 1 / 2 / 3 are based on actual historical
+    # solvent additions, not a linear "per 10s" extrapolation.
+    # =====================================================
+    worker_sop = matrix_df.groupby(
         [
             "Resin",
             "Vendor",
             "Solvent_Type",
-            "Initial_Viscosity_Zone"
+            "Initial_Viscosity_Zone",
+            "Paint_Weight_Range"
         ],
         observed=False
     ).agg(
         Valid_Batches=("塗料批號", "nunique"),
-        Target_Visc=("黏度(秒)_1", "median"),
-        Optimal_Sens=("Sensitivity", "median"),
-        Max_Safe_Ratio=("Solvent_Ratio_Percent", "max")
+        Typical_Paint_Weight=("塗料重量", "median"),
+        Typical_Target_Visc=("黏度(秒)_1", "median"),
+        Historical_Total_Solvent=("添加重量", "median"),
+        Historical_Solvent_P90=(
+            "添加重量",
+            lambda x: x.quantile(0.90)
+        ),
+        Median_Solvent_Ratio=(
+            "Solvent_Ratio_Percent",
+            "median"
+        ),
+        P90_Solvent_Ratio=(
+            "Solvent_Ratio_Percent",
+            lambda x: x.quantile(0.90)
+        ),
+        P95_Solvent_Ratio=(
+            "Solvent_Ratio_Percent",
+            lambda x: x.quantile(0.95)
+        )
     ).reset_index()
 
-    sop_grouped = sop_grouped[
-        (sop_grouped["Valid_Batches"] >= 5)
-        & (sop_grouped["Optimal_Sens"] > 0)
+    # Only keep statistically usable lookup rows
+    worker_sop = worker_sop[
+        (worker_sop["Valid_Batches"] >= 5)
+        & (worker_sop["Historical_Total_Solvent"] > 0)
     ].copy()
 
-    sop_grouped["Practical_Factor"] = (
-        10.0 / sop_grouped["Optimal_Sens"]
+    # =====================================================
+    # 3. STAGED ADDITION QUANTITIES
+    # These are based on actual historical total solvent,
+    # not direct linear multiplication by viscosity drop.
+    # =====================================================
+    worker_sop["Stage_1_Add_kg"] = (
+        worker_sop["Historical_Total_Solvent"] * 0.60
     )
 
-    # -----------------------------------------------------
-    # 2. BUILD SATURATION THRESHOLDS
-    #    Per Resin + Vendor + Solvent
-    # -----------------------------------------------------
+    worker_sop["Stage_2_Max_Add_kg"] = (
+        worker_sop["Historical_Total_Solvent"] * 0.25
+    )
+
+    worker_sop["Stage_3_Max_Add_kg"] = (
+        worker_sop["Historical_Total_Solvent"] * 0.15
+    )
+
+    # =====================================================
+    # 4. BUILD SATURATION THRESHOLDS
+    # Per Resin + Vendor + Solvent
+    # =====================================================
     saturation_summary = []
 
     system_keys = matrix_df[
@@ -1170,122 +1225,133 @@ with tab4:
             & (matrix_df["Solvent_Type"] == solvent_value)
         ].copy()
 
-        temp_saturation_result = build_saturation_profile(
+        temp_saturation = build_saturation_profile(
             temp_system_df
         )
-
-        warning_ratio = temp_saturation_result["warning_ratio"]
-        saturation_limit = temp_saturation_result["saturation_ratio"]
 
         saturation_summary.append({
             "Resin": resin_value,
             "Vendor": vendor_value,
             "Solvent_Type": solvent_value,
-            "Warning_Ratio": warning_ratio,
-            "Saturation_Stop_Limit": saturation_limit
+            "Saturation_Warning_Ratio": (
+                temp_saturation["warning_ratio"]
+            ),
+            "Saturation_Stop_Ratio": (
+                temp_saturation["saturation_ratio"]
+            )
         })
 
-    saturation_summary_df = pd.DataFrame(saturation_summary)
+    saturation_summary_df = pd.DataFrame(
+        saturation_summary
+    )
 
-    # -----------------------------------------------------
-    # 3. MERGE SATURATION LIMITS INTO SOP TABLE
-    # -----------------------------------------------------
-    sop_grouped = sop_grouped.merge(
+    worker_sop = worker_sop.merge(
         saturation_summary_df,
         on=["Resin", "Vendor", "Solvent_Type"],
         how="left"
     )
 
-    # If no saturation threshold was found,
-    # use P90 as warning and P95 as stop safeguard.
-    system_ratio_limits = matrix_df.groupby(
-        ["Resin", "Vendor", "Solvent_Type"],
-        observed=False
-    ).agg(
-        Fallback_P90=(
-            "Solvent_Ratio_Percent",
-            lambda x: x.quantile(0.90)
-        ),
-        Fallback_P95=(
-            "Solvent_Ratio_Percent",
-            lambda x: x.quantile(0.95)
-        )
-    ).reset_index()
-
-    sop_grouped = sop_grouped.merge(
-        system_ratio_limits,
-        on=["Resin", "Vendor", "Solvent_Type"],
-        how="left"
+    # If saturation detection is unavailable,
+    # retain P90/P95 as operational safeguards.
+    worker_sop["Warning_Ratio"] = (
+        worker_sop["Saturation_Warning_Ratio"]
+        .fillna(worker_sop["P90_Solvent_Ratio"])
     )
 
-    sop_grouped["Warning_Ratio"] = (
-        sop_grouped["Warning_Ratio"]
-        .fillna(sop_grouped["Fallback_P90"])
+    worker_sop["Stop_Ratio"] = (
+        worker_sop["Saturation_Stop_Ratio"]
+        .fillna(worker_sop["P95_Solvent_Ratio"])
     )
 
-    sop_grouped["Saturation_Stop_Limit"] = (
-        sop_grouped["Saturation_Stop_Limit"]
-        .fillna(sop_grouped["Fallback_P95"])
+    # =====================================================
+    # 5. RECHECK AND ESCALATION INSTRUCTIONS
+    # =====================================================
+    worker_sop["Stage_1_Instruction"] = (
+        "Add Stage 1 → Mix 5 min → Measure"
     )
 
-    # -----------------------------------------------------
-    # 4. FINAL OPERATOR SOP TABLE
-    # -----------------------------------------------------
-    sop_output = sop_grouped[
+    worker_sop["Stage_2_Instruction"] = (
+        "Only if viscosity remains above USL"
+    )
+
+    worker_sop["Stop_Instruction"] = (
+        "Stop and contact Process Engineer"
+    )
+
+    # =====================================================
+    # 6. FINAL PRINTED SOP TABLE
+    # =====================================================
+    worker_output = worker_sop[
         [
             "Resin",
             "Vendor",
             "Solvent_Type",
             "Initial_Viscosity_Zone",
+            "Paint_Weight_Range",
             "Valid_Batches",
-            "Target_Visc",
-            "Practical_Factor",
+            "Typical_Paint_Weight",
+            "Typical_Target_Visc",
+            "Stage_1_Add_kg",
+            "Stage_1_Instruction",
+            "Stage_2_Max_Add_kg",
+            "Stage_2_Instruction",
+            "Stage_3_Max_Add_kg",
             "Warning_Ratio",
-            "Saturation_Stop_Limit",
-            "Max_Safe_Ratio"
+            "Stop_Ratio",
+            "Stop_Instruction"
         ]
     ].copy()
 
-    sop_output.rename(
+    worker_output.rename(
         columns={
             "Solvent_Type": "Solvent",
-            "Initial_Viscosity_Zone": "Input Viscosity Range",
+            "Initial_Viscosity_Zone": "Initial Viscosity Range",
+            "Paint_Weight_Range": "Paint Weight Range",
             "Valid_Batches": "Valid Batches",
-            "Target_Visc": "Typical Target (s)",
-            "Practical_Factor": (
-                "Add kg (per 100kg Dilution Base / 10s drop)"
-            ),
+            "Typical_Paint_Weight": "Typical Paint Weight (kg)",
+            "Typical_Target_Visc": "Typical Target (s)",
+            "Stage_1_Add_kg": "Stage 1 Add (kg)",
+            "Stage_1_Instruction": "Stage 1 Action",
+            "Stage_2_Max_Add_kg": "Stage 2 Max Add (kg)",
+            "Stage_2_Instruction": "Stage 2 Condition",
+            "Stage_3_Max_Add_kg": "Stage 3 Max Add (kg)",
             "Warning_Ratio": "Warning Ratio (%)",
-            "Saturation_Stop_Limit": (
-                "Stop / Engineer Approval (%)"
-            ),
-            "Max_Safe_Ratio": "Historical Max Ratio (%)"
+            "Stop_Ratio": "Stop / Engineer Approval (%)",
+            "Stop_Instruction": "Escalation Rule"
         },
         inplace=True
     )
 
-    sop_output = sop_output.sort_values(
+    worker_output = worker_output.sort_values(
         by=[
             "Resin",
             "Vendor",
             "Solvent",
-            "Input Viscosity Range"
+            "Initial Viscosity Range",
+            "Paint Weight Range"
         ]
     )
 
     st.dataframe(
-        sop_output,
+        worker_output,
         column_config={
             "Valid Batches": st.column_config.NumberColumn(
                 format="%d"
             ),
-            "Typical Target (s)": st.column_config.NumberColumn(
-                format="%.1f"
+            "Typical Paint Weight (kg)": st.column_config.NumberColumn(
+                format="%.1f kg"
             ),
-            "Add kg (per 100kg Dilution Base / 10s drop)": (
-                st.column_config.NumberColumn(
-                    format="%.2f kg"
-                )
+            "Typical Target (s)": st.column_config.NumberColumn(
+                format="%.1f s"
+            ),
+            "Stage 1 Add (kg)": st.column_config.NumberColumn(
+                format="%.2f kg"
+            ),
+            "Stage 2 Max Add (kg)": st.column_config.NumberColumn(
+                format="%.2f kg"
+            ),
+            "Stage 3 Max Add (kg)": st.column_config.NumberColumn(
+                format="%.2f kg"
             ),
             "Warning Ratio (%)": st.column_config.NumberColumn(
                 format="%.1f%%"
@@ -1294,20 +1360,36 @@ with tab4:
                 st.column_config.NumberColumn(
                     format="%.1f%%"
                 )
-            ),
-            "Historical Max Ratio (%)": st.column_config.NumberColumn(
-                format="%.1f%%"
             )
         },
         use_container_width=True,
         hide_index=True
     )
 
-    csv_export = sop_output.to_csv(index=False).encode("utf-8-sig")
+    st.markdown("---")
+
+    st.markdown("### Operator Usage Rule")
+
+    st.markdown(
+        """
+        1. Select the correct Resin, Vendor and Solvent.  
+        2. Find the Initial Viscosity Range and Paint Weight Range.  
+        3. Add **Stage 1 only**.  
+        4. Mix for 5 minutes and measure viscosity again.  
+        5. Add Stage 2 only when viscosity is still above the approved USL.  
+        6. Stage 3 is a micro-adjustment only.  
+        7. If Warning Ratio is reached, stop and re-measure.  
+        8. If Stop / Engineer Approval Ratio is reached, do not add more solvent.  
+        """
+    )
+
+    csv_export = worker_output.to_csv(
+        index=False
+    ).encode("utf-8-sig")
 
     st.download_button(
-        "📥 Download Printable SOP Matrix (CSV)",
+        "📥 Download Printable Worker SOP (CSV)",
         data=csv_export,
-        file_name="Shop_Floor_Master_SOP_Validated.csv",
+        file_name="Printed_Worker_Viscosity_SOP.csv",
         mime="text/csv"
     )
