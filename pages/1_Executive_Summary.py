@@ -1097,7 +1097,6 @@ with tab3:
 
 # =========================================================
 # =========================================================
-# =========================================================
 # TAB 4: SHOP FLOOR QUICK SOP
 # =========================================================
 with tab4:
@@ -1118,7 +1117,7 @@ with tab4:
     # =====================================================
     # 1. ORDER PAINT WEIGHT RANGE
     # 塗料重量 = 訂單塗料重量
-    # Operating base = 訂單塗料重量 + 120 kg line hold-up
+    # Operating Base = 訂單塗料重量 + 120 kg line hold-up
     # =====================================================
     weight_bins = [0, 25, 50, 80, 120, 200, np.inf]
 
@@ -1141,7 +1140,6 @@ with tab4:
 
     # =====================================================
     # 2. HISTORICAL LOOKUP TABLE
-    # Same Resin + Vendor + Solvent + Initial Viscosity + Weight Range
     # =====================================================
     worker_sop = matrix_df.groupby(
         [
@@ -1180,12 +1178,14 @@ with tab4:
             lambda x: x.quantile(0.75)
         ),
 
-        # Direct historical kg addition
+        # Historical median actual solvent addition in kg
         Ref_Solvent_Add_kg=(
             "添加重量",
             "median"
         ),
 
+        # Same definition as Tab 1:
+        # 添加重量 / (塗料重量 + 120) × 100
         Median_Solvent_Ratio=(
             "Solvent_Ratio_Percent",
             "median"
@@ -1202,7 +1202,7 @@ with tab4:
         )
     ).reset_index()
 
-    # Minimum records for worker reference
+    # Require enough historical data for an operator lookup row
     worker_sop = worker_sop[
         worker_sop["Valid_Batches"] >= 5
     ].copy()
@@ -1214,15 +1214,14 @@ with tab4:
         st.stop()
 
     # =====================================================
-    # 3. OPERATING BASE
+    # 3. OPERATING DILUTION BASE
     # =====================================================
     worker_sop["Operating_Dilution_Base"] = (
         worker_sop["Typical_Order_Paint_Weight"] + 120
     )
 
     # =====================================================
-    # 4. SATURATION LIMITS BY SYSTEM
-    # Resin + Vendor + Solvent
+    # 4. SATURATION LIMITS BY RESIN + VENDOR + SOLVENT
     # =====================================================
     saturation_summary = []
 
@@ -1231,7 +1230,6 @@ with tab4:
     ].drop_duplicates()
 
     for _, system_row in system_keys.iterrows():
-
         resin_value = system_row["Resin"]
         vendor_value = system_row["Vendor"]
         solvent_value = system_row["Solvent_Type"]
@@ -1260,9 +1258,8 @@ with tab4:
         how="left"
     )
 
-    # If saturation is not statistically detected:
-    # P90 = warning guardrail
-    # P95 = stop guardrail
+    # No clear saturation pattern:
+    # P90 = warning; P95 = maximum allowed ratio
     worker_sop["Warning_Ratio"] = (
         worker_sop["Saturation_Warning_Ratio"]
         .fillna(worker_sop["P90_Solvent_Ratio"])
@@ -1278,7 +1275,7 @@ with tab4:
         worker_sop["Warning_Ratio"]
     )
 
-    # Convert saturation ratio to kg
+    # Convert percentage limits back into kg
     worker_sop["Saturation_Warning_kg"] = (
         worker_sop["Operating_Dilution_Base"]
         * worker_sop["Warning_Ratio"]
@@ -1292,7 +1289,7 @@ with tab4:
     )
 
     # =====================================================
-    # 5. SIMPLE HISTORICAL RESULT CHECK RULE
+    # 5. OPERATION GUIDANCE
     # =====================================================
     worker_sop["Operation_Instruction"] = (
         "添加參考稀釋劑量 → 混合5分鐘 → 量測黏度"
@@ -1316,6 +1313,7 @@ with tab4:
 
             "Ref_Start_Visc",
             "Ref_Solvent_Add_kg",
+            "Median_Solvent_Ratio",
             "Ref_Final_Visc",
             "Final_Visc_P25",
             "Final_Visc_P75",
@@ -1328,7 +1326,6 @@ with tab4:
         ]
     ].copy()
 
-    # Combine P25-P75 final viscosity range
     worker_output["Final_Viscosity_Reference_Range"] = (
         worker_output["Final_Visc_P25"].round(1).astype(str)
         + " - "
@@ -1355,6 +1352,7 @@ with tab4:
 
             "Ref_Start_Visc": "參考起始黏度(秒)",
             "Ref_Solvent_Add_kg": "參考稀釋劑添加量(kg)",
+            "Median_Solvent_Ratio": "參考稀釋劑添加比例(%)",
             "Ref_Final_Visc": "參考最終黏度(秒)",
             "Final_Viscosity_Reference_Range": "最終黏度參考範圍",
 
@@ -1390,6 +1388,10 @@ with tab4:
 
             "參考稀釋劑添加量(kg)": st.column_config.NumberColumn(
                 format="%.2f kg"
+            ),
+
+            "參考稀釋劑添加比例(%)": st.column_config.NumberColumn(
+                format="%.2f%%"
             ),
 
             "參考最終黏度(秒)": st.column_config.NumberColumn(
