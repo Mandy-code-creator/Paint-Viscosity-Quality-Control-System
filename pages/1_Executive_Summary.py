@@ -1097,6 +1097,7 @@ with tab3:
 
 # =========================================================
 # =========================================================
+# =========================================================
 # TAB 4: MASTER SHOP FLOOR REFERENCE TABLE
 # =========================================================
 with tab4:
@@ -1104,7 +1105,7 @@ with tab4:
 
     st.warning(
         "請依樹脂種類、塗料供應商、稀釋劑種類及初始黏度區間查詢。"
-        "添加後請混合5分鐘並量測黏度，不得超過飽和停止添加量。"
+        "添加後請混合5分鐘並量測黏度，不得超過飽和停止比例。"
     )
 
     st.caption(
@@ -1115,29 +1116,24 @@ with tab4:
     matrix_df = master_df.copy()
 
     # =====================================================
-    # 1. FINAL VISCOSITY ZONE
+    # 1. HELPER: DISPLAY ACTUAL RANGE
+    # If P25 = P75, show only one actual value.
     # =====================================================
-    def assign_final_zone(v):
-        if pd.isna(v):
-            return "Unknown"
-        elif v <= 30:
-            return "≤30 s"
-        elif v <= 50:
-            return "31-50 s"
-        elif v <= 70:
-            return "51-70 s"
-        elif v <= 90:
-            return "71-90 s"
-        else:
-            return ">90 s"
+    def format_actual_range(p25, p75, unit="秒"):
+        if pd.isna(p25) or pd.isna(p75):
+            return "-"
 
-    matrix_df["Final_Viscosity_Zone"] = (
-        matrix_df["黏度(秒)_1"].apply(assign_final_zone)
-    )
+        p25 = round(float(p25), 1)
+        p75 = round(float(p75), 1)
+
+        if abs(p25 - p75) < 0.05:
+            return f"{p25:.1f} {unit}"
+
+        return f"{p25:.1f} - {p75:.1f} {unit}"
 
     # =====================================================
     # 2. HISTORICAL SUMMARY
-    # Group:
+    # Group by:
     # Resin + Vendor + Solvent + Initial Viscosity Zone
     # =====================================================
     worker_sop = matrix_df.groupby(
@@ -1149,47 +1145,40 @@ with tab4:
         ],
         observed=False
     ).agg(
-        歷史批數=("塗料批號", "nunique"),
+        History_Batches=("塗料批號", "nunique"),
 
-        參考起始黏度=("黏度(秒)", "median"),
-        起始黏度P25=("黏度(秒)", lambda x: x.quantile(0.25)),
-        起始黏度P75=("黏度(秒)", lambda x: x.quantile(0.75)),
+        Ref_Start_Visc=("黏度(秒)", "median"),
+        Start_Visc_P25=("黏度(秒)", lambda x: x.quantile(0.25)),
+        Start_Visc_P75=("黏度(秒)", lambda x: x.quantile(0.75)),
 
-        參考最終黏度=("黏度(秒)_1", "median"),
-        最終黏度P25=("黏度(秒)_1", lambda x: x.quantile(0.25)),
-        最終黏度P75=("黏度(秒)_1", lambda x: x.quantile(0.75)),
+        Ref_Final_Visc=("黏度(秒)_1", "median"),
+        Final_Visc_P25=("黏度(秒)_1", lambda x: x.quantile(0.25)),
+        Final_Visc_P75=("黏度(秒)_1", lambda x: x.quantile(0.75)),
 
-        參考稀釋劑添加量=("添加重量", "median"),
+        # Historical median actual solvent quantity
+        Ref_Solvent_Add_kg=("添加重量", "median"),
 
-        參考稀釋劑添加比例=(
+        # Same definition as Tab 1:
+        # 添加重量 / (塗料重量 + 120) × 100
+        Ref_Solvent_Ratio=(
             "Solvent_Ratio_Percent",
             "median"
         ),
 
-        稀釋劑比例P25=(
-            "Solvent_Ratio_Percent",
-            lambda x: x.quantile(0.25)
-        ),
-
-        稀釋劑比例P75=(
-            "Solvent_Ratio_Percent",
-            lambda x: x.quantile(0.75)
-        ),
-
-        稀釋劑比例P90=(
+        Ratio_P90=(
             "Solvent_Ratio_Percent",
             lambda x: x.quantile(0.90)
         ),
 
-        稀釋劑比例P95=(
+        Ratio_P95=(
             "Solvent_Ratio_Percent",
             lambda x: x.quantile(0.95)
         )
     ).reset_index()
 
-    # At least 5 historical batches per row
+    # Minimum historical sample size
     worker_sop = worker_sop[
-        worker_sop["歷史批數"] >= 5
+        worker_sop["History_Batches"] >= 5
     ].copy()
 
     if worker_sop.empty:
@@ -1200,32 +1189,27 @@ with tab4:
         st.stop()
 
     # =====================================================
-    # 3. CREATE BEFORE / AFTER REFERENCE RANGES
+    # 3. ACTUAL BEFORE / AFTER REFERENCE RANGE
     # =====================================================
-    worker_sop["初始黏度參考範圍"] = (
-        worker_sop["起始黏度P25"].round(1).astype(str)
-        + " - "
-        + worker_sop["起始黏度P75"].round(1).astype(str)
-        + " 秒"
+    worker_sop["Start_Visc_Actual_Range"] = worker_sop.apply(
+        lambda row: format_actual_range(
+            row["Start_Visc_P25"],
+            row["Start_Visc_P75"]
+        ),
+        axis=1
     )
 
-    worker_sop["最終黏度參考範圍"] = (
-        worker_sop["最終黏度P25"].round(1).astype(str)
-        + " - "
-        + worker_sop["最終黏度P75"].round(1).astype(str)
-        + " 秒"
-    )
-
-    # Final zone is based on median final viscosity,
-    # so it always exists in worker_sop and cannot cause KeyError.
-    worker_sop["最終黏度區間"] = (
-        worker_sop["參考最終黏度"].apply(assign_final_zone)
+    worker_sop["Final_Visc_Actual_Range"] = worker_sop.apply(
+        lambda row: format_actual_range(
+            row["Final_Visc_P25"],
+            row["Final_Visc_P75"]
+        ),
+        axis=1
     )
 
     # =====================================================
     # 4. SATURATION LIMITS
-    # System-level:
-    # Resin + Vendor + Solvent
+    # Group by Resin + Vendor + Solvent
     # =====================================================
     saturation_summary = []
 
@@ -1250,8 +1234,8 @@ with tab4:
             "Resin": resin_value,
             "Vendor": vendor_value,
             "Solvent_Type": solvent_value,
-            "飽和警戒比例": temp_saturation["warning_ratio"],
-            "飽和停止比例": temp_saturation["saturation_ratio"]
+            "Saturation_Warning_Ratio": temp_saturation["warning_ratio"],
+            "Saturation_Stop_Ratio": temp_saturation["saturation_ratio"]
         })
 
     saturation_summary_df = pd.DataFrame(saturation_summary)
@@ -1262,35 +1246,34 @@ with tab4:
         how="left"
     )
 
-    # If no statistical saturation point is detected:
-    # P90 = warning reference
-    # P95 = stop reference
-    worker_sop["飽和警戒比例"] = (
-        worker_sop["飽和警戒比例"]
-        .fillna(worker_sop["稀釋劑比例P90"])
+    # If no clear saturation point is detected:
+    # P90 = warning ratio
+    # P95 = stop ratio
+    worker_sop["Saturation_Warning_Ratio"] = (
+        worker_sop["Saturation_Warning_Ratio"]
+        .fillna(worker_sop["Ratio_P90"])
     )
 
-    worker_sop["飽和停止比例"] = (
-        worker_sop["飽和停止比例"]
-        .fillna(worker_sop["稀釋劑比例P95"])
+    worker_sop["Saturation_Stop_Ratio"] = (
+        worker_sop["Saturation_Stop_Ratio"]
+        .fillna(worker_sop["Ratio_P95"])
     )
 
-    worker_sop["飽和停止比例"] = np.maximum(
-        worker_sop["飽和停止比例"],
-        worker_sop["飽和警戒比例"]
+    worker_sop["Saturation_Stop_Ratio"] = np.maximum(
+        worker_sop["Saturation_Stop_Ratio"],
+        worker_sop["Saturation_Warning_Ratio"]
     )
 
     # =====================================================
     # 5. OPERATION GUIDANCE
     # =====================================================
-    worker_sop["操作指示"] = (
+    worker_sop["Operation_Instruction"] = (
         "依參考添加量添加 → 混合5分鐘 → 量測黏度"
     )
 
-    worker_sop["結果判定"] = (
-        "量測最終黏度應落於參考範圍；"
-        "高於範圍請確認後再追加；"
-        "低於範圍停止追加。"
+    worker_sop["Result_Check"] = (
+        "量測後黏度應接近參考最終黏度；"
+        "偏差過大時請確認後再追加。"
     )
 
     # =====================================================
@@ -1301,25 +1284,24 @@ with tab4:
             "Resin",
             "Vendor",
             "Solvent_Type",
-
             "Initial_Viscosity_Zone",
-            "初始黏度參考範圍",
 
-            "最終黏度區間",
-            "最終黏度參考範圍",
+            "History_Batches",
 
-            "歷史批數",
+            "Start_Visc_Actual_Range",
+            "Ref_Start_Visc",
 
-            "參考起始黏度",
-            "參考稀釋劑添加量",
-            "參考稀釋劑添加比例",
-            "參考最終黏度",
+            "Ref_Solvent_Add_kg",
+            "Ref_Solvent_Ratio",
 
-            "飽和警戒比例",
-            "飽和停止比例",
+            "Final_Visc_Actual_Range",
+            "Ref_Final_Visc",
 
-            "操作指示",
-            "結果判定"
+            "Saturation_Warning_Ratio",
+            "Saturation_Stop_Ratio",
+
+            "Operation_Instruction",
+            "Result_Check"
         ]
     ].copy()
 
@@ -1328,25 +1310,24 @@ with tab4:
             "Resin": "樹脂種類",
             "Vendor": "塗料供應商",
             "Solvent_Type": "稀釋劑種類",
-
             "Initial_Viscosity_Zone": "初始黏度區間",
-            "初始黏度參考範圍": "初始黏度參考範圍",
 
-            "最終黏度區間": "最終黏度區間",
-            "最終黏度參考範圍": "最終黏度參考範圍",
+            "History_Batches": "歷史批數",
 
-            "歷史批數": "歷史批數",
+            "Start_Visc_Actual_Range": "初始黏度實際範圍",
+            "Ref_Start_Visc": "參考起始黏度(秒)",
 
-            "參考起始黏度": "參考起始黏度(秒)",
-            "參考稀釋劑添加量": "參考稀釋劑添加量(kg)",
-            "參考稀釋劑添加比例": "參考稀釋劑添加比例(%)",
-            "參考最終黏度": "參考最終黏度(秒)",
+            "Ref_Solvent_Add_kg": "參考稀釋劑添加量(kg)",
+            "Ref_Solvent_Ratio": "參考稀釋劑添加比例(%)",
 
-            "飽和警戒比例": "飽和警戒比例(%)",
-            "飽和停止比例": "飽和停止比例(%)",
+            "Final_Visc_Actual_Range": "最終黏度實際範圍",
+            "Ref_Final_Visc": "參考最終黏度(秒)",
 
-            "操作指示": "操作指示",
-            "結果判定": "結果判定"
+            "Saturation_Warning_Ratio": "飽和警戒比例(%)",
+            "Saturation_Stop_Ratio": "飽和停止比例(%)",
+
+            "Operation_Instruction": "操作指示",
+            "Result_Check": "結果判定"
         },
         inplace=True
     )
@@ -1396,9 +1377,9 @@ with tab4:
     )
 
     st.caption(
-        "參考稀釋劑添加比例與Tab 1圖表的Solvent Blending Ratio一致。"
-        "飽和警戒/停止比例為歷史效率下降分析結果；未偵測到明確飽和點時，"
-        "分別以P90與P95作為保護界限。"
+        "最終黏度實際範圍為歷史資料P25-P75；"
+        "若資料只有單一值，將直接顯示該實際值。"
+        "參考稀釋劑添加比例與Tab 1的Solvent Blending Ratio一致。"
     )
 
     csv_export = worker_output.to_csv(
