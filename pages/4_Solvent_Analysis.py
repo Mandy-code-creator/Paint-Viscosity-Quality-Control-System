@@ -9,7 +9,6 @@ from docx import Document
 from docx.shared import Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-
 # =========================================================
 # PAGE CONFIGURATION
 # =========================================================
@@ -25,7 +24,6 @@ st.markdown(
     "to specific Resin and Solvent types."
 )
 
-
 # =========================================================
 # 1. DATA LOADING
 # =========================================================
@@ -38,7 +36,6 @@ group_a = st.session_state.get("group_a_data", pd.DataFrame()).copy()
 if group_a.empty:
     st.error("❌ The dataset is empty. Please check the uploaded file.")
     st.stop()
-
 
 # =========================================================
 # 2. SIDEBAR FILTERS
@@ -64,6 +61,7 @@ filtered_df = group_a[
     group_a["Vendor"] == selected_vendor
 ].copy()
 
+# Enforce Grade A-B filter logic
 if "Grade" in filtered_df.columns:
     filtered_df = filtered_df[
         filtered_df["Grade"].isin(["A", "B", "A-B"])
@@ -72,7 +70,6 @@ if "Grade" in filtered_df.columns:
 if filtered_df.empty:
     st.warning(f"⚠️ No valid data available for {selected_vendor}.")
     st.stop()
-
 
 # =========================================================
 # 3. DATA CLEANING & CALCULATIONS
@@ -154,7 +151,6 @@ if filtered_df.empty:
     st.warning("⚠️ No valid records remain after calculations.")
     st.stop()
 
-
 # =========================================================
 # 4. HIERARCHY SUMMARY
 # =========================================================
@@ -180,7 +176,6 @@ tree_summary = tree_summary[
 if tree_summary.empty:
     st.warning("⚠️ No valid paint consumption data available.")
     st.stop()
-
 
 # =========================================================
 # 5. GRAPHVIZ HIERARCHY
@@ -234,26 +229,16 @@ date_cols = [
 if date_cols:
     try:
         date_col = date_cols[0]
-
-        min_date = pd.to_datetime(
-            filtered_df[date_col],
-            errors="coerce"
-        ).min()
-
-        max_date = pd.to_datetime(
-            filtered_df[date_col],
-            errors="coerce"
-        ).max()
+        min_date = pd.to_datetime(filtered_df[date_col], errors="coerce").min()
+        max_date = pd.to_datetime(filtered_df[date_col], errors="coerce").max()
 
         if pd.notna(min_date) and pd.notna(max_date):
             min_date_str = min_date.strftime("%b %Y")
             max_date_str = max_date.strftime("%b %Y")
-
             if min_date_str == max_date_str:
                 date_range_str = min_date_str
             else:
                 date_range_str = f"{min_date_str} - {max_date_str}"
-
     except Exception:
         date_range_str = "All Available Data"
 
@@ -281,15 +266,11 @@ center_html = f"""
     </TR>
 </TABLE>
 """
-
 graph.node("Root", f"<{center_html}>")
 
 for resin in tree_summary["Resin"].unique():
     resin_id = f"resin_{resin}"
-
-    resin_data = tree_summary[
-        tree_summary["Resin"] == resin
-    ].copy()
+    resin_data = tree_summary[tree_summary["Resin"] == resin].copy()
 
     resin_paint_sum = resin_data["Total_Paint"].sum()
     resin_solvent_sum = resin_data["Total_Solvent"].sum()
@@ -346,15 +327,10 @@ for resin in tree_summary["Resin"].unique():
             </TR>
         </TABLE>
         """
-
         graph.node(leaf_id, f"<{leaf_html}>")
         graph.edge(resin_id, leaf_id)
 
-st.graphviz_chart(
-    graph,
-    use_container_width=False
-)
-
+st.graphviz_chart(graph, use_container_width=False)
 
 # =========================================================
 # 6. SATURATION ANALYSIS - MATPLOTLIB
@@ -371,36 +347,23 @@ st.caption(
 col1, col2 = st.columns(2)
 
 with col1:
-    resin_options = sorted(
-        filtered_df["Resin"].dropna().unique().tolist()
-    )
-
+    resin_options = sorted(filtered_df["Resin"].dropna().unique().tolist())
     selected_resin = st.selectbox(
         "Select Resin for Saturation Analysis:",
         resin_options,
         key="saturation_resin"
     )
-
-analysis_resin_df = filtered_df[
-    filtered_df["Resin"] == selected_resin
-].copy()
+analysis_resin_df = filtered_df[filtered_df["Resin"] == selected_resin].copy()
 
 with col2:
-    solvent_options = sorted(
-        analysis_resin_df["Solvent_Type"].dropna().unique().tolist()
-    )
-
+    solvent_options = sorted(analysis_resin_df["Solvent_Type"].dropna().unique().tolist())
     selected_solvent = st.selectbox(
         "Select Solvent for Saturation Analysis:",
         solvent_options,
         key="saturation_solvent"
     )
+saturation_df = analysis_resin_df[analysis_resin_df["Solvent_Type"] == selected_solvent].copy()
 
-saturation_df = analysis_resin_df[
-    analysis_resin_df["Solvent_Type"] == selected_solvent
-].copy()
-
-# Retained for Word export
 fig_efficiency = None
 baseline_efficiency = None
 warning_ratio = None
@@ -411,7 +374,6 @@ if len(saturation_df) < 5:
         "⚠️ Historical records are insufficient for saturation analysis "
         "(minimum 5 records required)."
     )
-
 else:
     bins = [0, 3, 5, 7, 9, 11, np.inf]
     labels = ["0–3%", "3–5%", "5–7%", "7–9%", "9–11%", ">11%"]
@@ -435,19 +397,12 @@ else:
     efficiency_summary["Ratio_Midpoint"] = midpoints
 
     # At least 3 records per ratio interval
-    efficiency_summary = efficiency_summary[
-        efficiency_summary["Records"] >= 3
-    ].copy()
+    efficiency_summary = efficiency_summary[efficiency_summary["Records"] >= 3].copy()
 
     if efficiency_summary.empty:
-        st.warning(
-            "⚠️ Not enough records in each solvent-ratio interval."
-        )
-
+        st.warning("⚠️ Not enough records in each solvent-ratio interval.")
     else:
-        baseline_efficiency = efficiency_summary[
-            "Median_Efficiency"
-        ].iloc[0]
+        baseline_efficiency = efficiency_summary["Median_Efficiency"].iloc[0]
 
         efficiency_summary["Efficiency_Retention_Percent"] = (
             efficiency_summary["Median_Efficiency"]
@@ -455,24 +410,11 @@ else:
             * 100
         )
 
-        # Warning when efficiency is <= 70% of baseline
-        warning_rows = efficiency_summary[
-            efficiency_summary["Efficiency_Retention_Percent"] <= 70
-        ]
+        warning_rows = efficiency_summary[efficiency_summary["Efficiency_Retention_Percent"] <= 70]
+        stop_rows = efficiency_summary[efficiency_summary["Efficiency_Retention_Percent"] <= 50]
 
-        # Stop when efficiency is <= 50% of baseline
-        stop_rows = efficiency_summary[
-            efficiency_summary["Efficiency_Retention_Percent"] <= 50
-        ]
-
-        # Fallback if a clear saturation point is not detected
-        ratio_p90 = saturation_df[
-            "Solvent_Ratio_Percent"
-        ].quantile(0.90)
-
-        ratio_p95 = saturation_df[
-            "Solvent_Ratio_Percent"
-        ].quantile(0.95)
+        ratio_p90 = saturation_df["Solvent_Ratio_Percent"].quantile(0.90)
+        ratio_p95 = saturation_df["Solvent_Ratio_Percent"].quantile(0.95)
 
         warning_ratio = (
             warning_rows["Ratio_Midpoint"].iloc[0]
@@ -510,11 +452,7 @@ else:
         )
 
         # Record count above each point
-        for x, y, record in zip(
-            x_values,
-            y_values,
-            record_values
-        ):
+        for x, y, record in zip(x_values, y_values, record_values):
             ax.annotate(
                 str(record),
                 xy=(x, y),
@@ -526,114 +464,103 @@ else:
             )
 
         x_min = min(0, x_values.min() - 1)
-        x_max = max(
-            x_values.max() + 1,
-            stop_ratio + 1
-        )
+        x_max = max(x_values.max() + 1, stop_ratio + 1)
+        
+        # ---------------------------------------------------------
+        # CHỈNH SỬA Y-AXIS PADDING ĐỂ FIX LỖI CLIPPING TEXT
+        # ---------------------------------------------------------
+        y_min_orig, y_max_orig = ax.get_ylim()
+        
+        # Tăng thêm 15% không gian trống phía trên mốc y_max hiện tại
+        y_max = y_max_orig + (y_max_orig - y_min_orig) * 0.15 
+        ax.set_ylim(y_min_orig, y_max)
+        
+        # Đặt chữ thấp hơn đỉnh đồ thị một chút để tạo khoảng thở
+        y_text_pos = y_max_orig + (y_max_orig - y_min_orig) * 0.05 
 
-        y_min, y_max = ax.get_ylim()
-
-        # Warning and Stop overlap:
-        # Show one red saturation limit only
+        # Đổi màu cảnh báo bão hòa sang Deep Sky Blue
         if abs(stop_ratio - warning_ratio) < 0.2:
             ax.axvline(
                 stop_ratio,
-                color="red",
+                color="DeepSkyBlue",
                 linestyle="--",
                 linewidth=2.2
             )
-
             ax.axvspan(
                 stop_ratio,
                 x_max,
-                color="red",
+                color="DeepSkyBlue",
                 alpha=0.10
             )
-
             ax.text(
                 stop_ratio + 0.05,
-                y_max,
+                y_text_pos,
                 f"Saturation Limit: {stop_ratio:.1f}%",
-                color="red",
-                fontsize=9,
-                va="top",
+                color="DeepSkyBlue",
+                fontsize=10,
+                fontweight="bold",
+                va="center", # Sử dụng center thay vì top
                 ha="left"
             )
-
-        # Warning and Stop are different
         else:
             ax.axvline(
                 warning_ratio,
-                color="orange",
-                linestyle="--",
+                color="DeepSkyBlue",
+                linestyle=":",
                 linewidth=2
             )
-
             ax.axvline(
                 stop_ratio,
-                color="red",
+                color="DeepSkyBlue",
                 linestyle="--",
                 linewidth=2.2
             )
-
-            # Orange warning area
             ax.axvspan(
                 warning_ratio,
                 stop_ratio,
-                color="orange",
-                alpha=0.10
+                color="DeepSkyBlue",
+                alpha=0.05
             )
-
-            # Red saturation / stop area
             ax.axvspan(
                 stop_ratio,
                 x_max,
-                color="red",
+                color="DeepSkyBlue",
                 alpha=0.10
             )
-
             ax.text(
                 warning_ratio + 0.05,
-                y_max,
+                y_text_pos,
                 f"Warning: {warning_ratio:.1f}%",
-                color="orange",
-                fontsize=9,
-                va="top",
+                color="DeepSkyBlue",
+                fontsize=10,
+                fontweight="bold",
+                va="center",
                 ha="left"
             )
-
             ax.text(
                 stop_ratio + 0.05,
-                y_max,
+                y_text_pos,
                 f"Stop: {stop_ratio:.1f}%",
-                color="red",
-                fontsize=9,
-                va="top",
+                color="DeepSkyBlue",
+                fontsize=10,
+                fontweight="bold",
+                va="center",
                 ha="left"
             )
 
         ax.set_title(
             "Dilution Efficiency vs Solvent Ratio\n"
-            f"Resin: {selected_resin} | "
-            f"Vendor: {selected_vendor} | "
-            f"Solvent: {selected_solvent}",
+            f"Resin: {selected_resin} | Vendor: {selected_vendor} | Solvent: {selected_solvent}",
             fontsize=13,
             fontweight="bold",
             loc="left",
             pad=14
         )
 
-        ax.set_xlabel(
-            "Solvent Blending Ratio (%)",
-            fontsize=10
-        )
-
-        ax.set_ylabel(
-            "Median Dilution Efficiency (seconds / %)",
-            fontsize=10
-        )
-
+        ax.set_xlabel("Solvent Blending Ratio (%)", fontsize=10)
+        ax.set_ylabel("Median Dilution Efficiency (seconds / %)", fontsize=10)
         ax.set_xlim(x_min, x_max)
+        
         ax.grid(
             True,
             linestyle="--",
@@ -648,33 +575,17 @@ else:
             spine.set_color("black")
 
         ax.tick_params(axis="both", labelsize=9)
-
         fig_efficiency.tight_layout()
 
-        st.pyplot(
-            fig_efficiency,
-            use_container_width=True
-        )
+        st.pyplot(fig_efficiency, use_container_width=True)
 
         kpi1, kpi2, kpi3 = st.columns(3)
-
-        kpi1.metric(
-            "Baseline Efficiency",
-            f"{baseline_efficiency:.2f} s/%"
-        )
-
-        kpi2.metric(
-            "Saturation Warning Ratio",
-            f"{warning_ratio:.2f}%"
-        )
-
-        kpi3.metric(
-            "Saturation Stop Ratio",
-            f"{stop_ratio:.2f}%"
-        )
+        kpi1.metric("Baseline Efficiency", f"{baseline_efficiency:.2f} s/%")
+        kpi2.metric("Saturation Warning Ratio", f"{warning_ratio:.2f}%")
+        kpi3.metric("Saturation Stop Ratio", f"{stop_ratio:.2f}%")
 
         st.caption(
-            "The red shaded area represents the saturation / stop zone. "
+            "The shaded area represents the saturation / stop zone. "
             "After this point, further solvent addition is not recommended."
         )
 
@@ -701,7 +612,6 @@ else:
                 hide_index=True
             )
 
-
 # =========================================================
 # 7. WORD EXPORT - A4 FORMAT
 # =========================================================
@@ -716,7 +626,6 @@ try:
         st.stop()
 
     graph_stream = io.BytesIO(graph_png)
-
     doc = Document()
 
     # A4 portrait
@@ -737,29 +646,17 @@ try:
 
     report_vendor = doc.add_paragraph()
     report_vendor.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    report_vendor.add_run(
-        f"Vendor: {selected_vendor}"
-    ).bold = True
+    report_vendor.add_run(f"Vendor: {selected_vendor}").bold = True
 
     report_period = doc.add_paragraph()
     report_period.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    report_period.add_run(
-        f"Analysis Period: {date_range_str}"
-    )
+    report_period.add_run(f"Analysis Period: {date_range_str}")
 
     # Figure 1: hierarchy
-    doc.add_heading(
-        "1. Solvent Consumption Hierarchy",
-        level=1
-    )
-
+    doc.add_heading("1. Solvent Consumption Hierarchy", level=1)
     hierarchy_p = doc.add_paragraph()
     hierarchy_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-    hierarchy_p.add_run().add_picture(
-        graph_stream,
-        width=Inches(7.0)
-    )
+    hierarchy_p.add_run().add_picture(graph_stream, width=Inches(7.0))
 
     hierarchy_caption = doc.add_paragraph(
         "Figure 1. Solvent consumption hierarchy by resin and solvent type."
@@ -769,7 +666,6 @@ try:
     # Figure 2: saturation chart
     if fig_efficiency is not None:
         chart_stream = io.BytesIO()
-
         fig_efficiency.savefig(
             chart_stream,
             format="png",
@@ -777,21 +673,12 @@ try:
             bbox_inches="tight",
             facecolor="white"
         )
-
         chart_stream.seek(0)
 
-        doc.add_heading(
-            "2. Dilution Efficiency & Saturation Analysis",
-            level=1
-        )
-
+        doc.add_heading("2. Dilution Efficiency & Saturation Analysis", level=1)
         chart_p = doc.add_paragraph()
         chart_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-        chart_p.add_run().add_picture(
-            chart_stream,
-            width=Inches(7.0)
-        )
+        chart_p.add_run().add_picture(chart_stream, width=Inches(7.0))
 
         chart_caption = doc.add_paragraph(
             "Figure 2. Dilution efficiency versus solvent blending ratio "
@@ -801,11 +688,7 @@ try:
 
         # Key results table
         doc.add_heading("3. Key Results", level=1)
-
-        result_table = doc.add_table(
-            rows=1,
-            cols=3
-        )
+        result_table = doc.add_table(rows=1, cols=3)
         result_table.style = "Table Grid"
 
         header_cells = result_table.rows[0].cells
@@ -820,10 +703,9 @@ try:
 
         doc.add_paragraph(
             "Interpretation: When dilution efficiency decreases, additional "
-            "solvent produces less viscosity reduction. The red saturation "
+            "solvent produces less viscosity reduction. The shaded saturation "
             "zone is used as a reference to avoid excessive solvent addition."
         )
-
     else:
         doc.add_paragraph(
             "Note: Saturation chart was not generated because the selected "
@@ -850,4 +732,3 @@ try:
 except Exception as e:
     st.error(f"❌ Word report export failed: {e}")
     st.exception(e)
-
