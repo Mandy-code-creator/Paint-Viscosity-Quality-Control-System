@@ -451,40 +451,34 @@ else:
             color="#4F6DFF"
         )
 
-        # Record count above each point
+        # MẸO 1: Đặt nền trắng cho số liệu để không bị đường xanh đè lên
         for x, y, record in zip(x_values, y_values, record_values):
             ax.annotate(
                 str(record),
                 xy=(x, y),
-                xytext=(0, 7),
+                xytext=(0, 10),
                 textcoords="offset points",
                 ha="center",
                 fontsize=8,
-                color="#4A4A4A"
+                color="#4A4A4A",
+                bbox=dict(facecolor="white", edgecolor="none", pad=1.5, alpha=0.85)
             )
 
         x_min = min(0, x_values.min() - 1)
         x_max = max(x_values.max() + 1, stop_ratio + 1)
         
-        # ---------------------------------------------------------
-        # CHỈNH SỬA Y-AXIS PADDING ĐỂ BẢO VỆ NHÃN TRÊN & DƯỚI
-        # ---------------------------------------------------------
         y_min_orig, y_max_orig = ax.get_ylim()
-        
-        # Tính toán khoảng Range thực tế
         y_range = y_max_orig - y_min_orig
         
-        # Thêm 15% padding phía trên và 10% padding phía dưới
+        # Thêm không gian Y để chữ không cấn viền
         y_max = y_max_orig + (y_range * 0.15)
-        y_min = y_min_orig - (y_range * 0.10)
+        y_min = y_min_orig - (y_range * 0.15)
         ax.set_ylim(y_min, y_max)
         
-        # Đặt hai mốc Y so le nhau: Stop cao hơn Warning
-        y_text_pos_stop = y_max_orig + (y_range * 0.08)
-        y_text_pos_warning = y_max_orig + (y_range * 0.02)
+        # MẸO 2: Mở rộng margin bên phải để tạo không gian chứa Text và Mũi tên
+        fig_efficiency.subplots_adjust(right=0.75)
 
-        # Chuẩn hóa màu tham chiếu Deep Sky Blue
-        alert_color = "DeepSkyBlue"
+        alert_color = "red"
 
         if abs(stop_ratio - warning_ratio) < 0.2:
             ax.axvline(
@@ -499,15 +493,24 @@ else:
                 color=alert_color,
                 alpha=0.10
             )
-            ax.text(
-                stop_ratio + 0.05,
-                y_text_pos_stop,
+            # Annotate với mũi tên chỉ từ bên ngoài đồ thị vào
+            ax.annotate(
                 f"Saturation Limit: {stop_ratio:.1f}%",
+                xy=(stop_ratio, y_max_orig),
+                xytext=(1.05, 0.85),
+                textcoords="axes fraction",
                 color=alert_color,
                 fontsize=10,
                 fontweight="bold",
                 va="center",
-                ha="left"
+                ha="left",
+                arrowprops=dict(
+                    arrowstyle="->", 
+                    color=alert_color, 
+                    lw=1.5, 
+                    connectionstyle="arc3,rad=-0.2"
+                ),
+                annotation_clip=False
             )
         else:
             ax.axvline(
@@ -522,14 +525,12 @@ else:
                 linestyle="--",
                 linewidth=2.2
             )
-            
             ax.axvspan(
                 warning_ratio,
                 stop_ratio,
                 color=alert_color,
                 alpha=0.05
             )
-            
             ax.axvspan(
                 stop_ratio,
                 x_max,
@@ -537,26 +538,44 @@ else:
                 alpha=0.10
             )
             
-            ax.text(
-                warning_ratio + 0.05,
-                y_text_pos_warning,
+            # Text Warning bên ngoài
+            ax.annotate(
                 f"Warning: {warning_ratio:.1f}%",
+                xy=(warning_ratio, y_max_orig * 0.95),
+                xytext=(1.05, 0.75),
+                textcoords="axes fraction",
                 color=alert_color,
                 fontsize=10,
                 fontweight="bold",
                 va="center",
-                ha="left"
+                ha="left",
+                arrowprops=dict(
+                    arrowstyle="->", 
+                    color=alert_color, 
+                    lw=1.5, 
+                    connectionstyle="arc3,rad=-0.2"
+                ),
+                annotation_clip=False
             )
             
-            ax.text(
-                stop_ratio + 0.05,
-                y_text_pos_stop,
+            # Text Stop bên ngoài
+            ax.annotate(
                 f"Stop: {stop_ratio:.1f}%",
+                xy=(stop_ratio, y_max_orig * 0.85),
+                xytext=(1.05, 0.85),
+                textcoords="axes fraction",
                 color=alert_color,
                 fontsize=10,
                 fontweight="bold",
                 va="center",
-                ha="left"
+                ha="left",
+                arrowprops=dict(
+                    arrowstyle="->", 
+                    color=alert_color, 
+                    lw=1.5, 
+                    connectionstyle="arc3,rad=-0.2"
+                ),
+                annotation_clip=False
             )
 
         ax.set_title(
@@ -714,7 +733,7 @@ try:
 
         doc.add_paragraph(
             "Interpretation: When dilution efficiency decreases, additional "
-            "solvent produces less viscosity reduction. The shaded saturation "
+            "solvent produces less viscosity reduction. The red shaded saturation "
             "zone is used as a reference to avoid excessive solvent addition."
         )
     else:
