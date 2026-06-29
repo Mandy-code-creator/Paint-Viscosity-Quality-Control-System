@@ -1187,6 +1187,7 @@ with tab3:
 
 
 # =========================================================
+# =========================================================
 # TAB 4: MASTER SHOP FLOOR REFERENCE TABLE
 # =========================================================
 with tab4:
@@ -1202,8 +1203,71 @@ with tab4:
         "訂單塗料重量 + 120 kg 管線內運轉塗料。"
     )
 
+    # =====================================================
+    # PREPARE DATA
+    # =====================================================
     matrix_df = master_df.copy()
 
+    if matrix_df.empty:
+        st.warning("無可用歷史資料。")
+        st.stop()
+
+    # =====================================================
+    # CREATE OPERATIONAL VISCOSITY ZONE
+    # >130 s will become 130-Max Actual Value s
+    # according to each Resin + Vendor + Solvent system
+    # =====================================================
+    def create_worker_viscosity_zone(df):
+        temp_df = df.copy()
+
+        group_cols = [
+            "Resin",
+            "Vendor",
+            "Solvent_Type"
+        ]
+
+        system_max_visc = (
+            temp_df.groupby(group_cols)["黏度(秒)"]
+            .transform("max")
+        )
+
+        def base_zone(visc):
+            if visc <= 70:
+                return "<=70 s"
+            elif visc <= 90:
+                return "71-90 s"
+            elif visc <= 110:
+                return "91-110 s"
+            elif visc <= 130:
+                return "111-130 s"
+            else:
+                return ">130 s"
+
+        temp_df["Worker_Viscosity_Zone"] = (
+            temp_df["黏度(秒)"]
+            .apply(base_zone)
+        )
+
+        high_visc_mask = temp_df["黏度(秒)"] > 130
+
+        temp_df.loc[
+            high_visc_mask,
+            "Worker_Viscosity_Zone"
+        ] = (
+            "130-"
+            + system_max_visc.loc[high_visc_mask]
+            .round(1)
+            .astype(str)
+            + " s"
+        )
+
+        return temp_df
+
+    matrix_df = create_worker_viscosity_zone(matrix_df)
+
+    # =====================================================
+    # FORMAT FINAL VISCOSITY RANGE
+    # =====================================================
     def format_actual_range(p25, p75, unit="秒"):
         if pd.isna(p25) or pd.isna(p75):
             return "-"
@@ -1216,41 +1280,62 @@ with tab4:
 
         return f"{p25:.1f} - {p75:.1f} {unit}"
 
+    # =====================================================
+    # BUILD WORKER SOP TABLE
+    # =====================================================
     worker_sop = matrix_df.groupby(
         [
             "Resin",
             "Vendor",
             "Solvent_Type",
-            "Initial_Viscosity_Zone"
+            "Worker_Viscosity_Zone"
         ],
         observed=False
     ).agg(
         History_Batches=("塗料批號", "nunique"),
-        Ref_Paint_Weight_kg=("塗料重量", "median"),
-        Ref_Start_Visc=("黏度(秒)", "median"),
-        Final_Visc_P25=(
-            "黏度(秒)_1",
-            lambda x: x.quantile(0.25)
+
+        Ref_Start_Visc=(
+            "黏度(秒)",
+            "median"
         ),
-        Final_Visc_P75=(
-            "黏度(秒)_1",
-            lambda x: x.quantile(0.75)
+
+        Ref_Paint_Weight_kg=(
+            "塗料重量",
+            "median"
         ),
-        Ref_Solvent_Add_kg=("添加重量", "median"),
+
+        Ref_Solvent_Add_kg=(
+            "添加重量",
+            "median"
+        ),
+
         Ref_Solvent_Ratio=(
             "Solvent_Ratio_Percent",
             "median"
         ),
+
+        Final_Visc_P25=(
+            "黏度(秒)_1",
+            lambda x: x.quantile(0.25)
+        ),
+
+        Final_Visc_P75=(
+            "黏度(秒)_1",
+            lambda x: x.quantile(0.75)
+        ),
+
         Ratio_P90=(
             "Solvent_Ratio_Percent",
             lambda x: x.quantile(0.90)
         ),
+
         Ratio_P95=(
             "Solvent_Ratio_Percent",
             lambda x: x.quantile(0.95)
         )
     ).reset_index()
 
+    # Each row needs at least 5 valid historical batches
     worker_sop = worker_sop[
         worker_sop["History_Batches"] >= 5
     ].copy()
@@ -1270,13 +1355,21 @@ with tab4:
         axis=1
     )
 
+    # =====================================================
+    # BUILD SATURATION SUMMARY FOR EACH SYSTEM
+    # =====================================================
     saturation_summary = []
 
     system_keys = matrix_df[
-        ["Resin", "Vendor", "Solvent_Type"]
+        [
+            "Resin",
+            "Vendor",
+            "Solvent_Type"
+        ]
     ].drop_duplicates()
 
     for _, system_row in system_keys.iterrows():
+
         resin_value = system_row["Resin"]
         vendor_value = system_row["Vendor"]
         solvent_value = system_row["Solvent_Type"]
@@ -1293,18 +1386,28 @@ with tab4:
             "Resin": resin_value,
             "Vendor": vendor_value,
             "Solvent_Type": solvent_value,
-            "Saturation_Warning_Ratio": temp_saturation["warning_ratio"],
-            "Saturation_Stop_Ratio": temp_saturation["saturation_ratio"]
+            "Saturation_Warning_Ratio": (
+                temp_saturation["warning_ratio"]
+            ),
+            "Saturation_Stop_Ratio": (
+                temp_saturation["saturation_ratio"]
+            )
         })
 
     saturation_summary_df = pd.DataFrame(saturation_summary)
 
     worker_sop = worker_sop.merge(
         saturation_summary_df,
-        on=["Resin", "Vendor", "Solvent_Type"],
+        on=[
+            "Resin",
+            "Vendor",
+            "Solvent_Type"
+        ],
         how="left"
     )
 
+    # If saturation cannot be statistically detected,
+    # use historical P90 / P95 as fallback limits
     worker_sop["Saturation_Warning_Ratio"] = (
         worker_sop["Saturation_Warning_Ratio"]
         .fillna(worker_sop["Ratio_P90"])
@@ -1315,19 +1418,24 @@ with tab4:
         .fillna(worker_sop["Ratio_P95"])
     )
 
+    # Stop ratio must not be lower than warning ratio
     worker_sop["Saturation_Stop_Ratio"] = np.maximum(
         worker_sop["Saturation_Stop_Ratio"],
         worker_sop["Saturation_Warning_Ratio"]
     )
 
+    # =====================================================
+    # OUTPUT COLUMN ORDER
+    # Follow actual worker operation sequence
+    # =====================================================
     worker_output = worker_sop[
         [
             "Resin",
             "Vendor",
             "Solvent_Type",
-            "Initial_Viscosity_Zone",
-            "History_Batches",
+            "Worker_Viscosity_Zone",
             "Ref_Start_Visc",
+            "History_Batches",
             "Ref_Paint_Weight_kg",
             "Ref_Solvent_Add_kg",
             "Ref_Solvent_Ratio",
@@ -1342,9 +1450,9 @@ with tab4:
             "Resin": "樹脂種類",
             "Vendor": "塗料供應商",
             "Solvent_Type": "稀釋劑種類",
-            "Initial_Viscosity_Zone": "初始黏度區間",
-            "History_Batches": "歷史批數",
+            "Worker_Viscosity_Zone": "初始黏度區間",
             "Ref_Start_Visc": "參考起始黏度(秒)",
+            "History_Batches": "歷史批數",
             "Ref_Paint_Weight_kg": "參考塗料使用量(kg)",
             "Ref_Solvent_Add_kg": "參考稀釋劑添加量(kg)",
             "Ref_Solvent_Ratio": "參考稀釋劑添加比例(%)",
@@ -1355,37 +1463,81 @@ with tab4:
         inplace=True
     )
 
+    # =====================================================
+    # SORT VISCOSITY ZONES CORRECTLY
+    # =====================================================
+    def get_zone_order(zone):
+        zone = str(zone)
+
+        if zone.startswith("<=70"):
+            return 1
+
+        elif zone.startswith("71-90"):
+            return 2
+
+        elif zone.startswith("91-110"):
+            return 3
+
+        elif zone.startswith("111-130"):
+            return 4
+
+        elif zone.startswith("130-"):
+            return 5
+
+        return 99
+
+    worker_output["_zone_order"] = (
+        worker_output["初始黏度區間"]
+        .apply(get_zone_order)
+    )
+
     worker_output = worker_output.sort_values(
         by=[
             "樹脂種類",
             "塗料供應商",
             "稀釋劑種類",
-            "初始黏度區間"
+            "_zone_order"
         ]
-    )
+    ).drop(columns="_zone_order")
 
+    # =====================================================
+    # DISPLAY TABLE
+    # =====================================================
     st.dataframe(
         worker_output,
         column_config={
             "歷史批數": st.column_config.NumberColumn(
+                "歷史批數",
                 format="%d"
             ),
+
             "參考起始黏度(秒)": st.column_config.NumberColumn(
+                "參考起始黏度(秒)",
                 format="%.1f 秒"
             ),
+
             "參考塗料使用量(kg)": st.column_config.NumberColumn(
-                format="%.2f kg"
+                "參考塗料使用量(kg)",
+                format="%.1f kg"
             ),
+
             "參考稀釋劑添加量(kg)": st.column_config.NumberColumn(
-                format="%.2f kg"
+                "參考稀釋劑添加量(kg)",
+                format="%.1f kg"
             ),
+
             "參考稀釋劑添加比例(%)": st.column_config.NumberColumn(
+                "參考稀釋劑添加比例(%)",
                 format="%.2f%%"
             ),
+
             "飽和警戒比例(%)": st.column_config.NumberColumn(
+                "飽和警戒比例(%)",
                 format="%.2f%%"
             ),
+
             "飽和停止比例(%)": st.column_config.NumberColumn(
+                "飽和停止比例(%)",
                 format="%.2f%%"
             )
         },
@@ -1394,16 +1546,24 @@ with tab4:
     )
 
     st.caption(
-        "「歷史最終黏度範圍 (P25–P75)」表示相同條件下歷史最終黏度的中間50%分布，"
-        "非產品規格上下限。參考稀釋劑添加比例與Tab 1的Solvent Blending Ratio一致。"
+        "「歷史最終黏度範圍(P25–P75)」代表相同條件下，歷史最終黏度的中間50%分布，"
+        "僅供現場調整參考，非產品規格上下限。"
     )
 
+    st.caption(
+        "「130–Max s」表示該樹脂、供應商及稀釋劑組合中，歷史實際出現的最高初始黏度範圍；"
+        "飽和停止比例仍以歷史效率分析或P95作為安全限制。"
+    )
+
+    # =====================================================
+    # CSV DOWNLOAD
+    # =====================================================
     csv_export = worker_output.to_csv(
         index=False
     ).encode("utf-8-sig")
 
     st.download_button(
-        "下載現場歷史加料參考表 CSV",
+        label="下載現場歷史加料參考表 CSV",
         data=csv_export,
         file_name="現場歷史加料參考表.csv",
         mime="text/csv"
