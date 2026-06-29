@@ -1,4 +1,3 @@
-```python
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -851,4 +850,4 @@ try:
 except Exception as e:
     st.error(f"❌ Word report export failed: {e}")
     st.exception(e)
-```
+
