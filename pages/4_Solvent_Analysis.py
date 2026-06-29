@@ -121,12 +121,6 @@ filtered_df["Kg_per_1s"] = (
     / filtered_df["Delta_V"]
 )
 
-# Solvent ratio required for each 1-second viscosity reduction
-filtered_df["Pct_per_1s"] = (
-    filtered_df["Solvent_Ratio_Percent"]
-    / filtered_df["Delta_V"]
-)
-
 # Dilution efficiency:
 # viscosity reduction achieved by each 1% solvent ratio
 filtered_df["Dilution_Efficiency"] = (
@@ -142,7 +136,6 @@ filtered_df = filtered_df.replace(
         "Solvent_Ratio_Percent",
         "Delta_V",
         "Kg_per_1s",
-        "Pct_per_1s",
         "Dilution_Efficiency"
     ]
 )
@@ -152,7 +145,7 @@ if filtered_df.empty:
     st.stop()
 
 # =========================================================
-# 4. HIERARCHY SUMMARY
+# 4. HIERARCHY SUMMARY (UNIFIED TO MEDIAN LOGIC)
 # =========================================================
 tree_summary = filtered_df.groupby(
     ["Resin", "Solvent_Type"],
@@ -160,8 +153,8 @@ tree_summary = filtered_df.groupby(
 ).agg(
     Total_Paint=("塗料重量", "sum"),
     Total_Solvent=("添加重量", "sum"),
-    Avg_Kg_per_1s=("Kg_per_1s", "mean"),
-    Avg_Pct_per_1s=("Pct_per_1s", "mean"),
+    Median_Kg_per_1s=("Kg_per_1s", "median"),
+    Median_Efficiency=("Dilution_Efficiency", "median"),
     Avg_Visc_Before=("黏度(秒)", "mean"),
     Avg_Visc_After=("黏度(秒)_1", "mean")
 ).reset_index()
@@ -318,10 +311,10 @@ for resin in tree_summary["Resin"].unique():
                         Visc After: {row["Avg_Visc_After"]:.1f} s
                     </FONT><BR/>
                     <FONT COLOR="#00BFFF">
-                        {row["Avg_Kg_per_1s"]:.2f} kg / 1s
+                        {row["Median_Kg_per_1s"]:.2f} kg / 1s
                     </FONT><BR/>
                     <FONT COLOR="#D9534F">
-                        {row["Avg_Pct_per_1s"]:.2f}% / 1s
+                        Efficiency: {row["Median_Efficiency"]:.2f} s/%
                     </FONT>
                 </TD>
             </TR>
@@ -368,6 +361,8 @@ fig_efficiency = None
 baseline_efficiency = None
 warning_ratio = None
 stop_ratio = None
+baseline_range_label = "N/A"
+baseline_records = 0
 
 if len(saturation_df) < 5:
     st.warning(
@@ -404,7 +399,6 @@ else:
     else:
         baseline_efficiency = efficiency_summary["Median_Efficiency"].iloc[0]
         
-        # Lấy thông số để hiển thị mẫu công thức
         baseline_records = efficiency_summary["Records"].iloc[0]
         baseline_range_label = efficiency_summary["Ratio_Bin"].iloc[0]
 
@@ -622,9 +616,6 @@ else:
         kpi2.metric("Saturation Warning Ratio", f"{warning_ratio:.2f}%")
         kpi3.metric("Saturation Stop Ratio", f"{stop_ratio:.2f}%")
         
-        # ---------------------------------------------------------
-        # BƯỚC TÍNH MẪU ĐỂ MINH BẠCH HÓA SỐ LIỆU CHO QUẢN LÝ
-        # ---------------------------------------------------------
         with st.expander(f"🧮 Sample Calculation: How is Baseline {baseline_efficiency:.2f} determined?"):
             st.markdown(f"""
             **Step 1: Coil-level Calculation**
@@ -762,6 +753,26 @@ try:
             "solvent produces less viscosity reduction. The red shaded saturation "
             "zone is used as a reference to avoid excessive solvent addition."
         )
+
+        # ---------------------------------------------------------
+        # BỔ SUNG PHẦN GIẢI TRÌNH CALCULATION VÀO FILE WORD
+        # ---------------------------------------------------------
+        doc.add_heading("4. 基準數據判定與計算範例 (Baseline Sample Calculation)", level=1)
+        doc.add_paragraph(
+            f"為確保客觀性，系統自動捕捉第一個具備完整統計意義的區間作為基準（即 {baseline_range_label}，"
+            f"包含 {baseline_records} 卷歷史有效紀錄）。為排除極端值干擾，系統提取該區間內稀釋效率之「中位數 (Median)」做為 100% 黃金基準線。"
+        )
+        
+        doc.add_paragraph(f"• 基準效率 (Baseline Efficiency) = {baseline_efficiency:.2f} (秒/%)")
+        
+        calc_formula = doc.add_paragraph()
+        calc_formula.add_run("單卷 (Coil-level) 效率計算底層公式：\n").bold = True
+        calc_formula.add_run(
+            "1. 溶劑比例 (%) = [ 添加重量 / (塗料重量 + 120) ] × 100\n"
+            "2. 降黏幅度 (ΔV) = 稀釋前黏度 - 稀釋後黏度\n"
+            "3. 稀釋效率 (s/%) = ΔV / 溶劑比例"
+        )
+
     else:
         doc.add_paragraph(
             "Note: Saturation chart was not generated because the selected "
