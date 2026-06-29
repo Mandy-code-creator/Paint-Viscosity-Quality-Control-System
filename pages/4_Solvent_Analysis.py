@@ -403,6 +403,10 @@ else:
         st.warning("⚠️ Not enough records in each solvent-ratio interval.")
     else:
         baseline_efficiency = efficiency_summary["Median_Efficiency"].iloc[0]
+        
+        # Lấy thông số để hiển thị mẫu công thức
+        baseline_records = efficiency_summary["Records"].iloc[0]
+        baseline_range_label = efficiency_summary["Ratio_Bin"].iloc[0]
 
         efficiency_summary["Efficiency_Retention_Percent"] = (
             efficiency_summary["Median_Efficiency"]
@@ -451,7 +455,6 @@ else:
             color="#4F6DFF"
         )
 
-        # Background added to text so the blue line doesn't strike through it
         for x, y, record in zip(x_values, y_values, record_values):
             ax.annotate(
                 str(record),
@@ -476,7 +479,6 @@ else:
         
         fig_efficiency.subplots_adjust(right=0.75)
 
-        # TRẢ LẠI MÀU ĐỎ THEO YÊU CẦU
         alert_color = "red" 
 
         if abs(stop_ratio - warning_ratio) < 0.2:
@@ -574,9 +576,6 @@ else:
                 annotation_clip=False
             )
 
-        # ---------------------------------------------------------
-        # GHI CHÚ GIẢI THÍCH Ý NGHĨA CÁC CON SỐ
-        # ---------------------------------------------------------
         ax.text(
             0.02, 0.04,
             "ℹ️ Note: Numbers above data points indicate the total record count.",
@@ -622,6 +621,24 @@ else:
         kpi1.metric("Baseline Efficiency", f"{baseline_efficiency:.2f} s/%")
         kpi2.metric("Saturation Warning Ratio", f"{warning_ratio:.2f}%")
         kpi3.metric("Saturation Stop Ratio", f"{stop_ratio:.2f}%")
+        
+        # ---------------------------------------------------------
+        # BƯỚC TÍNH MẪU ĐỂ MINH BẠCH HÓA SỐ LIỆU CHO QUẢN LÝ
+        # ---------------------------------------------------------
+        with st.expander(f"🧮 Sample Calculation: How is Baseline {baseline_efficiency:.2f} determined?"):
+            st.markdown(f"""
+            **Step 1: Coil-level Calculation**
+            For every individual coil, the system evaluates solvent performance by calculating:
+            * **Solvent Ratio (%)** = `[Solvent Added / (Paint Weight + 120)] × 100`
+            * **Viscosity Drop (\u0394V)** = `Viscosity Before - Viscosity After`
+            * **Dilution Efficiency** = `\u0394V / Solvent Ratio`
+
+            **Step 2: Group Aggregation (Median)**
+            * The system identifies the optimal starting range: **{baseline_range_label}**.
+            * There are **{baseline_records}** historical records (coils) matching this condition.
+            * To prevent extreme outliers from skewing the results, the system calculates the **Median** efficiency across these {baseline_records} records.
+            * **Calculated Baseline** = **{baseline_efficiency:.2f} seconds per 1% solvent added**.
+            """)
 
         st.caption(
             "The shaded area represents the saturation / stop zone. "
