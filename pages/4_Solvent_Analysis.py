@@ -1,4 +1,3 @@
-```python
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -698,4 +697,4 @@ try:
 except Exception as e:
     st.error(f"Đã xảy ra lỗi khi tạo file Word: {e}")
     st.exception(e)
-```
+
