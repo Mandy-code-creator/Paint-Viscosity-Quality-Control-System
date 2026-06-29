@@ -555,19 +555,20 @@ with tab1:
 
     plot_df = system_df.reset_index(drop=True).copy()
 
-    # Each batch uses one color family:
-    # Before = darker, After = lighter, connecting line = same color.
     color_scale = px.colors.sample_colorscale(
         "Turbo",
         samplepoints=np.linspace(0.05, 0.95, len(plot_df))
     )
 
-        def hex_to_rgba(color_value, alpha):
+    def hex_to_rgba(color_value, alpha):
         color_value = str(color_value).strip()
 
         if color_value.startswith("rgb("):
             rgb_values = color_value.replace("rgb(", "").replace(")", "")
-            r, g, b = [int(float(x.strip())) for x in rgb_values.split(",")]
+            r, g, b = [
+                int(float(x.strip()))
+                for x in rgb_values.split(",")
+            ]
             return f"rgba({r},{g},{b},{alpha})"
 
         if color_value.startswith("rgba("):
@@ -587,16 +588,17 @@ with tab1:
         return f"rgba({r},{g},{b},{alpha})"
 
     before_colors = color_scale
+
     after_colors = [
         hex_to_rgba(color, 0.45)
         for color in color_scale
     ]
+
     line_colors = [
         hex_to_rgba(color, 0.55)
         for color in color_scale
     ]
 
-    # Same-color dotted connection for each mixing batch
     for idx, row in plot_df.iterrows():
         fig_scatter.add_trace(
             go.Scatter(
@@ -619,7 +621,6 @@ with tab1:
             )
         )
 
-    # Initial viscosity: darker tone
     fig_scatter.add_trace(
         go.Scatter(
             x=plot_df["Solvent_Ratio_Percent"],
@@ -651,7 +652,6 @@ with tab1:
         )
     )
 
-    # Final viscosity: same tone, lighter opacity
     fig_scatter.add_trace(
         go.Scatter(
             x=plot_df["Solvent_Ratio_Percent"],
