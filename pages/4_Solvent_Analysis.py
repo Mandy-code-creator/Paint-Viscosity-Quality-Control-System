@@ -416,18 +416,62 @@ else:
             )
         )
 
-        fig_efficiency.add_vline(
-            x=warning_ratio,
-            line_dash="dash",
-            annotation_text=f"Warning: {warning_ratio:.1f}%",
-            annotation_position="top left"
-        )
-
+        # Warning và Stop trùng nhau: chỉ hiển thị một giới hạn bão hòa màu đỏ
+    if abs(stop_ratio - warning_ratio) < 0.2:
         fig_efficiency.add_vline(
             x=stop_ratio,
+            line_color="red",
+            line_width=3,
+            line_dash="dash",
+            annotation_text=f"Saturation Limit: {stop_ratio:.1f}%",
+            annotation_position="top right",
+            annotation_font_color="red"
+        )
+    
+        fig_efficiency.add_vrect(
+            x0=stop_ratio,
+            x1=max(efficiency_summary["Ratio_Midpoint"].max() + 1, stop_ratio + 1),
+            fillcolor="red",
+            opacity=0.08,
+            line_width=0
+        )
+
+    # Warning và Stop khác nhau: hiển thị vùng cảnh báo và vùng dừng
+    else:
+        fig_efficiency.add_vline(
+            x=warning_ratio,
+            line_color="orange",
+            line_width=2,
+            line_dash="dash",
+            annotation_text=f"Warning: {warning_ratio:.1f}%",
+            annotation_position="top left",
+            annotation_font_color="orange"
+        )
+    
+        fig_efficiency.add_vline(
+            x=stop_ratio,
+            line_color="red",
+            line_width=3,
             line_dash="dot",
             annotation_text=f"Stop: {stop_ratio:.1f}%",
-            annotation_position="top right"
+            annotation_position="top right",
+            annotation_font_color="red"
+        )
+    
+        fig_efficiency.add_vrect(
+            x0=warning_ratio,
+            x1=stop_ratio,
+            fillcolor="orange",
+            opacity=0.08,
+            line_width=0
+        )
+    
+        fig_efficiency.add_vrect(
+            x0=stop_ratio,
+            x1=max(efficiency_summary["Ratio_Midpoint"].max() + 1, stop_ratio + 1),
+            fillcolor="red",
+            opacity=0.10,
+            line_width=0
         )
 
         fig_efficiency.update_layout(
