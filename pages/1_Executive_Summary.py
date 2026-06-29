@@ -552,29 +552,40 @@ with tab1:
 
     fig_scatter = go.Figure()
 
-    x_lines = []
-    y_lines = []
+plot_df = system_df.reset_index(drop=True).copy()
 
-    for _, row in system_df.iterrows():
-        x_lines.extend([
-            row["Solvent_Ratio_Percent"],
-            row["Solvent_Ratio_Percent"],
-            None
-        ])
+# Tạo sắc độ màu khác nhau theo từng batch
+color_scale = px.colors.sample_colorscale(
+    "Turbo",
+    samplepoints=np.linspace(0.05, 0.95, len(plot_df))
+)
 
-        y_lines.extend([
-            row["黏度(秒)"],
-            row["黏度(秒)_1"],
-            None
-        ])
+def hex_to_rgba(hex_color, alpha):
+    hex_color = hex_color.lstrip("#")
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
 
+before_colors = color_scale
+after_colors = [hex_to_rgba(color, 0.45) for color in color_scale]
+line_colors = [hex_to_rgba(color, 0.55) for color in color_scale]
+
+# Đường nối: cùng tông màu với cặp điểm trước / sau
+for idx, row in plot_df.iterrows():
     fig_scatter.add_trace(
         go.Scatter(
-            x=x_lines,
-            y=y_lines,
+            x=[
+                row["Solvent_Ratio_Percent"],
+                row["Solvent_Ratio_Percent"]
+            ],
+            y=[
+                row["黏度(秒)"],
+                row["黏度(秒)_1"]
+            ],
             mode="lines",
             line=dict(
-                color="lightgray",
+                color=line_colors[idx],
                 width=1.5,
                 dash="dot"
             ),
@@ -583,63 +594,69 @@ with tab1:
         )
     )
 
-    fig_scatter.add_trace(
-        go.Scatter(
-            x=system_df["Solvent_Ratio_Percent"],
-            y=system_df["黏度(秒)"],
-            mode="markers",
-            name="Initial Viscosity (Before)",
-            marker=dict(
-                color="#ED7D31",
-                size=9,
-                line=dict(width=1, color="white")
-            ),
-            customdata=system_df[
-                [
-                    "黏度(秒)_1",
-                    "Delta_V",
-                    "Initial_Viscosity_Zone"
-                ]
-            ].values,
-            hovertemplate=(
-                "<b>Zone: %{customdata[2]}</b><br>"
-                "Solvent Ratio: %{x:.2f}%<br>"
-                "Initial Visc (Before): %{y:.1f}s 🌟<br>"
-                "Final Visc (After): %{customdata[0]:.1f}s<br>"
-                "Viscosity Drop (Delta V): %{customdata[1]:.1f}s"
-                "<extra></extra>"
-            )
+# Điểm ban đầu: màu đậm
+fig_scatter.add_trace(
+    go.Scatter(
+        x=plot_df["Solvent_Ratio_Percent"],
+        y=plot_df["黏度(秒)"],
+        mode="markers",
+        name="Initial Viscosity (Before)",
+        marker=dict(
+            color=before_colors,
+            size=9,
+            line=dict(width=1, color="white")
+        ),
+        customdata=plot_df[
+            [
+                "黏度(秒)_1",
+                "Delta_V",
+                "Initial_Viscosity_Zone",
+                "塗料批號"
+            ]
+        ].values,
+        hovertemplate=(
+            "<b>Batch: %{customdata[3]}</b><br>"
+            "<b>Zone: %{customdata[2]}</b><br>"
+            "Solvent Ratio: %{x:.2f}%<br>"
+            "Initial Visc (Before): %{y:.1f}s<br>"
+            "Final Visc (After): %{customdata[0]:.1f}s<br>"
+            "Viscosity Drop (Delta V): %{customdata[1]:.1f}s"
+            "<extra></extra>"
         )
     )
+)
 
-    fig_scatter.add_trace(
-        go.Scatter(
-            x=system_df["Solvent_Ratio_Percent"],
-            y=system_df["黏度(秒)_1"],
-            mode="markers",
-            name="Final Viscosity (After)",
-            marker=dict(
-                color="#4472C4",
-                size=9,
-                line=dict(width=1, color="white")
-            ),
-            customdata=system_df[
-                [
-                    "黏度(秒)",
-                    "Delta_V",
-                    "Initial_Viscosity_Zone"
-                ]
-            ].values,
-            hovertemplate=(
-                "<b>Zone: %{customdata[2]}</b><br>"
-                "Solvent Ratio: %{x:.2f}%<br>"
-                "Initial Visc (Before): %{customdata[0]:.1f}s<br>"
-                "Final Visc (After): %{y:.1f}s 🌟<br>"
-                "Viscosity Drop (Delta V): %{customdata[1]:.1f}s"
-                "<extra></extra>"
-            )
+# Điểm sau khi thêm dung môi: cùng tông nhưng nhạt hơn
+fig_scatter.add_trace(
+    go.Scatter(
+        x=plot_df["Solvent_Ratio_Percent"],
+        y=plot_df["黏度(秒)_1"],
+        mode="markers",
+        name="Final Viscosity (After)",
+        marker=dict(
+            color=after_colors,
+            size=9,
+            line=dict(width=1, color="white")
+        ),
+        customdata=plot_df[
+            [
+                "黏度(秒)",
+                "Delta_V",
+                "Initial_Viscosity_Zone",
+                "塗料批號"
+            ]
+        ].values,
+        hovertemplate=(
+            "<b>Batch: %{customdata[3]}</b><br>"
+            "<b>Zone: %{customdata[2]}</b><br>"
+            "Solvent Ratio: %{x:.2f}%<br>"
+            "Initial Visc (Before): %{customdata[0]:.1f}s<br>"
+            "Final Visc (After): %{y:.1f}s<br>"
+            "Viscosity Drop (Delta V): %{customdata[1]:.1f}s"
+            "<extra></extra>"
         )
     )
+)
 
     chart_title = (
         f"Viscosity Transition by Solvent Ratio<br>"
