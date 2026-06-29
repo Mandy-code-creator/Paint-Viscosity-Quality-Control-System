@@ -97,7 +97,7 @@ def export_chart_to_word(
     # STATIC CHART EXPORT - NO KALEIDO REQUIRED
     # =====================================================
     try:
-        fig, ax = plt.subplots(figsize=(13, 6.3))
+        fig, ax = plt.subplots(figsize=(10.2, 5.2))
 
         for _, row in system_df.iterrows():
             ratio = row["Solvent_Ratio_Percent"]
@@ -169,7 +169,7 @@ def export_chart_to_word(
         fig.savefig(
             chart_stream,
             format="png",
-            dpi=200,
+            dpi=260,
             bbox_inches="tight"
         )
 
@@ -181,7 +181,7 @@ def export_chart_to_word(
 
         chart_paragraph.add_run().add_picture(
             chart_stream,
-            width=Inches(10.4)
+            width=Inches(9.6)
         )
 
     except Exception as e:
