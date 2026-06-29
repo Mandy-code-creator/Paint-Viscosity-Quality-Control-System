@@ -171,15 +171,15 @@ if tree_summary.empty:
     st.stop()
 
 # =========================================================
-# 5. GRAPHVIZ HIERARCHY
+# 5. GRAPHVIZ HIERARCHY (ENLARGED FONTS & PADDING)
 # =========================================================
 graph = graphviz.Digraph(engine="dot")
 
 graph.attr(
     rankdir="LR",
     splines="curved",
-    nodesep="0.2",
-    ranksep="1.0",
+    nodesep="0.3",
+    ranksep="1.2",
     bgcolor="transparent"
 )
 
@@ -195,8 +195,8 @@ graph.attr(
 graph.attr(
     "edge",
     color="#A0A0A0",
-    penwidth="1.5",
-    arrowsize="0.8"
+    penwidth="2.0",
+    arrowsize="0.9"
 )
 
 total_vendor_paint = tree_summary["Total_Paint"].sum()
@@ -236,23 +236,23 @@ if date_cols:
         date_range_str = "All Available Data"
 
 center_html = f"""
-<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4">
+<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="8">
     <TR>
         <TD BGCOLOR="#00BFFF" STYLE="ROUNDED" ALIGN="CENTER">
-            <FONT COLOR="white" POINT-SIZE="18">
+            <FONT COLOR="white" POINT-SIZE="22">
                 <B>VENDOR: {selected_vendor}</B>
             </FONT>
         </TD>
     </TR>
     <TR>
         <TD BGCOLOR="#F8F9FA" STYLE="ROUNDED" ALIGN="CENTER">
-            <FONT POINT-SIZE="12" COLOR="#333333">
+            <FONT POINT-SIZE="16" COLOR="#333333">
                 Period: <B>{date_range_str}</B><BR/>
                 <B>{total_vendor_paint:,.0f} kg</B> Paint Used<BR/>
                 Visc Reduction: <B>{avg_delta_v:.1f} s</B><BR/>
                 <B>{total_vendor_solv:,.0f} kg</B> Solvent Added<BR/>
             </FONT>
-            <FONT COLOR="#D9534F" POINT-SIZE="13">
+            <FONT COLOR="#D9534F" POINT-SIZE="18">
                 <B>Avg. Solvent Ratio: {avg_solvent_ratio:.2f}%</B>
             </FONT>
         </TD>
@@ -269,17 +269,17 @@ for resin in tree_summary["Resin"].unique():
     resin_solvent_sum = resin_data["Total_Solvent"].sum()
 
     resin_html = f"""
-    <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="2">
+    <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="6">
         <TR>
             <TD BGCOLOR="#E6F2FF" STYLE="ROUNDED"
                 BORDER="1" COLOR="#00BFFF" ALIGN="CENTER">
-                <FONT COLOR="#005A9E" POINT-SIZE="14">
+                <FONT COLOR="#005A9E" POINT-SIZE="18">
                     <B>RESIN: {resin}</B>
                 </FONT><BR/>
-                <FONT COLOR="#555555" POINT-SIZE="11">
+                <FONT COLOR="#555555" POINT-SIZE="14">
                     {resin_paint_sum:,.0f} kg Paint
                 </FONT><BR/>
-                <FONT COLOR="#D9534F" POINT-SIZE="11">
+                <FONT COLOR="#D9534F" POINT-SIZE="14">
                     {resin_solvent_sum:,.0f} kg Solvent
                 </FONT>
             </TD>
@@ -295,26 +295,26 @@ for resin in tree_summary["Resin"].unique():
         leaf_id = f"leaf_{resin}_{solvent}_{idx}"
 
         leaf_html = f"""
-        <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="2">
+        <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="6">
             <TR>
                 <TD ALIGN="CENTER" BGCOLOR="white" STYLE="ROUNDED"
                     BORDER="1" COLOR="#CCCCCC">
                     <B>
-                        <FONT COLOR="#333333">
+                        <FONT COLOR="#333333" POINT-SIZE="16">
                             SOLVENT: {solvent}
                         </FONT>
                     </B><BR/>
-                    <FONT COLOR="#888888" POINT-SIZE="10">
+                    <FONT COLOR="#888888" POINT-SIZE="13">
                         Visc Before: {row["Avg_Visc_Before"]:.1f} s
                     </FONT><BR/>
-                    <FONT COLOR="#888888" POINT-SIZE="10">
+                    <FONT COLOR="#888888" POINT-SIZE="13">
                         Visc After: {row["Avg_Visc_After"]:.1f} s
                     </FONT><BR/>
-                    <FONT COLOR="#00BFFF">
+                    <FONT COLOR="#00BFFF" POINT-SIZE="14">
                         {row["Median_Kg_per_1s"]:.2f} kg / 1s
                     </FONT><BR/>
-                    <FONT COLOR="#D9534F">
-                        Efficiency: {row["Median_Efficiency"]:.2f} s/%
+                    <FONT COLOR="#D9534F" POINT-SIZE="14">
+                        <B>Efficiency: {row["Median_Efficiency"]:.2f} s/%</B>
                     </FONT>
                 </TD>
             </TR>
@@ -323,7 +323,8 @@ for resin in tree_summary["Resin"].unique():
         graph.node(leaf_id, f"<{leaf_html}>")
         graph.edge(resin_id, leaf_id)
 
-st.graphviz_chart(graph, use_container_width=False)
+# Changed use_container_width to True so it expands across the dashboard
+st.graphviz_chart(graph, use_container_width=True)
 
 # =========================================================
 # 6. SATURATION ANALYSIS - MATPLOTLIB
@@ -754,9 +755,6 @@ try:
             "zone is used as a reference to avoid excessive solvent addition."
         )
 
-        # ---------------------------------------------------------
-        # BỔ SUNG PHẦN GIẢI TRÌNH CALCULATION VÀO FILE WORD
-        # ---------------------------------------------------------
         doc.add_heading("4. 基準數據判定與計算範例 (Baseline Sample Calculation)", level=1)
         doc.add_paragraph(
             f"為確保客觀性，系統自動捕捉第一個具備完整統計意義的區間作為基準（即 {baseline_range_label}，"
