@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+import matplotlib.pyplot as plt
 
 from io import BytesIO
 from docx import Document
@@ -12,10 +13,10 @@ from docx.enum.section import WD_ORIENT
 
 
 # =========================================================
-# EXPORT HISTORICAL CHART TO WORD (ROBUST SAFE VERSION)
+# EXPORT HISTORICAL CHART TO WORD
+# Uses matplotlib, so Kaleido is not required
 # =========================================================
 def export_chart_to_word(
-    fig,
     selected_resin,
     selected_vendor,
     selected_solvent,
@@ -92,15 +93,88 @@ def export_chart_to_word(
 
     doc.add_paragraph("")
 
+    # =====================================================
+    # STATIC CHART EXPORT - NO KALEIDO REQUIRED
+    # =====================================================
     try:
-        chart_png = fig.to_image(
-            format="png",
-            width=1500,
-            height=850,
-            scale=2
+        fig, ax = plt.subplots(figsize=(13, 6.3))
+
+        for _, row in system_df.iterrows():
+            ratio = row["Solvent_Ratio_Percent"]
+            visc_before = row["黏度(秒)"]
+            visc_after = row["黏度(秒)_1"]
+
+            ax.plot(
+                [ratio, ratio],
+                [visc_before, visc_after],
+                linestyle=":",
+                linewidth=0.8,
+                color="lightgray",
+                zorder=1
+            )
+
+        ax.scatter(
+            system_df["Solvent_Ratio_Percent"],
+            system_df["黏度(秒)"],
+            s=35,
+            color="#ED7D31",
+            edgecolors="white",
+            linewidths=0.5,
+            label="Initial Viscosity (Before)",
+            zorder=3
         )
 
-        chart_stream = BytesIO(chart_png)
+        ax.scatter(
+            system_df["Solvent_Ratio_Percent"],
+            system_df["黏度(秒)_1"],
+            s=35,
+            color="#4472C4",
+            edgecolors="white",
+            linewidths=0.5,
+            label="Final Viscosity (After)",
+            zorder=3
+        )
+
+        ax.set_title(
+            "Viscosity Transition by Solvent Ratio\n"
+            f"Resin: {selected_resin} | "
+            f"Vendor: {selected_vendor} | "
+            f"Solvent: {selected_solvent}",
+            fontsize=14,
+            fontweight="bold",
+            pad=16
+        )
+
+        ax.set_xlabel("Solvent Blending Ratio (%)", fontsize=10)
+        ax.set_ylabel("Viscosity (seconds)", fontsize=10)
+
+        ax.grid(
+            True,
+            linestyle="--",
+            linewidth=0.5,
+            alpha=0.5
+        )
+
+        ax.legend(
+            loc="upper center",
+            bbox_to_anchor=(0.5, 1.02),
+            ncol=2,
+            frameon=False
+        )
+
+        plt.tight_layout()
+
+        chart_stream = BytesIO()
+
+        fig.savefig(
+            chart_stream,
+            format="png",
+            dpi=200,
+            bbox_inches="tight"
+        )
+
+        chart_stream.seek(0)
+        plt.close(fig)
 
         chart_paragraph = doc.add_paragraph()
         chart_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -115,9 +189,7 @@ def export_chart_to_word(
         error_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
         error_run = error_paragraph.add_run(
-            "\n[⚠️ CHART IMAGE EXPORT FAILED]\n"
-            "Server environment is missing 'kaleido' library to render dynamic charts into static PNGs.\n"
-            "Please add 'kaleido==0.1.0.post1' to your requirements.txt."
+            f"\n[CHART EXPORT FAILED]\n{str(e)}"
         )
         error_run.bold = True
 
@@ -622,7 +694,6 @@ with tab1:
     st.plotly_chart(fig_scatter, use_container_width=True)
 
     word_data = export_chart_to_word(
-        fig=fig_scatter,
         selected_resin=selected_resin,
         selected_vendor=selected_vendor,
         selected_solvent=selected_solvent,
@@ -799,7 +870,6 @@ with tab2:
                     blocked = False
                     saturation_note = ""
 
-                    # Existing P90 / P95 / Max Drop safety logic
                     if (
                         required_ratio > ref_ratio_p95
                         or required_drop > ref_drop_max
@@ -828,7 +898,6 @@ with tab2:
                         )
                         risk_color = "green"
 
-                    # New saturation screening logic
                     if (
                         not pd.isna(saturation_limit_ratio)
                         and required_ratio >= saturation_limit_ratio
@@ -1096,7 +1165,6 @@ with tab3:
 
 
 # =========================================================
-# =========================================================
 # TAB 4: MASTER SHOP FLOOR REFERENCE TABLE
 # =========================================================
 with tab4:
@@ -1114,10 +1182,6 @@ with tab4:
 
     matrix_df = master_df.copy()
 
-    # =====================================================
-    # 1. HELPER: DISPLAY ACTUAL FINAL VISCOSITY RANGE
-    # P25-P75; if identical, show one actual value only
-    # =====================================================
     def format_actual_range(p25, p75, unit="秒"):
         if pd.isna(p25) or pd.isna(p75):
             return "-"
@@ -1130,11 +1194,6 @@ with tab4:
 
         return f"{p25:.1f} - {p75:.1f} {unit}"
 
-    # =====================================================
-    # 2. HISTORICAL SUMMARY
-    # Group by:
-    # Resin + Vendor + Solvent + Initial Viscosity Zone
-    # =====================================================
     worker_sop = matrix_df.groupby(
         [
             "Resin",
@@ -1145,46 +1204,31 @@ with tab4:
         observed=False
     ).agg(
         History_Batches=("塗料批號", "nunique"),
-
-        # Historical median paint quantity for similar batches
         Ref_Paint_Weight_kg=("塗料重量", "median"),
-
-        # Historical median initial viscosity
         Ref_Start_Visc=("黏度(秒)", "median"),
-
-        # Historical final viscosity distribution
         Final_Visc_P25=(
             "黏度(秒)_1",
             lambda x: x.quantile(0.25)
         ),
-
         Final_Visc_P75=(
             "黏度(秒)_1",
             lambda x: x.quantile(0.75)
         ),
-
-        # Historical median actual solvent addition
         Ref_Solvent_Add_kg=("添加重量", "median"),
-
-        # Same definition as Tab 1:
-        # 添加重量 / (塗料重量 + 120) × 100
         Ref_Solvent_Ratio=(
             "Solvent_Ratio_Percent",
             "median"
         ),
-
         Ratio_P90=(
             "Solvent_Ratio_Percent",
             lambda x: x.quantile(0.90)
         ),
-
         Ratio_P95=(
             "Solvent_Ratio_Percent",
             lambda x: x.quantile(0.95)
         )
     ).reset_index()
 
-    # Each SOP row requires at least 5 historical batches
     worker_sop = worker_sop[
         worker_sop["History_Batches"] >= 5
     ].copy()
@@ -1196,9 +1240,6 @@ with tab4:
         )
         st.stop()
 
-    # =====================================================
-    # 3. FINAL VISCOSITY P25-P75 DISPLAY
-    # =====================================================
     worker_sop["Final_Visc_P25_P75"] = worker_sop.apply(
         lambda row: format_actual_range(
             row["Final_Visc_P25"],
@@ -1207,10 +1248,6 @@ with tab4:
         axis=1
     )
 
-    # =====================================================
-    # 4. SATURATION LIMITS
-    # Group by Resin + Vendor + Solvent
-    # =====================================================
     saturation_summary = []
 
     system_keys = matrix_df[
@@ -1246,9 +1283,6 @@ with tab4:
         how="left"
     )
 
-    # When no statistically clear saturation point is found:
-    # P90 = warning guardrail
-    # P95 = stop guardrail
     worker_sop["Saturation_Warning_Ratio"] = (
         worker_sop["Saturation_Warning_Ratio"]
         .fillna(worker_sop["Ratio_P90"])
@@ -1264,25 +1298,18 @@ with tab4:
         worker_sop["Saturation_Warning_Ratio"]
     )
 
-    # =====================================================
-    # 5. FINAL OUTPUT TABLE
-    # =====================================================
     worker_output = worker_sop[
         [
             "Resin",
             "Vendor",
             "Solvent_Type",
             "Initial_Viscosity_Zone",
-
             "History_Batches",
             "Ref_Start_Visc",
-
             "Ref_Paint_Weight_kg",
             "Ref_Solvent_Add_kg",
             "Ref_Solvent_Ratio",
-
             "Final_Visc_P25_P75",
-
             "Saturation_Warning_Ratio",
             "Saturation_Stop_Ratio"
         ]
@@ -1294,16 +1321,12 @@ with tab4:
             "Vendor": "塗料供應商",
             "Solvent_Type": "稀釋劑種類",
             "Initial_Viscosity_Zone": "初始黏度區間",
-
             "History_Batches": "歷史批數",
             "Ref_Start_Visc": "參考起始黏度(秒)",
-
             "Ref_Paint_Weight_kg": "參考塗料使用量(kg)",
             "Ref_Solvent_Add_kg": "參考稀釋劑添加量(kg)",
             "Ref_Solvent_Ratio": "參考稀釋劑添加比例(%)",
-
             "Final_Visc_P25_P75": "歷史最終黏度範圍 (P25–P75)",
-
             "Saturation_Warning_Ratio": "飽和警戒比例(%)",
             "Saturation_Stop_Ratio": "飽和停止比例(%)"
         },
@@ -1325,27 +1348,21 @@ with tab4:
             "歷史批數": st.column_config.NumberColumn(
                 format="%d"
             ),
-
             "參考起始黏度(秒)": st.column_config.NumberColumn(
                 format="%.1f 秒"
             ),
-
             "參考塗料使用量(kg)": st.column_config.NumberColumn(
                 format="%.2f kg"
             ),
-
             "參考稀釋劑添加量(kg)": st.column_config.NumberColumn(
                 format="%.2f kg"
             ),
-
             "參考稀釋劑添加比例(%)": st.column_config.NumberColumn(
                 format="%.2f%%"
             ),
-
             "飽和警戒比例(%)": st.column_config.NumberColumn(
                 format="%.2f%%"
             ),
-
             "飽和停止比例(%)": st.column_config.NumberColumn(
                 format="%.2f%%"
             )
