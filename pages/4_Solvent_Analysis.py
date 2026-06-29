@@ -72,7 +72,7 @@ if filtered_df.empty:
     st.stop()
 
 # =========================================================
-# 3. DATA CLEANING & CALCULATIONS
+# 3. DATA CLEANING & CALCULATIONS (COIL-LEVEL)
 # =========================================================
 required_cols = ["塗料重量", "添加重量", "黏度(秒)", "黏度(秒)_1"]
 
@@ -451,7 +451,7 @@ else:
             color="#4F6DFF"
         )
 
-        # MẸO 1: Đặt nền trắng cho số liệu để không bị đường xanh đè lên
+        # Background added to text so the blue line doesn't strike through it
         for x, y, record in zip(x_values, y_values, record_values):
             ax.annotate(
                 str(record),
@@ -470,15 +470,13 @@ else:
         y_min_orig, y_max_orig = ax.get_ylim()
         y_range = y_max_orig - y_min_orig
         
-        # Thêm không gian Y để chữ không cấn viền
         y_max = y_max_orig + (y_range * 0.15)
         y_min = y_min_orig - (y_range * 0.15)
         ax.set_ylim(y_min, y_max)
         
-        # MẸO 2: Mở rộng margin bên phải để tạo không gian chứa Text và Mũi tên
         fig_efficiency.subplots_adjust(right=0.75)
 
-        alert_color = "red"
+        alert_color = "DeepSkyBlue"
 
         if abs(stop_ratio - warning_ratio) < 0.2:
             ax.axvline(
@@ -493,7 +491,6 @@ else:
                 color=alert_color,
                 alpha=0.10
             )
-            # Annotate với mũi tên chỉ từ bên ngoài đồ thị vào
             ax.annotate(
                 f"Saturation Limit: {stop_ratio:.1f}%",
                 xy=(stop_ratio, y_max_orig),
@@ -538,7 +535,6 @@ else:
                 alpha=0.10
             )
             
-            # Text Warning bên ngoài
             ax.annotate(
                 f"Warning: {warning_ratio:.1f}%",
                 xy=(warning_ratio, y_max_orig * 0.95),
@@ -558,7 +554,6 @@ else:
                 annotation_clip=False
             )
             
-            # Text Stop bên ngoài
             ax.annotate(
                 f"Stop: {stop_ratio:.1f}%",
                 xy=(stop_ratio, y_max_orig * 0.85),
@@ -577,6 +572,20 @@ else:
                 ),
                 annotation_clip=False
             )
+
+        # ---------------------------------------------------------
+        # BỔ SUNG GHI CHÚ GIẢI THÍCH Ý NGHĨA CÁC CON SỐ
+        # ---------------------------------------------------------
+        ax.text(
+            0.02, 0.04,
+            "ℹ️ Note: Numbers above data points indicate the total record count.",
+            transform=ax.transAxes,
+            fontsize=9,
+            color="#333333",
+            bbox=dict(facecolor="white", edgecolor="#CCCCCC", pad=5, alpha=0.9),
+            va="bottom",
+            ha="left"
+        )
 
         ax.set_title(
             "Dilution Efficiency vs Solvent Ratio\n"
@@ -598,7 +607,6 @@ else:
             alpha=0.45
         )
 
-        # Full black border for report style
         for spine in ax.spines.values():
             spine.set_visible(True)
             spine.set_linewidth(1.2)
@@ -733,7 +741,7 @@ try:
 
         doc.add_paragraph(
             "Interpretation: When dilution efficiency decreases, additional "
-            "solvent produces less viscosity reduction. The red shaded saturation "
+            "solvent produces less viscosity reduction. The shaded saturation "
             "zone is used as a reference to avoid excessive solvent addition."
         )
     else:
