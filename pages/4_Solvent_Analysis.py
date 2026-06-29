@@ -476,7 +476,8 @@ else:
         
         fig_efficiency.subplots_adjust(right=0.75)
 
-        alert_color = "DeepSkyBlue"
+        # TRẢ LẠI MÀU ĐỎ THEO YÊU CẦU
+        alert_color = "red" 
 
         if abs(stop_ratio - warning_ratio) < 0.2:
             ax.axvline(
@@ -574,7 +575,7 @@ else:
             )
 
         # ---------------------------------------------------------
-        # BỔ SUNG GHI CHÚ GIẢI THÍCH Ý NGHĨA CÁC CON SỐ
+        # GHI CHÚ GIẢI THÍCH Ý NGHĨA CÁC CON SỐ
         # ---------------------------------------------------------
         ax.text(
             0.02, 0.04,
@@ -741,7 +742,7 @@ try:
 
         doc.add_paragraph(
             "Interpretation: When dilution efficiency decreases, additional "
-            "solvent produces less viscosity reduction. The shaded saturation "
+            "solvent produces less viscosity reduction. The red shaded saturation "
             "zone is used as a reference to avoid excessive solvent addition."
         )
     else:
