@@ -562,11 +562,28 @@ with tab1:
         samplepoints=np.linspace(0.05, 0.95, len(plot_df))
     )
 
-    def hex_to_rgba(hex_color, alpha):
-        hex_color = hex_color.lstrip("#")
-        r = int(hex_color[0:2], 16)
-        g = int(hex_color[2:4], 16)
-        b = int(hex_color[4:6], 16)
+        def hex_to_rgba(color_value, alpha):
+        color_value = str(color_value).strip()
+
+        if color_value.startswith("rgb("):
+            rgb_values = color_value.replace("rgb(", "").replace(")", "")
+            r, g, b = [int(float(x.strip())) for x in rgb_values.split(",")]
+            return f"rgba({r},{g},{b},{alpha})"
+
+        if color_value.startswith("rgba("):
+            rgb_values = color_value.replace("rgba(", "").replace(")", "")
+            r, g, b, _ = [
+                float(x.strip())
+                for x in rgb_values.split(",")
+            ]
+            return f"rgba({int(r)},{int(g)},{int(b)},{alpha})"
+
+        color_value = color_value.lstrip("#")
+
+        r = int(color_value[0:2], 16)
+        g = int(color_value[2:4], 16)
+        b = int(color_value[4:6], 16)
+
         return f"rgba({r},{g},{b},{alpha})"
 
     before_colors = color_scale
