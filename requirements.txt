@@ -8,3 +8,4 @@ graphviz
 streamlit-agraph
 python-docx
 kaleido
+matplotlib
