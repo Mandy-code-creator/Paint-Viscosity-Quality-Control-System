@@ -555,51 +555,11 @@ with tab1:
 
     plot_df = system_df.reset_index(drop=True).copy()
 
-    color_scale = px.colors.sample_colorscale(
-        "Turbo",
-        samplepoints=np.linspace(0.05, 0.95, len(plot_df))
-    )
-
-    def hex_to_rgba(color_value, alpha):
-        color_value = str(color_value).strip()
-
-        if color_value.startswith("rgb("):
-            rgb_values = color_value.replace("rgb(", "").replace(")", "")
-            r, g, b = [
-                int(float(x.strip()))
-                for x in rgb_values.split(",")
-            ]
-            return f"rgba({r},{g},{b},{alpha})"
-
-        if color_value.startswith("rgba("):
-            rgb_values = color_value.replace("rgba(", "").replace(")", "")
-            r, g, b, _ = [
-                float(x.strip())
-                for x in rgb_values.split(",")
-            ]
-            return f"rgba({int(r)},{int(g)},{int(b)},{alpha})"
-
-        color_value = color_value.lstrip("#")
-
-        r = int(color_value[0:2], 16)
-        g = int(color_value[2:4], 16)
-        b = int(color_value[4:6], 16)
-
-        return f"rgba({r},{g},{b},{alpha})"
-
-    before_colors = color_scale
-
-    after_colors = [
-        hex_to_rgba(color, 0.45)
-        for color in color_scale
-    ]
-
-    line_colors = [
-        hex_to_rgba(color, 0.55)
-        for color in color_scale
-    ]
-
-    for idx, row in plot_df.iterrows():
+    # =====================================================
+    # CONNECTING LINE FOR SAME BATCH
+    # Keep light gray to avoid visual confusion
+    # =====================================================
+    for _, row in plot_df.iterrows():
         fig_scatter.add_trace(
             go.Scatter(
                 x=[
@@ -612,15 +572,32 @@ with tab1:
                 ],
                 mode="lines",
                 line=dict(
-                    color=line_colors[idx],
-                    width=1.5,
+                    color="rgba(120,120,120,0.35)",
+                    width=1.4,
                     dash="dot"
                 ),
-                hoverinfo="skip",
+                customdata=[
+                    [
+                        row["塗料批號"],
+                        row["Delta_V"]
+                    ],
+                    [
+                        row["塗料批號"],
+                        row["Delta_V"]
+                    ]
+                ],
+                hovertemplate=(
+                    "<b>Batch: %{customdata[0]}</b><br>"
+                    "Viscosity Drop: %{customdata[1]:.1f}s"
+                    "<extra></extra>"
+                ),
                 showlegend=False
             )
         )
 
+    # =====================================================
+    # INITIAL VISCOSITY BEFORE SOLVENT ADDITION
+    # =====================================================
     fig_scatter.add_trace(
         go.Scatter(
             x=plot_df["Solvent_Ratio_Percent"],
@@ -628,9 +605,10 @@ with tab1:
             mode="markers",
             name="Initial Viscosity (Before)",
             marker=dict(
-                color=before_colors,
-                size=9,
-                line=dict(width=1, color="white")
+                color="#ED7D31",
+                size=8,
+                opacity=0.85,
+                line=dict(width=0.8, color="white")
             ),
             customdata=plot_df[
                 [
@@ -652,6 +630,9 @@ with tab1:
         )
     )
 
+    # =====================================================
+    # FINAL VISCOSITY AFTER SOLVENT ADDITION
+    # =====================================================
     fig_scatter.add_trace(
         go.Scatter(
             x=plot_df["Solvent_Ratio_Percent"],
@@ -659,9 +640,10 @@ with tab1:
             mode="markers",
             name="Final Viscosity (After)",
             marker=dict(
-                color=after_colors,
-                size=9,
-                line=dict(width=1, color="white")
+                color="#4472C4",
+                size=8,
+                opacity=0.85,
+                line=dict(width=0.8, color="white")
             ),
             customdata=plot_df[
                 [
@@ -756,8 +738,6 @@ with tab1:
             "wordprocessingml.document"
         )
     )
-
-
 # =========================================================
 # TAB 2: SOP RECOMMENDATION
 # =========================================================
