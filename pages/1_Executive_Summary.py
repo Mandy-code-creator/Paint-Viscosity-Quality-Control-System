@@ -1215,7 +1215,6 @@ with tab4:
     # =====================================================
     # CREATE OPERATIONAL VISCOSITY ZONE
     # >130 s will become 130-Max Actual Value s
-    # according to each Resin + Vendor + Solvent system
     # =====================================================
     def create_worker_viscosity_zone(df):
         temp_df = df.copy()
@@ -1233,15 +1232,15 @@ with tab4:
 
         def base_zone(visc):
             if visc <= 70:
-                return "<=70 s"
+                return "<=70"
             elif visc <= 90:
-                return "71-90 s"
+                return "71-90"
             elif visc <= 110:
-                return "91-110 s"
+                return "91-110"
             elif visc <= 130:
-                return "111-130 s"
+                return "111-130"
             else:
-                return ">130 s"
+                return ">130"
 
         temp_df["Worker_Viscosity_Zone"] = (
             temp_df["黏度(秒)"]
@@ -1258,7 +1257,6 @@ with tab4:
             + system_max_visc.loc[high_visc_mask]
             .round(1)
             .astype(str)
-            + " s"
         )
 
         return temp_df
@@ -1268,7 +1266,7 @@ with tab4:
     # =====================================================
     # FORMAT FINAL VISCOSITY RANGE
     # =====================================================
-    def format_actual_range(p25, p75, unit="秒"):
+    def format_actual_range(p25, p75):
         if pd.isna(p25) or pd.isna(p75):
             return "-"
 
@@ -1276,12 +1274,12 @@ with tab4:
         p75 = round(float(p75), 1)
 
         if abs(p25 - p75) < 0.05:
-            return f"{p25:.1f} {unit}"
+            return f"{p25:.1f}"
 
-        return f"{p25:.1f} - {p75:.1f} {unit}"
+        return f"{p25:.1f} - {p75:.1f}"
 
     # =====================================================
-    # BUILD WORKER SOP TABLE
+    # BUILD SOP TABLE
     # =====================================================
     worker_sop = matrix_df.groupby(
         [
@@ -1335,7 +1333,7 @@ with tab4:
         )
     ).reset_index()
 
-    # Each row needs at least 5 valid historical batches
+    # At least 5 historical batches per condition
     worker_sop = worker_sop[
         worker_sop["History_Batches"] >= 5
     ].copy()
@@ -1356,7 +1354,7 @@ with tab4:
     )
 
     # =====================================================
-    # BUILD SATURATION SUMMARY FOR EACH SYSTEM
+    # BUILD SATURATION SUMMARY
     # =====================================================
     saturation_summary = []
 
@@ -1406,8 +1404,8 @@ with tab4:
         how="left"
     )
 
-    # If saturation cannot be statistically detected,
-    # use historical P90 / P95 as fallback limits
+    # If no saturation threshold is detected,
+    # use P90 / P95 as backup limits
     worker_sop["Saturation_Warning_Ratio"] = (
         worker_sop["Saturation_Warning_Ratio"]
         .fillna(worker_sop["Ratio_P90"])
@@ -1418,15 +1416,14 @@ with tab4:
         .fillna(worker_sop["Ratio_P95"])
     )
 
-    # Stop ratio must not be lower than warning ratio
+    # Stop ratio must never be lower than warning ratio
     worker_sop["Saturation_Stop_Ratio"] = np.maximum(
         worker_sop["Saturation_Stop_Ratio"],
         worker_sop["Saturation_Warning_Ratio"]
     )
 
     # =====================================================
-    # OUTPUT COLUMN ORDER
-    # Follow actual worker operation sequence
+    # FINAL OUTPUT COLUMN ORDER
     # =====================================================
     worker_output = worker_sop[
         [
@@ -1451,36 +1448,32 @@ with tab4:
             "Vendor": "塗料供應商",
             "Solvent_Type": "稀釋劑種類",
             "Worker_Viscosity_Zone": "初始黏度區間",
-            "Ref_Start_Visc": "參考起始黏度(秒)",
+            "Ref_Start_Visc": "參考起始黏度",
             "History_Batches": "歷史批數",
-            "Ref_Paint_Weight_kg": "參考塗料使用量(kg)",
-            "Ref_Solvent_Add_kg": "參考稀釋劑添加量(kg)",
-            "Ref_Solvent_Ratio": "參考稀釋劑添加比例(%)",
-            "Final_Visc_P25_P75": "歷史最終黏度範圍 (P25–P75)",
-            "Saturation_Warning_Ratio": "飽和警戒比例(%)",
-            "Saturation_Stop_Ratio": "飽和停止比例(%)"
+            "Ref_Paint_Weight_kg": "參考塗料使用量",
+            "Ref_Solvent_Add_kg": "參考稀釋劑添加量",
+            "Ref_Solvent_Ratio": "參考稀釋劑添加比例",
+            "Final_Visc_P25_P75": "歷史最終黏度範圍",
+            "Saturation_Warning_Ratio": "飽和警戒比例",
+            "Saturation_Stop_Ratio": "飽和停止比例"
         },
         inplace=True
     )
 
     # =====================================================
-    # SORT VISCOSITY ZONES CORRECTLY
+    # SORT VISCOSITY ZONE IN LOGICAL ORDER
     # =====================================================
     def get_zone_order(zone):
         zone = str(zone)
 
         if zone.startswith("<=70"):
             return 1
-
         elif zone.startswith("71-90"):
             return 2
-
         elif zone.startswith("91-110"):
             return 3
-
         elif zone.startswith("111-130"):
             return 4
-
         elif zone.startswith("130-"):
             return 5
 
@@ -1506,39 +1499,47 @@ with tab4:
     st.dataframe(
         worker_output,
         column_config={
+            "初始黏度區間": st.column_config.TextColumn(
+                "初始黏度區間 (秒)"
+            ),
+
+            "參考起始黏度": st.column_config.NumberColumn(
+                "參考起始黏度 (秒)",
+                format="%.1f"
+            ),
+
             "歷史批數": st.column_config.NumberColumn(
                 "歷史批數",
                 format="%d"
             ),
 
-            "參考起始黏度(秒)": st.column_config.NumberColumn(
-                "參考起始黏度(秒)",
-                format="%.1f 秒"
+            "參考塗料使用量": st.column_config.NumberColumn(
+                "參考塗料使用量 (kg)",
+                format="%.1f"
             ),
 
-            "參考塗料使用量(kg)": st.column_config.NumberColumn(
-                "參考塗料使用量(kg)",
-                format="%.1f kg"
+            "參考稀釋劑添加量": st.column_config.NumberColumn(
+                "參考稀釋劑添加量 (kg)",
+                format="%.1f"
             ),
 
-            "參考稀釋劑添加量(kg)": st.column_config.NumberColumn(
-                "參考稀釋劑添加量(kg)",
-                format="%.1f kg"
+            "參考稀釋劑添加比例": st.column_config.NumberColumn(
+                "參考稀釋劑添加比例 (%)",
+                format="%.2f"
             ),
 
-            "參考稀釋劑添加比例(%)": st.column_config.NumberColumn(
-                "參考稀釋劑添加比例(%)",
-                format="%.2f%%"
+            "歷史最終黏度範圍": st.column_config.TextColumn(
+                "歷史最終黏度範圍 (秒, P25–P75)"
             ),
 
-            "飽和警戒比例(%)": st.column_config.NumberColumn(
-                "飽和警戒比例(%)",
-                format="%.2f%%"
+            "飽和警戒比例": st.column_config.NumberColumn(
+                "飽和警戒比例 (%)",
+                format="%.2f"
             ),
 
-            "飽和停止比例(%)": st.column_config.NumberColumn(
-                "飽和停止比例(%)",
-                format="%.2f%%"
+            "飽和停止比例": st.column_config.NumberColumn(
+                "飽和停止比例 (%)",
+                format="%.2f"
             )
         },
         use_container_width=True,
@@ -1546,12 +1547,13 @@ with tab4:
     )
 
     st.caption(
-        "「歷史最終黏度範圍(P25–P75)」代表相同條件下，歷史最終黏度的中間50%分布，"
+        "「歷史最終黏度範圍」為相同條件下歷史最終黏度的中間50%分布，"
         "僅供現場調整參考，非產品規格上下限。"
     )
 
     st.caption(
-        "「130–Max s」表示該樹脂、供應商及稀釋劑組合中，歷史實際出現的最高初始黏度範圍；"
+        "「130–Max」表示該樹脂、供應商及稀釋劑組合中，"
+        "歷史實際出現的最高初始黏度範圍；"
         "飽和停止比例仍以歷史效率分析或P95作為安全限制。"
     )
 
