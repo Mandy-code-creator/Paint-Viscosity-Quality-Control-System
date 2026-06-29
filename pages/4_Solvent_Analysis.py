@@ -467,81 +467,92 @@ else:
         x_max = max(x_values.max() + 1, stop_ratio + 1)
         
         # ---------------------------------------------------------
-        # CHỈNH SỬA Y-AXIS PADDING ĐỂ FIX LỖI CLIPPING TEXT
+        # CHỈNH SỬA Y-AXIS & OFFSET TEXT ĐỂ TRÁNH OVERLAP
         # ---------------------------------------------------------
         y_min_orig, y_max_orig = ax.get_ylim()
         
-        # Tăng thêm 15% không gian trống phía trên mốc y_max hiện tại
+        # Tăng thêm 15% không gian trống phía trên
         y_max = y_max_orig + (y_max_orig - y_min_orig) * 0.15 
         ax.set_ylim(y_min_orig, y_max)
         
-        # Đặt chữ thấp hơn đỉnh đồ thị một chút để tạo khoảng thở
-        y_text_pos = y_max_orig + (y_max_orig - y_min_orig) * 0.05 
+        # Đặt hai mốc Y so le nhau: Stop cao hơn Warning
+        y_text_pos_stop = y_max_orig + (y_max_orig - y_min_orig) * 0.08 
+        y_text_pos_warning = y_max_orig + (y_max_orig - y_min_orig) * 0.02
 
-        # Đổi màu cảnh báo bão hòa sang Deep Sky Blue
+        # Màu ĐỎ cảnh báo theo yêu cầu
+        alert_color = "red"
+
         if abs(stop_ratio - warning_ratio) < 0.2:
             ax.axvline(
                 stop_ratio,
-                color="DeepSkyBlue",
+                color=alert_color,
                 linestyle="--",
                 linewidth=2.2
             )
             ax.axvspan(
                 stop_ratio,
                 x_max,
-                color="DeepSkyBlue",
+                color=alert_color,
                 alpha=0.10
             )
             ax.text(
                 stop_ratio + 0.05,
-                y_text_pos,
+                y_text_pos_stop,
                 f"Saturation Limit: {stop_ratio:.1f}%",
-                color="DeepSkyBlue",
-                fontsize=10,
-                fontweight="bold",
-                va="center", # Sử dụng center thay vì top
-                ha="left"
-            )
-        else:
-            ax.axvline(
-                warning_ratio,
-                color="DeepSkyBlue",
-                linestyle=":",
-                linewidth=2
-            )
-            ax.axvline(
-                stop_ratio,
-                color="DeepSkyBlue",
-                linestyle="--",
-                linewidth=2.2
-            )
-            ax.axvspan(
-                warning_ratio,
-                stop_ratio,
-                color="DeepSkyBlue",
-                alpha=0.05
-            )
-            ax.axvspan(
-                stop_ratio,
-                x_max,
-                color="DeepSkyBlue",
-                alpha=0.10
-            )
-            ax.text(
-                warning_ratio + 0.05,
-                y_text_pos,
-                f"Warning: {warning_ratio:.1f}%",
-                color="DeepSkyBlue",
+                color=alert_color,
                 fontsize=10,
                 fontweight="bold",
                 va="center",
                 ha="left"
             )
+        else:
+            ax.axvline(
+                warning_ratio,
+                color=alert_color,
+                linestyle=":",
+                linewidth=2
+            )
+            ax.axvline(
+                stop_ratio,
+                color=alert_color,
+                linestyle="--",
+                linewidth=2.2
+            )
+            
+            # Vùng Warning mờ hơn
+            ax.axvspan(
+                warning_ratio,
+                stop_ratio,
+                color=alert_color,
+                alpha=0.05
+            )
+            
+            # Vùng Stop đậm hơn
+            ax.axvspan(
+                stop_ratio,
+                x_max,
+                color=alert_color,
+                alpha=0.10
+            )
+            
+            # Text Warning nằm thấp hơn một chút
+            ax.text(
+                warning_ratio + 0.05,
+                y_text_pos_warning,
+                f"Warning: {warning_ratio:.1f}%",
+                color=alert_color,
+                fontsize=10,
+                fontweight="bold",
+                va="center",
+                ha="left"
+            )
+            
+            # Text Stop nằm cao hơn một chút
             ax.text(
                 stop_ratio + 0.05,
-                y_text_pos,
+                y_text_pos_stop,
                 f"Stop: {stop_ratio:.1f}%",
-                color="DeepSkyBlue",
+                color=alert_color,
                 fontsize=10,
                 fontweight="bold",
                 va="center",
@@ -703,7 +714,7 @@ try:
 
         doc.add_paragraph(
             "Interpretation: When dilution efficiency decreases, additional "
-            "solvent produces less viscosity reduction. The shaded saturation "
+            "solvent produces less viscosity reduction. The red shaded saturation "
             "zone is used as a reference to avoid excessive solvent addition."
         )
     else:
