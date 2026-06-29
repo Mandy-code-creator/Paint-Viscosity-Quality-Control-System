@@ -171,28 +171,32 @@ if tree_summary.empty:
     st.stop()
 
 # =========================================================
-# =========================================================
-# 5. GRAPHVIZ HIERARCHY
-# Stable Streamlit version - readable nodes
+# 5. GRAPHVIZ HIERARCHY (ENLARGED FONTS & PADDING)
 # =========================================================
 graph = graphviz.Digraph(engine="dot")
 
-# Use vertical hierarchy to avoid an overly wide diagram
 graph.attr(
-    rankdir="TB",
-    splines="ortho",
-    nodesep="0.55",
-    ranksep="0.85",
-    pad="0.35",
-    bgcolor="transparent",
-    concentrate="true"
+    rankdir="LR",
+    splines="curved",
+    nodesep="0.3",
+    ranksep="1.2",
+    bgcolor="transparent"
+)
+
+graph.attr(
+    "node",
+    shape="none",
+    margin="0",
+    width="0",
+    height="0",
+    fontname="Arial"
 )
 
 graph.attr(
     "edge",
-    color="#9E9E9E",
-    penwidth="1.8",
-    arrowsize="0.75"
+    color="#A0A0A0",
+    penwidth="2.0",
+    arrowsize="0.9"
 )
 
 total_vendor_paint = tree_summary["Total_Paint"].sum()
@@ -206,9 +210,6 @@ avg_solvent_ratio = (
     else 0
 )
 
-# =========================================================
-# DATE RANGE
-# =========================================================
 date_range_str = "All Available Data"
 
 date_cols = [
@@ -221,133 +222,109 @@ date_cols = [
 if date_cols:
     try:
         date_col = date_cols[0]
-
-        min_date = pd.to_datetime(
-            filtered_df[date_col],
-            errors="coerce"
-        ).min()
-
-        max_date = pd.to_datetime(
-            filtered_df[date_col],
-            errors="coerce"
-        ).max()
+        min_date = pd.to_datetime(filtered_df[date_col], errors="coerce").min()
+        max_date = pd.to_datetime(filtered_df[date_col], errors="coerce").max()
 
         if pd.notna(min_date) and pd.notna(max_date):
             min_date_str = min_date.strftime("%b %Y")
             max_date_str = max_date.strftime("%b %Y")
-
             if min_date_str == max_date_str:
                 date_range_str = min_date_str
             else:
                 date_range_str = f"{min_date_str} - {max_date_str}"
-
     except Exception:
         date_range_str = "All Available Data"
 
+center_html = f"""
+<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="8">
+    <TR>
+        <TD BGCOLOR="#00BFFF" STYLE="ROUNDED" ALIGN="CENTER">
+            <FONT COLOR="white" POINT-SIZE="22">
+                <B>VENDOR: {selected_vendor}</B>
+            </FONT>
+        </TD>
+    </TR>
+    <TR>
+        <TD BGCOLOR="#F8F9FA" STYLE="ROUNDED" ALIGN="CENTER">
+            <FONT POINT-SIZE="16" COLOR="#333333">
+                Period: <B>{date_range_str}</B><BR/>
+                <B>{total_vendor_paint:,.0f} kg</B> Paint Used<BR/>
+                Visc Reduction: <B>{avg_delta_v:.1f} s</B><BR/>
+                <B>{total_vendor_solv:,.0f} kg</B> Solvent Added<BR/>
+            </FONT>
+            <FONT COLOR="#D9534F" POINT-SIZE="18">
+                <B>Avg. Solvent Ratio: {avg_solvent_ratio:.2f}%</B>
+            </FONT>
+        </TD>
+    </TR>
+</TABLE>
+"""
+graph.node("Root", f"<{center_html}>")
 
-# =========================================================
-# ROOT NODE: VENDOR SUMMARY
-# =========================================================
-root_label = (
-    f"VENDOR\n"
-    f"{selected_vendor}\n\n"
-    f"Period: {date_range_str}\n\n"
-    f"Paint Used: {total_vendor_paint:,.0f} kg\n"
-    f"Solvent Added: {total_vendor_solv:,.0f} kg\n"
-    f"Avg. Viscosity Drop: {avg_delta_v:.1f} s\n\n"
-    f"Solvent Ratio: {avg_solvent_ratio:.2f}%"
-)
-
-graph.node(
-    "Root",
-    label=root_label,
-    shape="box",
-    style="rounded,filled",
-    fillcolor="#00BFFF",
-    color="#008CC0",
-    fontcolor="white",
-    fontname="Arial",
-    fontsize="17",
-    penwidth="2.2",
-    margin="0.35,0.25"
-)
-
-
-# =========================================================
-# RESIN + SOLVENT NODES
-# =========================================================
-for resin in tree_summary["Resin"].dropna().unique():
-
+for resin in tree_summary["Resin"].unique():
     resin_id = f"resin_{resin}"
-
-    resin_data = tree_summary[
-        tree_summary["Resin"] == resin
-    ].copy()
+    resin_data = tree_summary[tree_summary["Resin"] == resin].copy()
 
     resin_paint_sum = resin_data["Total_Paint"].sum()
     resin_solvent_sum = resin_data["Total_Solvent"].sum()
 
-    resin_label = (
-        f"RESIN\n"
-        f"{resin}\n\n"
-        f"Paint: {resin_paint_sum:,.0f} kg\n"
-        f"Solvent: {resin_solvent_sum:,.0f} kg"
-    )
+    resin_html = f"""
+    <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="6">
+        <TR>
+            <TD BGCOLOR="#E6F2FF" STYLE="ROUNDED"
+                BORDER="1" COLOR="#00BFFF" ALIGN="CENTER">
+                <FONT COLOR="#005A9E" POINT-SIZE="18">
+                    <B>RESIN: {resin}</B>
+                </FONT><BR/>
+                <FONT COLOR="#555555" POINT-SIZE="14">
+                    {resin_paint_sum:,.0f} kg Paint
+                </FONT><BR/>
+                <FONT COLOR="#D9534F" POINT-SIZE="14">
+                    {resin_solvent_sum:,.0f} kg Solvent
+                </FONT>
+            </TD>
+        </TR>
+    </TABLE>
+    """
 
-    graph.node(
-        resin_id,
-        label=resin_label,
-        shape="box",
-        style="rounded,filled",
-        fillcolor="#E6F2FF",
-        color="#00A0E0",
-        fontcolor="#005A9E",
-        fontname="Arial",
-        fontsize="15",
-        penwidth="1.8",
-        margin="0.30,0.22"
-    )
-
+    graph.node(resin_id, f"<{resin_html}>")
     graph.edge("Root", resin_id)
 
     for idx, row in resin_data.iterrows():
-
-        solvent = str(row["Solvent_Type"])
+        solvent = row["Solvent_Type"]
         leaf_id = f"leaf_{resin}_{solvent}_{idx}"
 
-        leaf_label = (
-            f"SOLVENT\n"
-            f"{solvent}\n\n"
-            f"Before: {row['Avg_Visc_Before']:.1f} s\n"
-            f"After: {row['Avg_Visc_After']:.1f} s\n\n"
-            f"{row['Median_Kg_per_1s']:.2f} kg / 1s\n"
-            f"Efficiency: {row['Median_Efficiency']:.2f} s/%"
-        )
-
-        graph.node(
-            leaf_id,
-            label=leaf_label,
-            shape="box",
-            style="rounded,filled",
-            fillcolor="white",
-            color="#BDBDBD",
-            fontcolor="#333333",
-            fontname="Arial",
-            fontsize="14",
-            penwidth="1.5",
-            margin="0.28,0.20"
-        )
-
+        leaf_html = f"""
+        <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="6">
+            <TR>
+                <TD ALIGN="CENTER" BGCOLOR="white" STYLE="ROUNDED"
+                    BORDER="1" COLOR="#CCCCCC">
+                    <B>
+                        <FONT COLOR="#333333" POINT-SIZE="16">
+                            SOLVENT: {solvent}
+                        </FONT>
+                    </B><BR/>
+                    <FONT COLOR="#888888" POINT-SIZE="13">
+                        Visc Before: {row["Avg_Visc_Before"]:.1f} s
+                    </FONT><BR/>
+                    <FONT COLOR="#888888" POINT-SIZE="13">
+                        Visc After: {row["Avg_Visc_After"]:.1f} s
+                    </FONT><BR/>
+                    <FONT COLOR="#00BFFF" POINT-SIZE="14">
+                        {row["Median_Kg_per_1s"]:.2f} kg / 1s
+                    </FONT><BR/>
+                    <FONT COLOR="#D9534F" POINT-SIZE="14">
+                        <B>Efficiency: {row["Median_Efficiency"]:.2f} s/%</B>
+                    </FONT>
+                </TD>
+            </TR>
+        </TABLE>
+        """
+        graph.node(leaf_id, f"<{leaf_html}>")
         graph.edge(resin_id, leaf_id)
 
-
-# =========================================================
-# DISPLAY
-# =========================================================
-st.graphviz_chart(
-    graph,
-    use_container_width=True
-)
+# Changed use_container_width to True so it expands across the dashboard
+st.graphviz_chart(graph, use_container_width=True)
 # =========================================================
 # 6. SATURATION ANALYSIS - MATPLOTLIB
 # =========================================================
