@@ -322,79 +322,45 @@ if tree_summary.empty:
 
 
 # =========================================================
-# 5. GRAPHVIZ HIERARCHY
+# =========================================================
+# 5. GRAPHVIZ HIERARCHY (4-LEVEL STABLE LAYOUT)
 # =========================================================
 graph = graphviz.Digraph(engine="dot")
 
 graph.attr(
     rankdir="LR",
     splines="curved",
-    nodesep="0.2",
-    ranksep="0.6",
+    nodesep="0.2",   
+    ranksep="0.6",    
     bgcolor="transparent"
 )
 
-graph.attr(
-    "node",
-    shape="none",
-    margin="0",
-    fontname="Arial"
-)
+graph.attr("node", shape="none", margin="0", fontname="Arial")
+graph.attr("edge", color="#B0B0B0", penwidth="1.2", arrowsize="0.7")
 
-graph.attr(
-    "edge",
-    color="#B0B0B0",
-    penwidth="1.2",
-    arrowsize="0.7"
-)
-
-
-# ---------------------------------------------------------
-# Vendor totals calculated directly from filtered_df
-# ---------------------------------------------------------
-total_vendor_paint = filtered_df["塗料重量"].sum()
-total_vendor_solv = filtered_df["添加重量"].sum()
+total_vendor_paint = tree_summary["Total_Paint"].sum()
+total_vendor_solv = tree_summary["Total_Solvent"].sum()
 avg_delta_v = filtered_df["Delta_V"].mean()
+total_dilution_base = filtered_df["Dilution_Base_kg"].sum()
 
 avg_solvent_ratio = (
-    total_vendor_solv / total_vendor_paint * 100
-    if total_vendor_paint > 0
-    else 0
+    total_vendor_solv / total_dilution_base * 100
+    if total_dilution_base > 0 else 0
 )
 
-st.sidebar.caption(
-    f"Check: {total_vendor_solv:,.1f} kg solvent ÷ "
-    f"{total_vendor_paint:,.1f} kg paint "
-    f"= {avg_solvent_ratio:.2f}%"
-)
-
-
-# Date range
 date_range_str = "All Available Data"
-
 date_cols = [
     col for col in filtered_df.columns
-    if "date" in col.lower()
-    or "日期" in col.lower()
-    or "time" in col.lower()
+    if "date" in col.lower() or "日期" in col.lower() or "time" in col.lower()
 ]
 
 if date_cols:
     try:
         date_col = date_cols[0]
-
-        min_date = pd.to_datetime(
-            filtered_df[date_col],
-            errors="coerce"
-        ).min()
-
-        max_date = pd.to_datetime(
-            filtered_df[date_col],
-            errors="coerce"
-        ).max()
+        min_date = pd.to_datetime(filtered_df[date_col], errors="coerce").min()
+        max_date = pd.to_datetime(filtered_df[date_col], errors="coerce").max()
 
         if pd.notna(min_date) and pd.notna(max_date):
-
             min_date_str = min_date.strftime("%b %Y")
             max_date_str = max_date.strftime("%b %Y")
 
@@ -407,109 +373,68 @@ if date_cols:
         date_range_str = "All Available Data"
 
 
-# Root Node
-center_html = f"""
-<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="6">
-    <TR>
-        <TD BGCOLOR="#00BFFF" STYLE="ROUNDED" ALIGN="CENTER">
-            <FONT COLOR="white" POINT-SIZE="12">
-                <B>VENDOR: {selected_vendor}</B>
-            </FONT>
-        </TD>
-    </TR>
-
-    <TR>
-        <TD BGCOLOR="#F8F9FA" STYLE="ROUNDED" ALIGN="CENTER">
-            <FONT POINT-SIZE="10" COLOR="#333333">
-                Period: <B>{date_range_str}</B><BR/>
-                <B>{total_vendor_paint:,.0f} kg</B> Paint Used<BR/>
-                Visc Reduction: <B>{avg_delta_v:.1f} s</B><BR/>
-                <B>{total_vendor_solv:,.0f} kg</B> Solvent Added<BR/>
-            </FONT>
-
-            <FONT COLOR="#D9534F" POINT-SIZE="11">
-                <B>Avg. Solvent Ratio: {avg_solvent_ratio:.2f}%</B>
-            </FONT>
-        </TD>
-    </TR>
-</TABLE>
-"""
+# --- LEVEL 0: ROOT NODE (VENDOR) ---
+center_html = f"""<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="6">
+  <TR>
+    <TD BGCOLOR="#00BFFF" STYLE="ROUNDED" ALIGN="CENTER">
+      <FONT COLOR="white" POINT-SIZE="12"><B>VENDOR: {selected_vendor}</B></FONT>
+    </TD>
+  </TR>
+  <TR>
+    <TD BGCOLOR="#F8F9FA" STYLE="ROUNDED" ALIGN="CENTER">
+      <FONT POINT-SIZE="10" COLOR="#333333">Period: <B>{date_range_str}</B><BR/>
+      <B>{total_vendor_paint:,.0f} kg</B> Paint Used<BR/>
+      Visc Reduction: <B>{avg_delta_v:.1f} s</B><BR/>
+      <B>{total_vendor_solv:,.0f} kg</B> Solvent Added<BR/>
+      </FONT><FONT COLOR="#D9534F" POINT-SIZE="11"><B>Avg. Solvent Ratio: {avg_solvent_ratio:.2f}%</B></FONT>
+    </TD>
+  </TR>
+</TABLE>"""
 
 graph.node("Root", f"<{center_html}>")
 
 
-# Resin → Position → Solvent
+# --- LEVEL 1, 2 & 3: RESIN -> POSITION -> SOLVENT ---
 for resin in tree_summary["Resin"].unique():
-
     resin_id = f"resin_{resin}"
-
-    resin_data = tree_summary[
-        tree_summary["Resin"] == resin
-    ].copy()
+    resin_data = tree_summary[tree_summary["Resin"] == resin].copy()
 
     resin_paint_sum = resin_data["Total_Paint"].sum()
     resin_solvent_sum = resin_data["Total_Solvent"].sum()
 
-    resin_html = f"""
-    <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5">
-        <TR>
-            <TD BGCOLOR="#E6F2FF" STYLE="ROUNDED"
-                BORDER="1" COLOR="#00BFFF" ALIGN="CENTER">
-
-                <FONT COLOR="#005A9E" POINT-SIZE="11">
-                    <B>RESIN: {resin}</B>
-                </FONT><BR/>
-
-                <FONT COLOR="#555555" POINT-SIZE="10">
-                    {resin_paint_sum:,.0f} kg Paint
-                </FONT><BR/>
-
-                <FONT COLOR="#D9534F" POINT-SIZE="10">
-                    {resin_solvent_sum:,.0f} kg Solvent
-                </FONT>
-            </TD>
-        </TR>
-    </TABLE>
-    """
+    resin_html = f"""<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5">
+      <TR>
+        <TD BGCOLOR="#E6F2FF" STYLE="ROUNDED" BORDER="1" COLOR="#00BFFF" ALIGN="CENTER">
+          <FONT COLOR="#005A9E" POINT-SIZE="11"><B>RESIN: {resin}</B></FONT><BR/>
+          <FONT COLOR="#555555" POINT-SIZE="10">{resin_paint_sum:,.0f} kg Paint</FONT><BR/>
+          <FONT COLOR="#D9534F" POINT-SIZE="10">{resin_solvent_sum:,.0f} kg Solvent</FONT>
+        </TD>
+      </TR>
+    </TABLE>"""
 
     graph.node(resin_id, f"<{resin_html}>")
     graph.edge("Root", resin_id)
 
     for pos in resin_data["Position_UI"].unique():
-
         pos_id = f"pos_{resin}_{pos}"
-
-        pos_data = resin_data[
-            resin_data["Position_UI"] == pos
-        ].copy()
+        pos_data = resin_data[resin_data["Position_UI"] == pos].copy()
 
         pos_paint_sum = pos_data["Total_Paint"].sum()
 
-        pos_html = f"""
-        <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4">
-            <TR>
-                <TD BGCOLOR="#FFF7ED" STYLE="ROUNDED"
-                    BORDER="1" COLOR="#F97316" ALIGN="CENTER">
-
-                    <FONT COLOR="#C2410C" POINT-SIZE="10">
-                        <B>POS: {pos}</B>
-                    </FONT><BR/>
-
-                    <FONT COLOR="#555555" POINT-SIZE="9">
-                        {pos_paint_sum:,.0f} kg
-                    </FONT>
-                </TD>
-            </TR>
-        </TABLE>
-        """
+        pos_html = f"""<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4">
+          <TR>
+            <TD BGCOLOR="#FFF7ED" STYLE="ROUNDED" BORDER="1" COLOR="#F97316" ALIGN="CENTER">
+              <FONT COLOR="#C2410C" POINT-SIZE="10"><B>POS: {pos}</B></FONT><BR/>
+              <FONT COLOR="#555555" POINT-SIZE="9">{pos_paint_sum:,.0f} kg</FONT>
+            </TD>
+          </TR>
+        </TABLE>"""
 
         graph.node(pos_id, f"<{pos_html}>")
         graph.edge(resin_id, pos_id)
 
         for idx, row in pos_data.iterrows():
-
             solvent = row["Solvent_Type"]
-
             leaf_id = f"leaf_{resin}_{pos}_{solvent}_{idx}"
 
             sat_limit_display = (
@@ -518,44 +443,21 @@ for resin in tree_summary["Resin"].unique():
                 else "N/A"
             )
 
-            leaf_html = f"""
-            <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5">
-                <TR>
-                    <TD ALIGN="CENTER" BGCOLOR="white"
-                        STYLE="ROUNDED" BORDER="1" COLOR="#CCCCCC">
-
-                        <FONT COLOR="#333333" POINT-SIZE="10">
-                            <B>SOLVENT: {solvent}</B>
-                        </FONT><BR/>
-
-                        <FONT COLOR="#555555" POINT-SIZE="9">
-                            Visc: {row["Avg_Visc_Before"]:.1f}s
-                            &rarr;
-                            {row["Avg_Visc_After"]:.1f}s
-                        </FONT><BR/>
-
-                        <FONT COLOR="#00BFFF" POINT-SIZE="9">
-                            <B>Opt. Eff: {row["Opt_Eff"]:.2f} s/%</B>
-                        </FONT><BR/>
-
-                        <FONT COLOR="#D9534F" POINT-SIZE="9">
-                            <B>Sat. Limit: {sat_limit_display}</B>
-                        </FONT>
-                    </TD>
-                </TR>
-            </TABLE>
-            """
+            leaf_html = f"""<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5">
+              <TR>
+                <TD ALIGN="CENTER" BGCOLOR="white" STYLE="ROUNDED" BORDER="1" COLOR="#CCCCCC">
+                  <FONT COLOR="#333333" POINT-SIZE="10"><B>SOLVENT: {solvent}</B></FONT><BR/>
+                  <FONT COLOR="#555555" POINT-SIZE="9">Visc: {row["Avg_Visc_Before"]:.1f}s &rarr; {row["Avg_Visc_After"]:.1f}s</FONT><BR/>
+                  <FONT COLOR="#00BFFF" POINT-SIZE="9"><B>Opt. Eff: {row["Opt_Eff"]:.2f} s/%</B></FONT><BR/>
+                  <FONT COLOR="#D9534F" POINT-SIZE="9"><B>Sat. Limit: {sat_limit_display}</B></FONT>
+                </TD>
+              </TR>
+            </TABLE>"""
 
             graph.node(leaf_id, f"<{leaf_html}>")
             graph.edge(pos_id, leaf_id)
 
-
-st.graphviz_chart(
-    graph,
-    use_container_width=True
-)
-
-
+st.graphviz_chart(graph, use_container_width=True)
 # =========================================================
 # 6. SATURATION ANALYSIS
 # =========================================================
