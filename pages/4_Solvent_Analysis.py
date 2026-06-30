@@ -154,11 +154,14 @@ if filtered_df.empty:
 # Viscosity reduction
 filtered_df["Delta_V"] = filtered_df["黏度(秒)"] - filtered_df["黏度(秒)_1"]
 
-# Include 120 kg operating paint inside line
-filtered_df["Dilution_Base_kg"] = filtered_df["塗料重量"] + 120
+# Dilution base = actual paint weight in the mixing container
+# No additional 120 kg operating paint is included
+filtered_df["Dilution_Base_kg"] = filtered_df["塗料重量"]
 
 # Solvent blending ratio (%)
-filtered_df["Solvent_Ratio_Percent"] = (filtered_df["添加重量"] / filtered_df["Dilution_Base_kg"]) * 100
+filtered_df["Solvent_Ratio_Percent"] = (
+    filtered_df["添加重量"] / filtered_df["塗料重量"]
+) * 100
 
 # kg solvent required for each 1-second viscosity reduction
 filtered_df["Kg_per_1s"] = filtered_df["添加重量"] / filtered_df["Delta_V"]
@@ -543,7 +546,7 @@ else:
             st.markdown(f"""
             **Step 1: Coil-level Calculation**
             For every individual coil, the system evaluates solvent performance by calculating:
-            * **Solvent Ratio (%)** = `[Solvent Added / (Paint Weight + 120)] × 100`
+            * **Solvent Ratio (%)** = `[Solvent Added / Paint Weight] × 100`
             * **Viscosity Drop (ΔV)** = `Viscosity Before - Viscosity After`
             * **Dilution Efficiency** = `ΔV / Solvent Ratio`
 
@@ -659,7 +662,7 @@ try:
         calc_formula = doc.add_paragraph()
         calc_formula.add_run("單卷 (Coil-level) 效率計算底層公式：\n").bold = True
         calc_formula.add_run(
-            "1. 溶劑比例 (%) = [ 添加重量 / (塗料重量 + 120) ] × 100\n"
+            "1. 溶劑比例 (%) = [ 添加重量 / 塗料重量 ] × 100\n"
             "2. 降黏幅度 (ΔV) = 稀釋前黏度 - 稀釋後黏度\n"
             "3. 稀釋效率 (s/%) = ΔV / 溶劑比例"
         )
