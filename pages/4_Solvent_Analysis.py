@@ -38,20 +38,23 @@ if group_a.empty:
     st.stop()
 
 # =========================================================
+# =========================================================
 # 2. SIDEBAR FILTERS & DATA MAPPING
 # =========================================================
 st.sidebar.header("🔍 Hierarchy Filters")
 
-# Chuẩn hóa và dịch cột Vị trí phủ sang tiếng Anh
+# Chuẩn hóa và dịch cột Vị trí phủ sang tiếng Anh (Gộp lớp lót thành 3 nhóm)
 if "塗裝位置" not in group_a.columns:
     group_a["塗裝位置"] = "Unknown"
 
+# Cập nhật logic gộp nhóm tại đây
 pos_mapping = {
-    "TP": "Top Primer", "正底漆": "Top Primer",
+    "TP": "Primer", "正底漆": "Primer",
+    "BP": "Primer", "背底漆": "Primer",
     "TF": "Top Finish", "正面漆": "Top Finish",
-    "BP": "Back Primer", "背底漆": "Back Primer",
     "BF": "Back Finish", "背面漆": "Back Finish"
 }
+
 group_a["Position_UI"] = group_a["塗裝位置"].map(pos_mapping).fillna(group_a["塗裝位置"])
 
 for col in ["Vendor", "Resin", "Solvent_Type"]:
@@ -66,6 +69,7 @@ if not vendor_list:
 
 selected_vendor = st.sidebar.selectbox("Select Vendor:", vendor_list)
 
+# Danh sách Position_UI bây giờ sẽ chỉ còn: All Positions, Primer, Top Finish, Back Finish
 position_list = ["All Positions"] + sorted(group_a["Position_UI"].dropna().unique().tolist())
 selected_position = st.sidebar.selectbox("Select Coating Position:", position_list)
 
