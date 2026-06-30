@@ -14,10 +14,10 @@ from docx.enum.section import WD_ORIENT
 
 # =========================================================
 # EXPORT HISTORICAL CHART TO WORD
-# Uses matplotlib, so Kaleido is not required
 # =========================================================
 def export_chart_to_word(
     selected_resin,
+    selected_pos,
     selected_vendor,
     selected_solvent,
     system_df
@@ -46,6 +46,7 @@ def export_chart_to_word(
 
     subtitle_run = subtitle.add_run(
         f"Resin: {selected_resin} | "
+        f"Position: {selected_pos} | "
         f"Vendor: {selected_vendor} | "
         f"Solvent Type: {selected_solvent}"
     )
@@ -77,7 +78,6 @@ def export_chart_to_word(
     for i, header in enumerate(headers):
         cell = table.cell(0, i)
         cell.text = header
-
         for paragraph in cell.paragraphs:
             for run in paragraph.runs:
                 run.bold = True
@@ -86,7 +86,6 @@ def export_chart_to_word(
     for i, value in enumerate(values):
         cell = table.cell(1, i)
         cell.text = value
-
         for paragraph in cell.paragraphs:
             for run in paragraph.runs:
                 run.font.size = Pt(9)
@@ -137,9 +136,7 @@ def export_chart_to_word(
 
         ax.set_title(
             "Viscosity Transition by Solvent Ratio\n"
-            f"Resin: {selected_resin} | "
-            f"Vendor: {selected_vendor} | "
-            f"Solvent: {selected_solvent}",
+            f"Resin: {selected_resin} | Position: {selected_pos} | Vendor: {selected_vendor} | Solvent: {selected_solvent}",
             fontsize=14,
             fontweight="bold",
             pad=16
@@ -148,12 +145,7 @@ def export_chart_to_word(
         ax.set_xlabel("Solvent Blending Ratio (%)", fontsize=10)
         ax.set_ylabel("Viscosity (seconds)", fontsize=10)
 
-        ax.grid(
-            True,
-            linestyle="--",
-            linewidth=0.5,
-            alpha=0.5
-        )
+        ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.5)
 
         ax.legend(
             loc="upper center",
@@ -165,42 +157,26 @@ def export_chart_to_word(
         plt.tight_layout()
 
         chart_stream = BytesIO()
-
-        fig.savefig(
-            chart_stream,
-            format="png",
-            dpi=260,
-            bbox_inches="tight"
-        )
-
+        fig.savefig(chart_stream, format="png", dpi=260, bbox_inches="tight")
         chart_stream.seek(0)
         plt.close(fig)
 
         chart_paragraph = doc.add_paragraph()
         chart_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-        chart_paragraph.add_run().add_picture(
-            chart_stream,
-            width=Inches(9.6)
-        )
+        chart_paragraph.add_run().add_picture(chart_stream, width=Inches(9.6))
 
     except Exception as e:
         error_paragraph = doc.add_paragraph()
         error_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-        error_run = error_paragraph.add_run(
-            f"\n[CHART EXPORT FAILED]\n{str(e)}"
-        )
+        error_run = error_paragraph.add_run(f"\n[CHART EXPORT FAILED]\n{str(e)}")
         error_run.bold = True
 
     note = doc.add_paragraph()
-
     note_run = note.add_run(
         "Note: Orange points represent viscosity before solvent addition. "
         "Blue points represent viscosity after solvent addition. "
         "The dotted line connects the same mixing batch."
     )
-
     note_run.italic = True
     note_run.font.size = Pt(9)
 
@@ -237,12 +213,24 @@ def process_data(df):
 
     if data.empty:
         return data
+    
+    if "塗裝位置" not in data.columns:
+        data["塗裝位置"] = "Unknown"
+
+    pos_mapping = {
+        "TP": "Primer", "正底漆": "Primer",
+        "BP": "Primer", "背底漆": "Primer",
+        "TF": "Top Finish", "正面漆": "Top Finish",
+        "BF": "Back Finish", "背面漆": "Back Finish"
+    }
+    data["Position_UI"] = data["塗裝位置"].map(pos_mapping).fillna(data["塗裝位置"])
 
     data = data[
         (data["添加重量"] > 0)
         & (data["塗料重量"] > 0)
         & (data["黏度(秒)"] > data["黏度(秒)_1"])
         & (data["Resin"].notna())
+        & (data["Position_UI"].notna())
         & (data["Vendor"].notna())
         & (data["Solvent_Type"].notna())
     ]
@@ -281,10 +269,9 @@ def process_data(df):
 
     data["Initial_Viscosity_Zone"] = data["黏度(秒)"].apply(assign_zone)
 
+    # Đưa Position_UI vào tiêu chí gom nhóm cho thuật toán n >= 30
     system_batch_counts = (
-        data.groupby(
-            ["Resin", "Vendor", "Solvent_Type"]
-        )["塗料批號"]
+        data.groupby(["Resin", "Position_UI", "Vendor", "Solvent_Type"])["塗料批號"]
         .transform("nunique")
     )
 
@@ -294,16 +281,12 @@ def process_data(df):
         return data
 
     q01 = (
-        data.groupby(
-            ["Resin", "Vendor", "Solvent_Type"]
-        )["Sensitivity"]
+        data.groupby(["Resin", "Position_UI", "Vendor", "Solvent_Type"])["Sensitivity"]
         .transform(lambda x: x.quantile(0.01))
     )
 
     q99 = (
-        data.groupby(
-            ["Resin", "Vendor", "Solvent_Type"]
-        )["Sensitivity"]
+        data.groupby(["Resin", "Position_UI", "Vendor", "Solvent_Type"])["Sensitivity"]
         .transform(lambda x: x.quantile(0.99))
     )
 
@@ -442,7 +425,7 @@ def reset_execution_states():
 
 
 # =========================================================
-# GLOBAL FILTERS
+# GLOBAL FILTERS (4 CỘT)
 # =========================================================
 st.title("⚙️ AI-Assisted Viscosity Optimization System")
 
@@ -453,7 +436,7 @@ st.markdown(
 
 st.markdown("---")
 
-col_f1, col_f2, col_f3 = st.columns(3)
+col_f1, col_f2, col_f3, col_f4 = st.columns(4)
 
 with col_f1:
     selected_resin = st.selectbox(
@@ -463,22 +446,31 @@ with col_f1:
     )
 
 with col_f2:
+    selected_pos = st.selectbox(
+        "Select Position:",
+        sorted(master_df[master_df["Resin"] == selected_resin]["Position_UI"].unique()),
+        on_change=reset_execution_states
+    )
+
+with col_f3:
     selected_vendor = st.selectbox(
         "Select Vendor:",
         sorted(
             master_df[
-                master_df["Resin"] == selected_resin
+                (master_df["Resin"] == selected_resin)
+                & (master_df["Position_UI"] == selected_pos)
             ]["Vendor"].unique()
         ),
         on_change=reset_execution_states
     )
 
-with col_f3:
+with col_f4:
     selected_solvent = st.selectbox(
         "Select Solvent Type:",
         sorted(
             master_df[
                 (master_df["Resin"] == selected_resin)
+                & (master_df["Position_UI"] == selected_pos)
                 & (master_df["Vendor"] == selected_vendor)
             ]["Solvent_Type"].unique()
         ),
@@ -487,6 +479,7 @@ with col_f3:
 
 system_df = master_df[
     (master_df["Resin"] == selected_resin)
+    & (master_df["Position_UI"] == selected_pos)
     & (master_df["Vendor"] == selected_vendor)
     & (master_df["Solvent_Type"] == selected_solvent)
 ]
@@ -555,21 +548,11 @@ with tab1:
 
     plot_df = system_df.reset_index(drop=True).copy()
 
-    # =====================================================
-    # CONNECTING LINE FOR SAME BATCH
-    # Keep light gray to avoid visual confusion
-    # =====================================================
     for _, row in plot_df.iterrows():
         fig_scatter.add_trace(
             go.Scatter(
-                x=[
-                    row["Solvent_Ratio_Percent"],
-                    row["Solvent_Ratio_Percent"]
-                ],
-                y=[
-                    row["黏度(秒)"],
-                    row["黏度(秒)_1"]
-                ],
+                x=[row["Solvent_Ratio_Percent"], row["Solvent_Ratio_Percent"]],
+                y=[row["黏度(秒)"], row["黏度(秒)_1"]],
                 mode="lines",
                 line=dict(
                     color="rgba(120,120,120,0.35)",
@@ -577,14 +560,8 @@ with tab1:
                     dash="dot"
                 ),
                 customdata=[
-                    [
-                        row["塗料批號"],
-                        row["Delta_V"]
-                    ],
-                    [
-                        row["塗料批號"],
-                        row["Delta_V"]
-                    ]
+                    [row["塗料批號"], row["Delta_V"]],
+                    [row["塗料批號"], row["Delta_V"]]
                 ],
                 hovertemplate=(
                     "<b>Batch: %{customdata[0]}</b><br>"
@@ -595,9 +572,6 @@ with tab1:
             )
         )
 
-    # =====================================================
-    # INITIAL VISCOSITY BEFORE SOLVENT ADDITION
-    # =====================================================
     fig_scatter.add_trace(
         go.Scatter(
             x=plot_df["Solvent_Ratio_Percent"],
@@ -611,12 +585,7 @@ with tab1:
                 line=dict(width=0.8, color="white")
             ),
             customdata=plot_df[
-                [
-                    "黏度(秒)_1",
-                    "Delta_V",
-                    "Initial_Viscosity_Zone",
-                    "塗料批號"
-                ]
+                ["黏度(秒)_1", "Delta_V", "Initial_Viscosity_Zone", "塗料批號"]
             ].values,
             hovertemplate=(
                 "<b>Batch: %{customdata[3]}</b><br>"
@@ -630,9 +599,6 @@ with tab1:
         )
     )
 
-    # =====================================================
-    # FINAL VISCOSITY AFTER SOLVENT ADDITION
-    # =====================================================
     fig_scatter.add_trace(
         go.Scatter(
             x=plot_df["Solvent_Ratio_Percent"],
@@ -646,12 +612,7 @@ with tab1:
                 line=dict(width=0.8, color="white")
             ),
             customdata=plot_df[
-                [
-                    "黏度(秒)",
-                    "Delta_V",
-                    "Initial_Viscosity_Zone",
-                    "塗料批號"
-                ]
+                ["黏度(秒)", "Delta_V", "Initial_Viscosity_Zone", "塗料批號"]
             ].values,
             hovertemplate=(
                 "<b>Batch: %{customdata[3]}</b><br>"
@@ -667,9 +628,8 @@ with tab1:
 
     chart_title = (
         f"Viscosity Transition by Solvent Ratio<br>"
-        f"<sup>Resin: {selected_resin} | "
-        f"Vendor: {selected_vendor} | "
-        f"Solvent: {selected_solvent}</sup>"
+        f"<sup>Resin: {selected_resin} | Position: {selected_pos} | "
+        f"Vendor: {selected_vendor} | Solvent: {selected_solvent}</sup>"
     )
 
     fig_scatter.update_layout(
@@ -719,6 +679,7 @@ with tab1:
 
     word_data = export_chart_to_word(
         selected_resin=selected_resin,
+        selected_pos=selected_pos,
         selected_vendor=selected_vendor,
         selected_solvent=selected_solvent,
         system_df=system_df
@@ -726,7 +687,7 @@ with tab1:
 
     file_name = (
         f"Viscosity_Transition_"
-        f"{selected_resin}_{selected_vendor}_{selected_solvent}.docx"
+        f"{selected_resin}_{selected_pos}_{selected_vendor}_{selected_solvent}.docx"
     )
 
     st.download_button(
@@ -989,6 +950,7 @@ with tab2:
                             "calc_rec_solvent": recommended_solvent,
                             "calc_max_solvent": max_total_solvent,
                             "sys_resin": selected_resin,
+                            "sys_pos": selected_pos,
                             "sys_vendor": selected_vendor,
                             "sys_solvent": selected_solvent,
                             "calc_risk": risk_status
@@ -1039,7 +1001,7 @@ with tab3:
 
     st.markdown(
         "Full operational baseline matrix for safety boundary definitions. "
-        "Filtered by selected Resin & Vendor."
+        "Filtered by selected Resin, Position & Vendor."
     )
 
     def generate_matrix(df):
@@ -1219,8 +1181,10 @@ with tab4:
     def create_worker_viscosity_zone(df):
         temp_df = df.copy()
 
+        # Update groupby keys to include Position_UI
         group_cols = [
             "Resin",
+            "Position_UI",
             "Vendor",
             "Solvent_Type"
         ]
@@ -1284,6 +1248,7 @@ with tab4:
     worker_sop = matrix_df.groupby(
         [
             "Resin",
+            "Position_UI",
             "Vendor",
             "Solvent_Type",
             "Worker_Viscosity_Zone"
@@ -1361,6 +1326,7 @@ with tab4:
     system_keys = matrix_df[
         [
             "Resin",
+            "Position_UI",
             "Vendor",
             "Solvent_Type"
         ]
@@ -1369,11 +1335,13 @@ with tab4:
     for _, system_row in system_keys.iterrows():
 
         resin_value = system_row["Resin"]
+        pos_value = system_row["Position_UI"]
         vendor_value = system_row["Vendor"]
         solvent_value = system_row["Solvent_Type"]
 
         temp_system_df = matrix_df[
             (matrix_df["Resin"] == resin_value)
+            & (matrix_df["Position_UI"] == pos_value)
             & (matrix_df["Vendor"] == vendor_value)
             & (matrix_df["Solvent_Type"] == solvent_value)
         ].copy()
@@ -1382,6 +1350,7 @@ with tab4:
 
         saturation_summary.append({
             "Resin": resin_value,
+            "Position_UI": pos_value,
             "Vendor": vendor_value,
             "Solvent_Type": solvent_value,
             "Saturation_Warning_Ratio": (
@@ -1398,6 +1367,7 @@ with tab4:
         saturation_summary_df,
         on=[
             "Resin",
+            "Position_UI",
             "Vendor",
             "Solvent_Type"
         ],
@@ -1423,11 +1393,21 @@ with tab4:
     )
 
     # =====================================================
+    # TRANSLATE POSITION BACK TO CHINESE FOR SHOP FLOOR
+    # =====================================================
+    worker_sop["塗裝位置"] = worker_sop["Position_UI"].map({
+        "Primer": "底漆 (Primer)",
+        "Top Finish": "正面漆 (Top Finish)",
+        "Back Finish": "背面漆 (Back Finish)"
+    }).fillna(worker_sop["Position_UI"])
+
+    # =====================================================
     # FINAL OUTPUT COLUMN ORDER
     # =====================================================
     worker_output = worker_sop[
         [
             "Resin",
+            "塗裝位置",
             "Vendor",
             "Solvent_Type",
             "Worker_Viscosity_Zone",
@@ -1487,6 +1467,7 @@ with tab4:
     worker_output = worker_output.sort_values(
         by=[
             "樹脂種類",
+            "塗裝位置",
             "塗料供應商",
             "稀釋劑種類",
             "_zone_order"
@@ -1552,7 +1533,7 @@ with tab4:
     )
 
     st.caption(
-        "「130–Max」表示該樹脂、供應商及稀釋劑組合中，"
+        "「130–Max」表示該樹脂、塗裝位置、供應商及稀釋劑組合中，"
         "歷史實際出現的最高初始黏度範圍；"
         "飽和停止比例仍以歷史效率分析或P95作為安全限制。"
     )
