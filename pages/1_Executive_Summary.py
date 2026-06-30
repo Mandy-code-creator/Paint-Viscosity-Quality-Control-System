@@ -244,8 +244,9 @@ def process_data(df):
     if data.empty:
         return data
 
-    data["Dilution_Base"] = data["塗料重量"] + 120
-
+    # Dilution base = actual paint weight only
+    data["Dilution_Base"] = data["塗料重量"]
+    
     data["Solvent_Ratio_Percent"] = (
         data["添加重量"] / data["Dilution_Base"]
     ) * 100
@@ -837,7 +838,7 @@ with tab2:
                     ref_drop_p90 = ref_data["Delta_V"].quantile(0.9)
                     ref_drop_max = ref_data["Delta_V"].max()
 
-                    dilution_base = order_weight + 120
+                    dilution_base = order_weight
                     required_ratio = required_drop / ref_sensitivity
 
                     recommended_solvent = (
@@ -1161,8 +1162,8 @@ with tab4:
     )
 
     st.caption(
-        "註：稀釋劑添加比例計算基準為："
-        "訂單塗料重量 + 120 kg 管線內運轉塗料。"
+    "註：稀釋劑添加比例計算基準為實際塗料重量，"
+    "不包含管線內運轉塗料。"
     )
 
     # =====================================================
