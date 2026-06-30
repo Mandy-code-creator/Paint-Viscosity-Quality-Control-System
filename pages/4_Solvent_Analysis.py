@@ -171,7 +171,7 @@ if tree_summary.empty:
     st.stop()
 
 # =========================================================
-# 5. GRAPHVIZ HIERARCHY (OPTIMIZED FOR STREAMLIT APP)
+# 5. GRAPHVIZ HIERARCHY (COMPACT & SQUARE CELLS FOR APP LAYOUT)
 # =========================================================
 import pandas as pd
 import graphviz
@@ -179,12 +179,12 @@ import streamlit as st
 
 graph = graphviz.Digraph(engine="dot")
 
-# Cấu hình khoảng cách đồ thị
+# SỬA ĐỔI 1: Gom cụm đồ thị cực kỳ sát nhau để không bị phí không gian của App
 graph.attr(
-    rankdir="LR",    # Gợi ý: Đổi thành "TB" (Top-to-Bottom) nếu đồ thị bị quá chật theo chiều ngang
+    rankdir="LR",
     splines="curved",
-    nodesep="0.8",   # Khoảng cách dọc giữa các node
-    ranksep="2.0",   # Khoảng cách ngang giữa các cấp
+    nodesep="0.05",   # Giảm tối đa khoảng cách dọc giữa các hàng
+    ranksep="0.4",    # Giảm tối đa khoảng cách ngang giữa các cột
     bgcolor="transparent"
 )
 
@@ -192,19 +192,17 @@ graph.attr(
     "node",
     shape="none",
     margin="0",
-    width="0",
-    height="0",
     fontname="Arial"
 )
 
 graph.attr(
     "edge",
-    color="#A0A0A0",
-    penwidth="2.0",
-    arrowsize="0.9"
+    color="#B0B0B0",
+    penwidth="1.2",
+    arrowsize="0.6"
 )
 
-# Tính toán các chỉ số tổng hợp
+# --- PHẦN TÍNH TOÁN DỮ LIỆU CỦA BẠN ---
 total_vendor_paint = tree_summary["Total_Paint"].sum()
 total_vendor_solv = tree_summary["Total_Solvent"].sum()
 avg_delta_v = filtered_df["Delta_V"].mean()
@@ -216,13 +214,10 @@ avg_solvent_ratio = (
     else 0
 )
 
-# Xử lý chuỗi ngày tháng
 date_range_str = "All Available Data"
 date_cols = [
     col for col in filtered_df.columns
-    if "date" in col.lower()
-    or "日期" in col.lower()
-    or "time" in col.lower()
+    if "date" in col.lower() or "日期" in col.lower() or "time" in col.lower()
 ]
 
 if date_cols:
@@ -241,26 +236,27 @@ if date_cols:
     except Exception:
         date_range_str = "All Available Data"
 
-# TẠO NODE GỐC (VENDOR)
+
+# SỬA ĐỔI 2: Thiết kế lại HTML - Giảm CELLPADDING xuống tối thiểu (3-4) để ô không bị dẹt dài.
+# Sử dụng cỡ chữ tiêu chuẩn (9-11px). Khi đồ thị gọn, Streamlit sẽ KHÔNG bóp nhỏ chữ của bạn nữa.
+
+# --- NODE GỐC (VENDOR) ---
 center_html = f"""
-<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="16">
+<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4">
     <TR>
         <TD BGCOLOR="#00BFFF" STYLE="ROUNDED" ALIGN="CENTER">
-            <FONT COLOR="white" POINT-SIZE="26">
-                <B>VENDOR: {selected_vendor}</B>
-            </FONT>
+            <FONT COLOR="white" POINT-SIZE="11"><B>VENDOR: {selected_vendor}</B></FONT>
         </TD>
     </TR>
     <TR>
         <TD BGCOLOR="#F8F9FA" STYLE="ROUNDED" ALIGN="CENTER">
-            <FONT POINT-SIZE="18" COLOR="#333333">
-                Period: <B>{date_range_str}</B><BR/><BR/>
+            <FONT POINT-SIZE="9" COLOR="#333333">
+                Period: <B>{date_range_str}</B><BR/>
                 <B>{total_vendor_paint:,.0f} kg</B> Paint Used<BR/>
                 Visc Reduction: <B>{avg_delta_v:.1f} s</B><BR/>
                 <B>{total_vendor_solv:,.0f} kg</B> Solvent Added<BR/>
             </FONT>
-            <BR/>
-            <FONT COLOR="#D9534F" POINT-SIZE="22">
+            <FONT COLOR="#D9534F" POINT-SIZE="10">
                 <B>Avg. Solvent Ratio: {avg_solvent_ratio:.2f}%</B>
             </FONT>
         </TD>
@@ -269,7 +265,8 @@ center_html = f"""
 """
 graph.node("Root", f"<{center_html}>")
 
-# TẠO CÁC NODE CẤP 2 (RESIN) VÀ NODE LÁ (SOLVENT)
+
+# --- CÁC NODE CẤP TRUNG GIAN (RESIN) VÀ LÁ (SOLVENT) ---
 for resin in tree_summary["Resin"].unique():
     resin_id = f"resin_{resin}"
     resin_data = tree_summary[tree_summary["Resin"] == resin].copy()
@@ -278,18 +275,12 @@ for resin in tree_summary["Resin"].unique():
     resin_solvent_sum = resin_data["Total_Solvent"].sum()
 
     resin_html = f"""
-    <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="14">
+    <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4">
         <TR>
             <TD BGCOLOR="#E6F2FF" STYLE="ROUNDED" BORDER="1" COLOR="#00BFFF" ALIGN="CENTER">
-                <FONT COLOR="#005A9E" POINT-SIZE="20">
-                    <B>RESIN: {resin}</B>
-                </FONT><BR/><BR/>
-                <FONT COLOR="#555555" POINT-SIZE="16">
-                    {resin_paint_sum:,.0f} kg Paint
-                </FONT><BR/>
-                <FONT COLOR="#D9534F" POINT-SIZE="16">
-                    {resin_solvent_sum:,.0f} kg Solvent
-                </FONT>
+                <FONT COLOR="#005A9E" POINT-SIZE="10"><B>RESIN: {resin}</B></FONT><BR/>
+                <FONT COLOR="#555555" POINT-SIZE="9">{resin_paint_sum:,.0f} kg Paint</FONT><BR/>
+                <FONT COLOR="#D9534F" POINT-SIZE="9">{resin_solvent_sum:,.0f} kg Solvent</FONT>
             </TD>
         </TR>
     </TABLE>
@@ -301,27 +292,16 @@ for resin in tree_summary["Resin"].unique():
         solvent = row["Solvent_Type"]
         leaf_id = f"leaf_{resin}_{solvent}_{idx}"
 
+        # SỬA ĐỔI 3: Gộp chung "Visc Before" và "After" thành một dòng nằm ngang bằng bảng (Table) nhỏ nội bộ.
+        # Điều này giúp ô Solvent ngắn lại theo chiều ngang và tăng chiều cao -> Ô trở nên vuông vắn, chữ sẽ tự động to lên rõ rệt trên App.
         leaf_html = f"""
-        <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="14">
+        <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4">
             <TR>
                 <TD ALIGN="CENTER" BGCOLOR="white" STYLE="ROUNDED" BORDER="1" COLOR="#CCCCCC">
-                    <B>
-                        <FONT COLOR="#333333" POINT-SIZE="18">
-                            SOLVENT: {solvent}
-                        </FONT>
-                    </B><BR/><BR/>
-                    <FONT COLOR="#888888" POINT-SIZE="15">
-                        Visc Before: {row["Avg_Visc_Before"]:.1f} s
-                    </FONT><BR/>
-                    <FONT COLOR="#888888" POINT-SIZE="15">
-                        Visc After: {row["Avg_Visc_After"]:.1f} s
-                    </FONT><BR/><BR/>
-                    <FONT COLOR="#00BFFF" POINT-SIZE="16">
-                        {row["Median_Kg_per_1s"]:.2f} kg / 1s
-                    </FONT><BR/>
-                    <FONT COLOR="#D9534F" POINT-SIZE="16">
-                        <B>Efficiency: {row["Median_Efficiency"]:.2f} s/%</B>
-                    </FONT>
+                    <FONT COLOR="#333333" POINT-SIZE="10"><B>SOLVENT: {solvent}</B></FONT><BR/>
+                    <FONT COLOR="#888888" POINT-SIZE="8">B4: {row["Avg_Visc_Before"]:.1f}s | Aft: {row["Avg_Visc_After"]:.1f}s</FONT><BR/>
+                    <FONT COLOR="#00BFFF" POINT-SIZE="9">{row["Median_Kg_per_1s"]:.2f} kg / 1s</FONT><BR/>
+                    <FONT COLOR="#D9534F" POINT-SIZE="9"><B>Eff: {row["Median_Efficiency"]:.2f} s/%</B></FONT>
                 </TD>
             </TR>
         </TABLE>
@@ -329,7 +309,7 @@ for resin in tree_summary["Resin"].unique():
         graph.node(leaf_id, f"<{leaf_html}>")
         graph.edge(resin_id, leaf_id)
 
-# Render biểu đồ
+# Render lên giao diện App Streamlit
 st.graphviz_chart(graph, use_container_width=True)
 # =========================================================
 # 6. SATURATION ANALYSIS - MATPLOTLIB
