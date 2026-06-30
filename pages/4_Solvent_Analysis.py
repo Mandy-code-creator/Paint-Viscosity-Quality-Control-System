@@ -236,18 +236,21 @@ if tree_summary.empty:
 
 
 # =========================================================
-# 5. GRAPHVIZ HIERARCHY (WITH OPTIMAL & SATURATION METRICS)
+# =========================================================
+# 5. GRAPHVIZ HIERARCHY (ADJUSTED SCALING & FONT SIZES)
 # =========================================================
 import graphviz
 
 graph = graphviz.Digraph(engine="dot")
 
+# Tăng nhẹ khoảng cách và thêm DPI để Streamlit không zoom quá mức
 graph.attr(
     rankdir="LR",
     splines="curved",
-    nodesep="0.05",   
-    ranksep="0.4",    
-    bgcolor="transparent"
+    nodesep="0.15",   
+    ranksep="0.8",    
+    bgcolor="transparent",
+    dpi="150"
 )
 
 graph.attr(
@@ -299,17 +302,18 @@ if date_cols:
 
 
 # --- ROOT NODE (VENDOR) ---
+# Đã giảm POINT-SIZE và tăng nhẹ CELLPADDING
 center_html = (
-    '<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5"><TR>'
+    '<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="6"><TR>'
     '<TD BGCOLOR="#00BFFF" STYLE="ROUNDED" ALIGN="CENTER">'
-    f'<FONT COLOR="white" POINT-SIZE="11"><B>VENDOR: {selected_vendor}</B></FONT>'
+    f'<FONT COLOR="white" POINT-SIZE="9"><B>VENDOR: {selected_vendor}</B></FONT>'
     '</TD></TR><TR>'
     '<TD BGCOLOR="#F8F9FA" STYLE="ROUNDED" ALIGN="CENTER">'
-    f'<FONT POINT-SIZE="9" COLOR="#333333">Period: <B>{date_range_str}</B><BR/>'
+    f'<FONT POINT-SIZE="8" COLOR="#333333">Period: <B>{date_range_str}</B><BR/>'
     f'<B>{total_vendor_paint:,.0f} kg</B> Paint Used<BR/>'
     f'Visc Reduction: <B>{avg_delta_v:.1f} s</B><BR/>'
     f'<B>{total_vendor_solv:,.0f} kg</B> Solvent Added<BR/>'
-    f'</FONT><FONT COLOR="#D9534F" POINT-SIZE="10"><B>Avg. Solvent Ratio: {avg_solvent_ratio:.2f}%</B></FONT>'
+    f'</FONT><FONT COLOR="#D9534F" POINT-SIZE="8"><B>Avg. Solvent Ratio: {avg_solvent_ratio:.2f}%</B></FONT>'
     '</TD></TR></TABLE>'
 )
 graph.node("Root", f"<{center_html}>")
@@ -324,11 +328,11 @@ for resin in tree_summary["Resin"].unique():
     resin_solvent_sum = resin_data["Total_Solvent"].sum()
 
     resin_html = (
-        '<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5"><TR>'
+        '<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="6"><TR>'
         '<TD BGCOLOR="#E6F2FF" STYLE="ROUNDED" BORDER="1" COLOR="#00BFFF" ALIGN="CENTER">'
-        f'<FONT COLOR="#005A9E" POINT-SIZE="10"><B>RESIN: {resin}</B></FONT><BR/>'
-        f'<FONT COLOR="#555555" POINT-SIZE="9">{resin_paint_sum:,.0f} kg Paint</FONT><BR/>'
-        f'<FONT COLOR="#D9534F" POINT-SIZE="9">{resin_solvent_sum:,.0f} kg Solvent</FONT>'
+        f'<FONT COLOR="#005A9E" POINT-SIZE="8"><B>RESIN: {resin}</B></FONT><BR/>'
+        f'<FONT COLOR="#555555" POINT-SIZE="7.5">{resin_paint_sum:,.0f} kg Paint</FONT><BR/>'
+        f'<FONT COLOR="#D9534F" POINT-SIZE="7.5">{resin_solvent_sum:,.0f} kg Solvent</FONT>'
         '</TD></TR></TABLE>'
     )
     graph.node(resin_id, f"<{resin_html}>")
@@ -338,16 +342,15 @@ for resin in tree_summary["Resin"].unique():
         solvent = row["Solvent_Type"]
         leaf_id = f"leaf_{resin}_{solvent}_{idx}"
 
-        # Xử lý chuỗi hiển thị giới hạn bão hòa
         sat_limit_display = f"{row['Sat_Limit']:.1f}%" if pd.notna(row["Sat_Limit"]) else "N/A"
 
         leaf_html = (
-            '<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5"><TR>'
+            '<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="6"><TR>'
             '<TD ALIGN="CENTER" BGCOLOR="white" STYLE="ROUNDED" BORDER="1" COLOR="#CCCCCC">'
-            f'<FONT COLOR="#333333" POINT-SIZE="10"><B>SOLVENT: {solvent}</B></FONT><BR/>'
-            f'<FONT COLOR="#555555" POINT-SIZE="9">Visc: {row["Avg_Visc_Before"]:.1f}s &rarr; {row["Avg_Visc_After"]:.1f}s</FONT><BR/>'
-            f'<FONT COLOR="#00BFFF" POINT-SIZE="9"><B>Opt. Eff: {row["Opt_Eff"]:.2f} s/%</B></FONT><BR/>'
-            f'<FONT COLOR="#D9534F" POINT-SIZE="9"><B>Sat. Limit: {sat_limit_display}</B></FONT>'
+            f'<FONT COLOR="#333333" POINT-SIZE="8"><B>SOLVENT: {solvent}</B></FONT><BR/>'
+            f'<FONT COLOR="#555555" POINT-SIZE="7.5">Visc: {row["Avg_Visc_Before"]:.1f}s &rarr; {row["Avg_Visc_After"]:.1f}s</FONT><BR/>'
+            f'<FONT COLOR="#00BFFF" POINT-SIZE="7.5"><B>Opt. Eff: {row["Opt_Eff"]:.2f} s/%</B></FONT><BR/>'
+            f'<FONT COLOR="#D9534F" POINT-SIZE="7.5"><B>Sat. Limit: {sat_limit_display}</B></FONT>'
             '</TD></TR></TABLE>'
         )
         graph.node(leaf_id, f"<{leaf_html}>")
