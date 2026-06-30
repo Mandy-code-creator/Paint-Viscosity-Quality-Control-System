@@ -1396,9 +1396,9 @@ with tab4:
     # TRANSLATE POSITION BACK TO CHINESE FOR SHOP FLOOR
     # =====================================================
     worker_sop["塗裝位置"] = worker_sop["Position_UI"].map({
-        "Primer": "底漆 (Primer)",
-        "Top Finish": "正面漆 (Top Finish)",
-        "Back Finish": "背面漆 (Back Finish)"
+        "Primer": "底漆 (P)",
+        "Top Finish": "正面漆 (TF)",
+        "Back Finish": "背面漆 (BF)"
     }).fillna(worker_sop["Position_UI"])
 
     # =====================================================
