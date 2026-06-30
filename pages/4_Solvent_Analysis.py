@@ -145,19 +145,83 @@ if filtered_df.empty:
     st.stop()
 
 # =========================================================
-# 4. HIERARCHY SUMMARY (UNIFIED TO MEDIAN LOGIC)
 # =========================================================
-tree_summary = filtered_df.groupby(
+# 4. HIERARCHY SUMMARY (ADVANCED OPTIMAL & SATURATION LOGIC)
+# =========================================================
+
+# 4.1 Define Helper Function for Optimal Efficiency and Saturation
+def calculate_advanced_metrics(group):
+    # Fallback for insufficient data
+    if len(group) < 5:
+        return pd.Series({
+            "Opt_Eff": group["Dilution_Efficiency"].median(), 
+            "Sat_Limit": np.nan
+        })
+
+    bins = [0, 3, 5, 7, 9, 11, np.inf]
+    labels = ["0-3", "3-5", "5-7", "7-9", "9-11", ">11"]
+    midpoints = [1.5, 4, 6, 8, 10, 12]
+
+    df_calc = group.copy()
+    df_calc["Ratio_Bin"] = pd.cut(
+        df_calc["Solvent_Ratio_Percent"],
+        bins=bins,
+        labels=labels,
+        include_lowest=True
+    )
+
+    summary = df_calc.groupby("Ratio_Bin", observed=False).agg(
+        Records=("Dilution_Efficiency", "size"),
+        Median_Efficiency=("Dilution_Efficiency", "median")
+    ).reset_index()
+
+    summary["Ratio_Midpoint"] = midpoints
+
+    # Filter valid bins
+    summary = summary[summary["Records"] >= 3].copy()
+
+    if summary.empty:
+        return pd.Series({
+            "Opt_Eff": group["Dilution_Efficiency"].median(), 
+            "Sat_Limit": group["Solvent_Ratio_Percent"].max()
+        })
+
+    # Calculate Baseline (Optimal) and Stop Limit (Saturation)
+    baseline_eff = summary["Median_Efficiency"].iloc[0]
+    summary["Efficiency_Retention_Percent"] = (summary["Median_Efficiency"] / baseline_eff) * 100
+
+    stop_rows = summary[summary["Efficiency_Retention_Percent"] <= 50]
+    
+    stop_ratio = (
+        stop_rows["Ratio_Midpoint"].iloc[0]
+        if not stop_rows.empty
+        else group["Solvent_Ratio_Percent"].quantile(0.95)
+    )
+
+    return pd.Series({
+        "Opt_Eff": baseline_eff,
+        "Sat_Limit": stop_ratio
+    })
+
+# 4.2 Basic Aggregation
+tree_base = filtered_df.groupby(
     ["Resin", "Solvent_Type"],
     observed=False
 ).agg(
     Total_Paint=("塗料重量", "sum"),
     Total_Solvent=("添加重量", "sum"),
-    Median_Kg_per_1s=("Kg_per_1s", "median"),
-    Median_Efficiency=("Dilution_Efficiency", "median"),
     Avg_Visc_Before=("黏度(秒)", "mean"),
     Avg_Visc_After=("黏度(秒)_1", "mean")
 ).reset_index()
+
+# 4.3 Advanced Metrics Aggregation
+advanced_metrics = filtered_df.groupby(
+    ["Resin", "Solvent_Type"],
+    observed=False
+).apply(calculate_advanced_metrics).reset_index()
+
+# 4.4 Merge Data
+tree_summary = pd.merge(tree_base, advanced_metrics, on=["Resin", "Solvent_Type"])
 
 tree_summary = tree_summary[
     tree_summary["Total_Paint"] > 0
@@ -170,21 +234,19 @@ if tree_summary.empty:
     st.warning("⚠️ No valid paint consumption data available.")
     st.stop()
 
+
 # =========================================================
-# 5. GRAPHVIZ HIERARCHY (COMPACT & SQUARE CELLS FOR APP LAYOUT)
+# 5. GRAPHVIZ HIERARCHY (WITH OPTIMAL & SATURATION METRICS)
 # =========================================================
-import pandas as pd
 import graphviz
-import streamlit as st
 
 graph = graphviz.Digraph(engine="dot")
 
-# SỬA ĐỔI 1: Gom cụm đồ thị cực kỳ sát nhau để không bị phí không gian của App
 graph.attr(
     rankdir="LR",
     splines="curved",
-    nodesep="0.05",   # Giảm tối đa khoảng cách dọc giữa các hàng
-    ranksep="0.4",    # Giảm tối đa khoảng cách ngang giữa các cột
+    nodesep="0.05",   
+    ranksep="0.4",    
     bgcolor="transparent"
 )
 
@@ -202,7 +264,6 @@ graph.attr(
     arrowsize="0.6"
 )
 
-# --- PHẦN TÍNH TOÁN DỮ LIỆU CỦA BẠN ---
 total_vendor_paint = tree_summary["Total_Paint"].sum()
 total_vendor_solv = tree_summary["Total_Solvent"].sum()
 avg_delta_v = filtered_df["Delta_V"].mean()
@@ -237,10 +298,7 @@ if date_cols:
         date_range_str = "All Available Data"
 
 
-# SỬA ĐỔI 2: Thiết kế lại HTML - Giảm CELLPADDING xuống tối thiểu (3-4) để ô không bị dẹt dài.
-# Sử dụng cỡ chữ tiêu chuẩn (9-11px). Khi đồ thị gọn, Streamlit sẽ KHÔNG bóp nhỏ chữ của bạn nữa.
-
-# --- NODE GỐC (VENDOR) ---
+# --- ROOT NODE (VENDOR) ---
 center_html = f"""
 <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4">
     <TR>
@@ -266,7 +324,7 @@ center_html = f"""
 graph.node("Root", f"<{center_html}>")
 
 
-# --- CÁC NODE CẤP TRUNG GIAN (RESIN) VÀ LÁ (SOLVENT) ---
+# --- RESIN AND SOLVENT LEAVES ---
 for resin in tree_summary["Resin"].unique():
     resin_id = f"resin_{resin}"
     resin_data = tree_summary[tree_summary["Resin"] == resin].copy()
@@ -292,16 +350,17 @@ for resin in tree_summary["Resin"].unique():
         solvent = row["Solvent_Type"]
         leaf_id = f"leaf_{resin}_{solvent}_{idx}"
 
-        # SỬA ĐỔI 3: Gộp chung "Visc Before" và "After" thành một dòng nằm ngang bằng bảng (Table) nhỏ nội bộ.
-        # Điều này giúp ô Solvent ngắn lại theo chiều ngang và tăng chiều cao -> Ô trở nên vuông vắn, chữ sẽ tự động to lên rõ rệt trên App.
+        # Determine how to display Saturation Limit (handle NaN if data is insufficient)
+        sat_limit_display = f"{row['Sat_Limit']:.1f}%" if pd.notna(row["Sat_Limit"]) else "N/A"
+
         leaf_html = f"""
         <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4">
             <TR>
                 <TD ALIGN="CENTER" BGCOLOR="white" STYLE="ROUNDED" BORDER="1" COLOR="#CCCCCC">
                     <FONT COLOR="#333333" POINT-SIZE="10"><B>SOLVENT: {solvent}</B></FONT><BR/>
                     <FONT COLOR="#888888" POINT-SIZE="8">B4: {row["Avg_Visc_Before"]:.1f}s | Aft: {row["Avg_Visc_After"]:.1f}s</FONT><BR/>
-                    <FONT COLOR="#00BFFF" POINT-SIZE="9">{row["Median_Kg_per_1s"]:.2f} kg / 1s</FONT><BR/>
-                    <FONT COLOR="#D9534F" POINT-SIZE="9"><B>Eff: {row["Median_Efficiency"]:.2f} s/%</B></FONT>
+                    <FONT COLOR="#00BFFF" POINT-SIZE="9"><B>Opt. Eff: {row["Opt_Eff"]:.2f} s/%</B></FONT><BR/>
+                    <FONT COLOR="#D9534F" POINT-SIZE="9"><B>Sat. Limit: {sat_limit_display}</B></FONT>
                 </TD>
             </TR>
         </TABLE>
@@ -309,7 +368,6 @@ for resin in tree_summary["Resin"].unique():
         graph.node(leaf_id, f"<{leaf_html}>")
         graph.edge(resin_id, leaf_id)
 
-# Render lên giao diện App Streamlit
 st.graphviz_chart(graph, use_container_width=True)
 # =========================================================
 # 6. SATURATION ANALYSIS - MATPLOTLIB
