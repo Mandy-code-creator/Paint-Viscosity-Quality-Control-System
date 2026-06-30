@@ -47,7 +47,6 @@ st.sidebar.header("🔍 Hierarchy Filters")
 if "塗裝位置" not in group_a.columns:
     group_a["塗裝位置"] = "Unknown"
 
-# Cập nhật logic gộp nhóm tại đây
 pos_mapping = {
     "TP": "Primer", "正底漆": "Primer",
     "BP": "Primer", "背底漆": "Primer",
@@ -55,12 +54,17 @@ pos_mapping = {
     "BF": "Back Finish", "背面漆": "Back Finish"
 }
 
-group_a["Position_UI"] = group_a["塗裝位置"].map(pos_mapping).fillna(group_a["塗裝位置"])
+group_a["Position_UI"] = group_a["塗裝位置"].map(pos_mapping).fillna(
+    group_a["塗裝位置"]
+)
 
 for col in ["Vendor", "Resin", "Solvent_Type"]:
     if col not in group_a.columns:
         group_a[col] = "Unknown"
 
+# -------------------------
+# 1. Vendor Filter
+# -------------------------
 vendor_list = sorted(group_a["Vendor"].dropna().unique().tolist())
 
 if not vendor_list:
@@ -69,21 +73,59 @@ if not vendor_list:
 
 selected_vendor = st.sidebar.selectbox("Select Vendor:", vendor_list)
 
-# Danh sách Position_UI bây giờ sẽ chỉ còn: All Positions, Primer, Top Finish, Back Finish
-position_list = ["All Positions"] + sorted(group_a["Position_UI"].dropna().unique().tolist())
-selected_position = st.sidebar.selectbox("Select Coating Position:", position_list)
+# Lọc Vendor trước để danh sách Resin chỉ hiện Resin thuộc Vendor đã chọn
+vendor_df = group_a[group_a["Vendor"] == selected_vendor].copy()
 
-filtered_df = group_a[group_a["Vendor"] == selected_vendor].copy()
+# -------------------------
+# 2. Resin Filter - NEW
+# -------------------------
+resin_filter_list = ["All Resins"] + sorted(
+    vendor_df["Resin"].dropna().unique().tolist()
+)
+
+selected_resin_filter = st.sidebar.selectbox(
+    "Select Resin Group:",
+    resin_filter_list
+)
+
+# Lọc Resin theo lựa chọn
+if selected_resin_filter != "All Resins":
+    vendor_df = vendor_df[
+        vendor_df["Resin"] == selected_resin_filter
+    ].copy()
+
+# -------------------------
+# 3. Coating Position Filter
+# -------------------------
+position_list = ["All Positions"] + sorted(
+    vendor_df["Position_UI"].dropna().unique().tolist()
+)
+
+selected_position = st.sidebar.selectbox(
+    "Select Coating Position:",
+    position_list
+)
+
+# Data chính dùng cho toàn bộ phân tích phía dưới
+filtered_df = vendor_df.copy()
 
 if selected_position != "All Positions":
-    filtered_df = filtered_df[filtered_df["Position_UI"] == selected_position].copy()
+    filtered_df = filtered_df[
+        filtered_df["Position_UI"] == selected_position
+    ].copy()
 
 # Enforce Grade A-B filter logic
 if "Grade" in filtered_df.columns:
-    filtered_df = filtered_df[filtered_df["Grade"].isin(["A", "B", "A-B"])].copy()
+    filtered_df = filtered_df[
+        filtered_df["Grade"].isin(["A", "B", "A-B"])
+    ].copy()
 
 if filtered_df.empty:
-    st.warning(f"⚠️ No valid data available for {selected_vendor} at {selected_position}.")
+    st.warning(
+        f"⚠️ No valid data available for Vendor: {selected_vendor}, "
+        f"Resin: {selected_resin_filter}, "
+        f"Position: {selected_position}."
+    )
     st.stop()
 
 # =========================================================
