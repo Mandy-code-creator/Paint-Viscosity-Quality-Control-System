@@ -462,98 +462,54 @@ else:
         alert_color = "red" 
 
         if abs(stop_ratio - warning_ratio) < 0.2:
-            ax.axvline(
-                stop_ratio,
-                color=alert_color,
-                linestyle="--",
-                linewidth=2.2
-            )
-            ax.axvspan(
-                stop_ratio,
-                x_max,
-                color=alert_color,
-                alpha=0.10
-            )
+            ax.axvline(stop_ratio, color=alert_color, linestyle="--", linewidth=2.2)
+            ax.axvspan(stop_ratio, x_max, color=alert_color, alpha=0.10)
+            
+            # Đặt chữ gọn gàng sát phía trên cùng bên phải của đường kẻ
             ax.annotate(
                 f"Saturation Limit: {stop_ratio:.1f}%",
-                xy=(stop_ratio, y_max_orig),
-                xytext=(1.05, 0.85),
-                textcoords="axes fraction",
+                xy=(stop_ratio, y_max_orig + (y_range * 0.08)), 
+                xytext=(8, 0), 
+                textcoords="offset points",
                 color=alert_color,
                 fontsize=10,
                 fontweight="bold",
                 va="center",
                 ha="left",
-                arrowprops=dict(
-                    arrowstyle="->", 
-                    color=alert_color, 
-                    lw=1.5, 
-                    connectionstyle="arc3,rad=-0.2"
-                ),
-                annotation_clip=False
+                bbox=dict(facecolor="white", edgecolor=alert_color, boxstyle="round,pad=0.3", alpha=0.9)
             )
         else:
-            ax.axvline(
-                warning_ratio,
-                color=alert_color,
-                linestyle=":",
-                linewidth=2
-            )
-            ax.axvline(
-                stop_ratio,
-                color=alert_color,
-                linestyle="--",
-                linewidth=2.2
-            )
-            ax.axvspan(
-                warning_ratio,
-                stop_ratio,
-                color=alert_color,
-                alpha=0.05
-            )
-            ax.axvspan(
-                stop_ratio,
-                x_max,
-                color=alert_color,
-                alpha=0.10
-            )
+            ax.axvline(warning_ratio, color=alert_color, linestyle=":", linewidth=2)
+            ax.axvline(stop_ratio, color=alert_color, linestyle="--", linewidth=2.2)
+            ax.axvspan(warning_ratio, stop_ratio, color=alert_color, alpha=0.05)
+            ax.axvspan(stop_ratio, x_max, color=alert_color, alpha=0.10)
             
+            # Chữ Warning nằm bên trái đường Warning
             ax.annotate(
                 f"Warning: {warning_ratio:.1f}%",
-                xy=(warning_ratio, y_max_orig * 0.95),
-                xytext=(1.05, 0.75),
-                textcoords="axes fraction",
+                xy=(warning_ratio, y_max_orig + (y_range * 0.08)),
+                xytext=(-8, 0), 
+                textcoords="offset points",
                 color=alert_color,
                 fontsize=10,
                 fontweight="bold",
                 va="center",
-                ha="left",
-                arrowprops=dict(
-                    arrowstyle="->", 
-                    color=alert_color, 
-                    lw=1.5, 
-                    connectionstyle="arc3,rad=-0.2"
-                ),
-                annotation_clip=False
+                ha="right",
+                bbox=dict(facecolor="white", edgecolor="none", alpha=0.8)
             )
             
+            # Chữ Stop nằm bên phải đường Stop
             ax.annotate(
                 f"Stop: {stop_ratio:.1f}%",
-                xy=(stop_ratio, y_max_orig * 0.85),
-                xytext=(1.05, 0.85),
-                textcoords="axes fraction",
+                xy=(stop_ratio, y_max_orig + (y_range * 0.08)),
+                xytext=(8, 0), 
+                textcoords="offset points",
                 color=alert_color,
                 fontsize=10,
                 fontweight="bold",
                 va="center",
                 ha="left",
-                arrowprops=dict(
-                    arrowstyle="->", 
-                    color=alert_color, 
-                    lw=1.5, 
-                    connectionstyle="arc3,rad=-0.2"
-                ),
-                annotation_clip=False
+                bbox=dict(facecolor="white", edgecolor=alert_color, boxstyle="round,pad=0.3", alpha=0.9)
             )
 
         ax.text(
