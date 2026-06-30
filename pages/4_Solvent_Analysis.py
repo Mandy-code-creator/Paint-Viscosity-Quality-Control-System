@@ -358,7 +358,7 @@ for resin in tree_summary["Resin"].unique():
             <TR>
                 <TD ALIGN="CENTER" BGCOLOR="white" STYLE="ROUNDED" BORDER="1" COLOR="#CCCCCC">
                     <FONT COLOR="#333333" POINT-SIZE="10"><B>SOLVENT: {solvent}</B></FONT><BR/>
-                    <FONT COLOR="#888888" POINT-SIZE="8">B4: {row["Avg_Visc_Before"]:.1f}s | Aft: {row["Avg_Visc_After"]:.1f}s</FONT><BR/>
+                    <FONT COLOR="#555555" POINT-SIZE="9">Visc: {row["Avg_Visc_Before"]:.1f}s &rarr; {row["Avg_Visc_After"]:.1f}s</FONT><BR/>
                     <FONT COLOR="#00BFFF" POINT-SIZE="9"><B>Opt. Eff: {row["Opt_Eff"]:.2f} s/%</B></FONT><BR/>
                     <FONT COLOR="#D9534F" POINT-SIZE="9"><B>Sat. Limit: {sat_limit_display}</B></FONT>
                 </TD>
