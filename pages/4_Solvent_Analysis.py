@@ -21,7 +21,7 @@ st.set_page_config(
 st.title("🌳 Solvent Consumption Hierarchy")
 st.markdown(
     "Coil-level analysis of solvent utilization mapping from Vendor "
-    "to specific Resin and Solvent types."
+    "to specific Resin, Coating Position, and Solvent types."
 )
 
 # =========================================================
@@ -38,9 +38,21 @@ if group_a.empty:
     st.stop()
 
 # =========================================================
-# 2. SIDEBAR FILTERS
+# 2. SIDEBAR FILTERS & DATA MAPPING
 # =========================================================
 st.sidebar.header("🔍 Hierarchy Filters")
+
+# Chuẩn hóa và dịch cột Vị trí phủ sang tiếng Anh
+if "塗裝位置" not in group_a.columns:
+    group_a["塗裝位置"] = "Unknown"
+
+pos_mapping = {
+    "TP": "Top Primer", "正底漆": "Top Primer",
+    "TF": "Top Finish", "正面漆": "Top Finish",
+    "BP": "Back Primer", "背底漆": "Back Primer",
+    "BF": "Back Finish", "背面漆": "Back Finish"
+}
+group_a["Position_UI"] = group_a["塗裝位置"].map(pos_mapping).fillna(group_a["塗裝位置"])
 
 for col in ["Vendor", "Resin", "Solvent_Type"]:
     if col not in group_a.columns:
@@ -52,23 +64,22 @@ if not vendor_list:
     st.warning("⚠️ No Vendor data available.")
     st.stop()
 
-selected_vendor = st.sidebar.selectbox(
-    "Select Vendor:",
-    vendor_list
-)
+selected_vendor = st.sidebar.selectbox("Select Vendor:", vendor_list)
 
-filtered_df = group_a[
-    group_a["Vendor"] == selected_vendor
-].copy()
+position_list = ["All Positions"] + sorted(group_a["Position_UI"].dropna().unique().tolist())
+selected_position = st.sidebar.selectbox("Select Coating Position:", position_list)
+
+filtered_df = group_a[group_a["Vendor"] == selected_vendor].copy()
+
+if selected_position != "All Positions":
+    filtered_df = filtered_df[filtered_df["Position_UI"] == selected_position].copy()
 
 # Enforce Grade A-B filter logic
 if "Grade" in filtered_df.columns:
-    filtered_df = filtered_df[
-        filtered_df["Grade"].isin(["A", "B", "A-B"])
-    ].copy()
+    filtered_df = filtered_df[filtered_df["Grade"].isin(["A", "B", "A-B"])].copy()
 
 if filtered_df.empty:
-    st.warning(f"⚠️ No valid data available for {selected_vendor}.")
+    st.warning(f"⚠️ No valid data available for {selected_vendor} at {selected_position}.")
     st.stop()
 
 # =========================================================
@@ -77,16 +88,11 @@ if filtered_df.empty:
 required_cols = ["塗料重量", "添加重量", "黏度(秒)", "黏度(秒)_1"]
 
 if not all(col in filtered_df.columns for col in required_cols):
-    st.error(
-        f"❌ Missing required columns: {', '.join(required_cols)}"
-    )
+    st.error(f"❌ Missing required columns: {', '.join(required_cols)}")
     st.stop()
 
 for col in required_cols:
-    filtered_df[col] = pd.to_numeric(
-        filtered_df[col],
-        errors="coerce"
-    )
+    filtered_df[col] = pd.to_numeric(filtered_df[col], errors="coerce")
 
 # Keep valid dilution records only
 filtered_df = filtered_df[
@@ -100,44 +106,22 @@ if filtered_df.empty:
     st.stop()
 
 # Viscosity reduction
-filtered_df["Delta_V"] = (
-    filtered_df["黏度(秒)"] - filtered_df["黏度(秒)_1"]
-)
+filtered_df["Delta_V"] = filtered_df["黏度(秒)"] - filtered_df["黏度(秒)_1"]
 
 # Include 120 kg operating paint inside line
-filtered_df["Dilution_Base_kg"] = (
-    filtered_df["塗料重量"] + 120
-)
+filtered_df["Dilution_Base_kg"] = filtered_df["塗料重量"] + 120
 
 # Solvent blending ratio (%)
-filtered_df["Solvent_Ratio_Percent"] = (
-    filtered_df["添加重量"]
-    / filtered_df["Dilution_Base_kg"]
-) * 100
+filtered_df["Solvent_Ratio_Percent"] = (filtered_df["添加重量"] / filtered_df["Dilution_Base_kg"]) * 100
 
 # kg solvent required for each 1-second viscosity reduction
-filtered_df["Kg_per_1s"] = (
-    filtered_df["添加重量"]
-    / filtered_df["Delta_V"]
-)
+filtered_df["Kg_per_1s"] = filtered_df["添加重量"] / filtered_df["Delta_V"]
 
-# Dilution efficiency:
-# viscosity reduction achieved by each 1% solvent ratio
-filtered_df["Dilution_Efficiency"] = (
-    filtered_df["Delta_V"]
-    / filtered_df["Solvent_Ratio_Percent"]
-)
+# Dilution efficiency
+filtered_df["Dilution_Efficiency"] = filtered_df["Delta_V"] / filtered_df["Solvent_Ratio_Percent"]
 
-filtered_df = filtered_df.replace(
-    [np.inf, -np.inf],
-    np.nan
-).dropna(
-    subset=[
-        "Solvent_Ratio_Percent",
-        "Delta_V",
-        "Kg_per_1s",
-        "Dilution_Efficiency"
-    ]
+filtered_df = filtered_df.replace([np.inf, -np.inf], np.nan).dropna(
+    subset=["Solvent_Ratio_Percent", "Delta_V", "Kg_per_1s", "Dilution_Efficiency"]
 )
 
 if filtered_df.empty:
@@ -145,13 +129,9 @@ if filtered_df.empty:
     st.stop()
 
 # =========================================================
+# 4. HIERARCHY SUMMARY (ADVANCED LOGIC WITH COATING POSITION)
 # =========================================================
-# 4. HIERARCHY SUMMARY (ADVANCED OPTIMAL & SATURATION LOGIC)
-# =========================================================
-
-# 4.1 Define Helper Function for Optimal Efficiency and Saturation
 def calculate_advanced_metrics(group):
-    # Fallback for insufficient data
     if len(group) < 5:
         return pd.Series({
             "Opt_Eff": group["Dilution_Efficiency"].median(), 
@@ -164,10 +144,7 @@ def calculate_advanced_metrics(group):
 
     df_calc = group.copy()
     df_calc["Ratio_Bin"] = pd.cut(
-        df_calc["Solvent_Ratio_Percent"],
-        bins=bins,
-        labels=labels,
-        include_lowest=True
+        df_calc["Solvent_Ratio_Percent"], bins=bins, labels=labels, include_lowest=True
     )
 
     summary = df_calc.groupby("Ratio_Bin", observed=False).agg(
@@ -176,8 +153,6 @@ def calculate_advanced_metrics(group):
     ).reset_index()
 
     summary["Ratio_Midpoint"] = midpoints
-
-    # Filter valid bins
     summary = summary[summary["Records"] >= 3].copy()
 
     if summary.empty:
@@ -186,12 +161,10 @@ def calculate_advanced_metrics(group):
             "Sat_Limit": group["Solvent_Ratio_Percent"].max()
         })
 
-    # Calculate Baseline (Optimal) and Stop Limit (Saturation)
     baseline_eff = summary["Median_Efficiency"].iloc[0]
     summary["Efficiency_Retention_Percent"] = (summary["Median_Efficiency"] / baseline_eff) * 100
 
     stop_rows = summary[summary["Efficiency_Retention_Percent"] <= 50]
-    
     stop_ratio = (
         stop_rows["Ratio_Midpoint"].iloc[0]
         if not stop_rows.empty
@@ -203,10 +176,8 @@ def calculate_advanced_metrics(group):
         "Sat_Limit": stop_ratio
     })
 
-# 4.2 Basic Aggregation
 tree_base = filtered_df.groupby(
-    ["Resin", "Solvent_Type"],
-    observed=False
+    ["Resin", "Position_UI", "Solvent_Type"], observed=False
 ).agg(
     Total_Paint=("塗料重量", "sum"),
     Total_Solvent=("添加重量", "sum"),
@@ -214,60 +185,35 @@ tree_base = filtered_df.groupby(
     Avg_Visc_After=("黏度(秒)_1", "mean")
 ).reset_index()
 
-# 4.3 Advanced Metrics Aggregation
 advanced_metrics = filtered_df.groupby(
-    ["Resin", "Solvent_Type"],
-    observed=False
+    ["Resin", "Position_UI", "Solvent_Type"], observed=False
 ).apply(calculate_advanced_metrics).reset_index()
 
-# 4.4 Merge Data
-tree_summary = pd.merge(tree_base, advanced_metrics, on=["Resin", "Solvent_Type"])
+tree_summary = pd.merge(tree_base, advanced_metrics, on=["Resin", "Position_UI", "Solvent_Type"])
 
-tree_summary = tree_summary[
-    tree_summary["Total_Paint"] > 0
-].sort_values(
-    by="Total_Paint",
-    ascending=False
+tree_summary = tree_summary[tree_summary["Total_Paint"] > 0].sort_values(
+    by=["Resin", "Total_Paint"], ascending=[True, False]
 )
 
 if tree_summary.empty:
     st.warning("⚠️ No valid paint consumption data available.")
     st.stop()
 
-
 # =========================================================
+# 5. GRAPHVIZ HIERARCHY (4-LEVEL STABLE LAYOUT)
 # =========================================================
-# =========================================================
-# 5. GRAPHVIZ HIERARCHY (STABLE LAYOUT & NORMAL FONT)
-# =========================================================
-import graphviz
-import pandas as pd
-import streamlit as st
-
 graph = graphviz.Digraph(engine="dot")
 
-# Trả lại tỷ lệ chuẩn để Graphviz không bị tính toán sai bounding box
 graph.attr(
     rankdir="LR",
     splines="curved",
-    nodesep="0.25",   
-    ranksep="0.8",    
+    nodesep="0.2",   
+    ranksep="0.6",    
     bgcolor="transparent"
 )
 
-graph.attr(
-    "node",
-    shape="none",
-    margin="0",
-    fontname="Arial"
-)
-
-graph.attr(
-    "edge",
-    color="#B0B0B0",
-    penwidth="1.2",
-    arrowsize="0.7"
-)
+graph.attr("node", shape="none", margin="0", fontname="Arial")
+graph.attr("edge", color="#B0B0B0", penwidth="1.2", arrowsize="0.7")
 
 total_vendor_paint = tree_summary["Total_Paint"].sum()
 total_vendor_solv = tree_summary["Total_Solvent"].sum()
@@ -276,15 +222,11 @@ total_dilution_base = filtered_df["Dilution_Base_kg"].sum()
 
 avg_solvent_ratio = (
     total_vendor_solv / total_dilution_base * 100
-    if total_dilution_base > 0
-    else 0
+    if total_dilution_base > 0 else 0
 )
 
 date_range_str = "All Available Data"
-date_cols = [
-    col for col in filtered_df.columns
-    if "date" in col.lower() or "日期" in col.lower() or "time" in col.lower()
-]
+date_cols = [col for col in filtered_df.columns if "date" in col.lower() or "日期" in col.lower() or "time" in col.lower()]
 
 if date_cols:
     try:
@@ -302,8 +244,7 @@ if date_cols:
     except Exception:
         date_range_str = "All Available Data"
 
-
-# --- ROOT NODE (VENDOR) ---
+# --- LEVEL 0: ROOT NODE (VENDOR) ---
 center_html = f"""<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="6">
   <TR>
     <TD BGCOLOR="#00BFFF" STYLE="ROUNDED" ALIGN="CENTER">
@@ -322,8 +263,7 @@ center_html = f"""<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="
 </TABLE>"""
 graph.node("Root", f"<{center_html}>")
 
-
-# --- RESIN AND SOLVENT LEAVES ---
+# --- LEVEL 1, 2 & 3: RESIN -> POSITION -> SOLVENT ---
 for resin in tree_summary["Resin"].unique():
     resin_id = f"resin_{resin}"
     resin_data = tree_summary[tree_summary["Resin"] == resin].copy()
@@ -331,7 +271,7 @@ for resin in tree_summary["Resin"].unique():
     resin_paint_sum = resin_data["Total_Paint"].sum()
     resin_solvent_sum = resin_data["Total_Solvent"].sum()
 
-    resin_html = f"""<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="6">
+    resin_html = f"""<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5">
       <TR>
         <TD BGCOLOR="#E6F2FF" STYLE="ROUNDED" BORDER="1" COLOR="#00BFFF" ALIGN="CENTER">
           <FONT COLOR="#005A9E" POINT-SIZE="11"><B>RESIN: {resin}</B></FONT><BR/>
@@ -343,26 +283,44 @@ for resin in tree_summary["Resin"].unique():
     graph.node(resin_id, f"<{resin_html}>")
     graph.edge("Root", resin_id)
 
-    for idx, row in resin_data.iterrows():
-        solvent = row["Solvent_Type"]
-        leaf_id = f"leaf_{resin}_{solvent}_{idx}"
-
-        sat_limit_display = f"{row['Sat_Limit']:.1f}%" if pd.notna(row["Sat_Limit"]) else "N/A"
-
-        leaf_html = f"""<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="6">
+    for pos in resin_data["Position_UI"].unique():
+        pos_id = f"pos_{resin}_{pos}"
+        pos_data = resin_data[resin_data["Position_UI"] == pos].copy()
+        
+        pos_paint_sum = pos_data["Total_Paint"].sum()
+        
+        pos_html = f"""<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4">
           <TR>
-            <TD ALIGN="CENTER" BGCOLOR="white" STYLE="ROUNDED" BORDER="1" COLOR="#CCCCCC">
-              <FONT COLOR="#333333" POINT-SIZE="11"><B>SOLVENT: {solvent}</B></FONT><BR/>
-              <FONT COLOR="#555555" POINT-SIZE="10">Visc: {row["Avg_Visc_Before"]:.1f}s &rarr; {row["Avg_Visc_After"]:.1f}s</FONT><BR/>
-              <FONT COLOR="#00BFFF" POINT-SIZE="10"><B>Opt. Eff: {row["Opt_Eff"]:.2f} s/%</B></FONT><BR/>
-              <FONT COLOR="#D9534F" POINT-SIZE="10"><B>Sat. Limit: {sat_limit_display}</B></FONT>
+            <TD BGCOLOR="#FFF7ED" STYLE="ROUNDED" BORDER="1" COLOR="#F97316" ALIGN="CENTER">
+              <FONT COLOR="#C2410C" POINT-SIZE="10"><B>POS: {pos}</B></FONT><BR/>
+              <FONT COLOR="#555555" POINT-SIZE="9">{pos_paint_sum:,.0f} kg</FONT>
             </TD>
           </TR>
         </TABLE>"""
-        graph.node(leaf_id, f"<{leaf_html}>")
-        graph.edge(resin_id, leaf_id)
+        graph.node(pos_id, f"<{pos_html}>")
+        graph.edge(resin_id, pos_id)
+
+        for idx, row in pos_data.iterrows():
+            solvent = row["Solvent_Type"]
+            leaf_id = f"leaf_{resin}_{pos}_{solvent}_{idx}"
+
+            sat_limit_display = f"{row['Sat_Limit']:.1f}%" if pd.notna(row["Sat_Limit"]) else "N/A"
+
+            leaf_html = f"""<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5">
+              <TR>
+                <TD ALIGN="CENTER" BGCOLOR="white" STYLE="ROUNDED" BORDER="1" COLOR="#CCCCCC">
+                  <FONT COLOR="#333333" POINT-SIZE="10"><B>SOLVENT: {solvent}</B></FONT><BR/>
+                  <FONT COLOR="#555555" POINT-SIZE="9">Visc: {row["Avg_Visc_Before"]:.1f}s &rarr; {row["Avg_Visc_After"]:.1f}s</FONT><BR/>
+                  <FONT COLOR="#00BFFF" POINT-SIZE="9"><B>Opt. Eff: {row["Opt_Eff"]:.2f} s/%</B></FONT><BR/>
+                  <FONT COLOR="#D9534F" POINT-SIZE="9"><B>Sat. Limit: {sat_limit_display}</B></FONT>
+                </TD>
+              </TR>
+            </TABLE>"""
+            graph.node(leaf_id, f"<{leaf_html}>")
+            graph.edge(pos_id, leaf_id)
 
 st.graphviz_chart(graph, use_container_width=True)
+
 # =========================================================
 # 6. SATURATION ANALYSIS - MATPLOTLIB
 # =========================================================
@@ -375,25 +333,25 @@ st.caption(
     "viscosity reduction."
 )
 
-col1, col2 = st.columns(2)
+col1, col2, col3 = st.columns(3)
 
 with col1:
     resin_options = sorted(filtered_df["Resin"].dropna().unique().tolist())
-    selected_resin = st.selectbox(
-        "Select Resin for Saturation Analysis:",
-        resin_options,
-        key="saturation_resin"
-    )
+    selected_resin = st.selectbox("Select Resin for Saturation Analysis:", resin_options, key="sat_resin")
+
 analysis_resin_df = filtered_df[filtered_df["Resin"] == selected_resin].copy()
 
 with col2:
-    solvent_options = sorted(analysis_resin_df["Solvent_Type"].dropna().unique().tolist())
-    selected_solvent = st.selectbox(
-        "Select Solvent for Saturation Analysis:",
-        solvent_options,
-        key="saturation_solvent"
-    )
-saturation_df = analysis_resin_df[analysis_resin_df["Solvent_Type"] == selected_solvent].copy()
+    pos_options = sorted(analysis_resin_df["Position_UI"].dropna().unique().tolist())
+    selected_pos = st.selectbox("Select Position:", pos_options, key="sat_pos")
+
+analysis_pos_df = analysis_resin_df[analysis_resin_df["Position_UI"] == selected_pos].copy()
+
+with col3:
+    solvent_options = sorted(analysis_pos_df["Solvent_Type"].dropna().unique().tolist())
+    selected_solvent = st.selectbox("Select Solvent:", solvent_options, key="sat_solvent")
+
+saturation_df = analysis_pos_df[analysis_pos_df["Solvent_Type"] == selected_solvent].copy()
 
 fig_efficiency = None
 baseline_efficiency = None
@@ -403,47 +361,33 @@ baseline_range_label = "N/A"
 baseline_records = 0
 
 if len(saturation_df) < 5:
-    st.warning(
-        "⚠️ Historical records are insufficient for saturation analysis "
-        "(minimum 5 records required)."
-    )
+    st.warning("⚠️ Historical records are insufficient for saturation analysis (minimum 5 records required).")
 else:
     bins = [0, 3, 5, 7, 9, 11, np.inf]
     labels = ["0–3%", "3–5%", "5–7%", "7–9%", "9–11%", ">11%"]
     midpoints = [1.5, 4, 6, 8, 10, 12]
 
     saturation_df["Ratio_Bin"] = pd.cut(
-        saturation_df["Solvent_Ratio_Percent"],
-        bins=bins,
-        labels=labels,
-        include_lowest=True
+        saturation_df["Solvent_Ratio_Percent"], bins=bins, labels=labels, include_lowest=True
     )
 
-    efficiency_summary = saturation_df.groupby(
-        "Ratio_Bin",
-        observed=False
-    ).agg(
+    efficiency_summary = saturation_df.groupby("Ratio_Bin", observed=False).agg(
         Records=("Dilution_Efficiency", "size"),
         Median_Efficiency=("Dilution_Efficiency", "median")
     ).reset_index()
 
     efficiency_summary["Ratio_Midpoint"] = midpoints
-
-    # At least 3 records per ratio interval
     efficiency_summary = efficiency_summary[efficiency_summary["Records"] >= 3].copy()
 
     if efficiency_summary.empty:
         st.warning("⚠️ Not enough records in each solvent-ratio interval.")
     else:
         baseline_efficiency = efficiency_summary["Median_Efficiency"].iloc[0]
-        
         baseline_records = efficiency_summary["Records"].iloc[0]
         baseline_range_label = efficiency_summary["Ratio_Bin"].iloc[0]
 
         efficiency_summary["Efficiency_Retention_Percent"] = (
-            efficiency_summary["Median_Efficiency"]
-            / baseline_efficiency
-            * 100
+            efficiency_summary["Median_Efficiency"] / baseline_efficiency * 100
         )
 
         warning_rows = efficiency_summary[efficiency_summary["Efficiency_Retention_Percent"] <= 70]
@@ -452,50 +396,23 @@ else:
         ratio_p90 = saturation_df["Solvent_Ratio_Percent"].quantile(0.90)
         ratio_p95 = saturation_df["Solvent_Ratio_Percent"].quantile(0.95)
 
-        warning_ratio = (
-            warning_rows["Ratio_Midpoint"].iloc[0]
-            if not warning_rows.empty
-            else ratio_p90
-        )
-
-        stop_ratio = (
-            stop_rows["Ratio_Midpoint"].iloc[0]
-            if not stop_rows.empty
-            else ratio_p95
-        )
-
+        warning_ratio = warning_rows["Ratio_Midpoint"].iloc[0] if not warning_rows.empty else ratio_p90
+        stop_ratio = stop_rows["Ratio_Midpoint"].iloc[0] if not stop_rows.empty else ratio_p95
         stop_ratio = max(stop_ratio, warning_ratio)
 
-        # -----------------------------------------------
         # MATPLOTLIB CHART
-        # -----------------------------------------------
-        fig_efficiency, ax = plt.subplots(
-            figsize=(11.5, 5.8),
-            dpi=180
-        )
+        fig_efficiency, ax = plt.subplots(figsize=(11.5, 5.8), dpi=180)
 
         x_values = efficiency_summary["Ratio_Midpoint"]
         y_values = efficiency_summary["Median_Efficiency"]
         record_values = efficiency_summary["Records"]
 
-        ax.plot(
-            x_values,
-            y_values,
-            marker="o",
-            linewidth=2,
-            markersize=6,
-            color="#4F6DFF"
-        )
+        ax.plot(x_values, y_values, marker="o", linewidth=2, markersize=6, color="#4F6DFF")
 
         for x, y, record in zip(x_values, y_values, record_values):
             ax.annotate(
-                str(record),
-                xy=(x, y),
-                xytext=(0, 10),
-                textcoords="offset points",
-                ha="center",
-                fontsize=8,
-                color="#4A4A4A",
+                str(record), xy=(x, y), xytext=(0, 10), textcoords="offset points",
+                ha="center", fontsize=8, color="#4A4A4A",
                 bbox=dict(facecolor="white", edgecolor="none", pad=1.5, alpha=0.85)
             )
 
@@ -508,26 +425,17 @@ else:
         y_max = y_max_orig + (y_range * 0.15)
         y_min = y_min_orig - (y_range * 0.15)
         ax.set_ylim(y_min, y_max)
-        
-        fig_efficiency.subplots_adjust(right=0.75)
 
         alert_color = "red" 
 
         if abs(stop_ratio - warning_ratio) < 0.2:
             ax.axvline(stop_ratio, color=alert_color, linestyle="--", linewidth=2.2)
             ax.axvspan(stop_ratio, x_max, color=alert_color, alpha=0.10)
-            
-            # Đặt chữ gọn gàng sát phía trên cùng bên phải của đường kẻ
             ax.annotate(
                 f"Saturation Limit: {stop_ratio:.1f}%",
                 xy=(stop_ratio, y_max_orig + (y_range * 0.08)), 
-                xytext=(8, 0), 
-                textcoords="offset points",
-                color=alert_color,
-                fontsize=10,
-                fontweight="bold",
-                va="center",
-                ha="left",
+                xytext=(8, 0), textcoords="offset points", color=alert_color,
+                fontsize=10, fontweight="bold", va="center", ha="left",
                 bbox=dict(facecolor="white", edgecolor=alert_color, boxstyle="round,pad=0.3", alpha=0.9)
             )
         else:
@@ -536,64 +444,38 @@ else:
             ax.axvspan(warning_ratio, stop_ratio, color=alert_color, alpha=0.05)
             ax.axvspan(stop_ratio, x_max, color=alert_color, alpha=0.10)
             
-            # Chữ Warning nằm bên trái đường Warning
             ax.annotate(
                 f"Warning: {warning_ratio:.1f}%",
                 xy=(warning_ratio, y_max_orig + (y_range * 0.08)),
-                xytext=(-8, 0), 
-                textcoords="offset points",
-                color=alert_color,
-                fontsize=10,
-                fontweight="bold",
-                va="center",
-                ha="right",
+                xytext=(-8, 0), textcoords="offset points", color=alert_color,
+                fontsize=10, fontweight="bold", va="center", ha="right",
                 bbox=dict(facecolor="white", edgecolor="none", alpha=0.8)
             )
-            
-            # Chữ Stop nằm bên phải đường Stop
             ax.annotate(
                 f"Stop: {stop_ratio:.1f}%",
                 xy=(stop_ratio, y_max_orig + (y_range * 0.08)),
-                xytext=(8, 0), 
-                textcoords="offset points",
-                color=alert_color,
-                fontsize=10,
-                fontweight="bold",
-                va="center",
-                ha="left",
+                xytext=(8, 0), textcoords="offset points", color=alert_color,
+                fontsize=10, fontweight="bold", va="center", ha="left",
                 bbox=dict(facecolor="white", edgecolor=alert_color, boxstyle="round,pad=0.3", alpha=0.9)
             )
 
         ax.text(
             0.02, 0.04,
             "ℹ️ Note: Numbers above data points indicate the total record count.",
-            transform=ax.transAxes,
-            fontsize=9,
-            color="#333333",
-            bbox=dict(facecolor="white", edgecolor="#CCCCCC", pad=5, alpha=0.9),
-            va="bottom",
-            ha="left"
+            transform=ax.transAxes, fontsize=9, color="#333333",
+            bbox=dict(facecolor="white", edgecolor="#CCCCCC", pad=5, alpha=0.9), va="bottom", ha="left"
         )
 
         ax.set_title(
             "Dilution Efficiency vs Solvent Ratio\n"
-            f"Resin: {selected_resin} | Vendor: {selected_vendor} | Solvent: {selected_solvent}",
-            fontsize=13,
-            fontweight="bold",
-            loc="left",
-            pad=14
+            f"Resin: {selected_resin} | Position: {selected_pos} | Solvent: {selected_solvent}",
+            fontsize=13, fontweight="bold", loc="left", pad=14
         )
 
         ax.set_xlabel("Solvent Blending Ratio (%)", fontsize=10)
         ax.set_ylabel("Median Dilution Efficiency (seconds / %)", fontsize=10)
         ax.set_xlim(x_min, x_max)
-        
-        ax.grid(
-            True,
-            linestyle="--",
-            linewidth=0.6,
-            alpha=0.45
-        )
+        ax.grid(True, linestyle="--", linewidth=0.6, alpha=0.45)
 
         for spine in ax.spines.values():
             spine.set_visible(True)
@@ -604,6 +486,7 @@ else:
         fig_efficiency.tight_layout()
 
         st.pyplot(fig_efficiency, use_container_width=True)
+        plt.close(fig_efficiency)
 
         kpi1, kpi2, kpi3 = st.columns(3)
         kpi1.metric("Baseline Efficiency", f"{baseline_efficiency:.2f} s/%")
@@ -615,8 +498,8 @@ else:
             **Step 1: Coil-level Calculation**
             For every individual coil, the system evaluates solvent performance by calculating:
             * **Solvent Ratio (%)** = `[Solvent Added / (Paint Weight + 120)] × 100`
-            * **Viscosity Drop (\u0394V)** = `Viscosity Before - Viscosity After`
-            * **Dilution Efficiency** = `\u0394V / Solvent Ratio`
+            * **Viscosity Drop (ΔV)** = `Viscosity Before - Viscosity After`
+            * **Dilution Efficiency** = `ΔV / Solvent Ratio`
 
             **Step 2: Group Aggregation (Median)**
             * The system identifies the optimal starting range: **{baseline_range_label}**.
@@ -632,26 +515,13 @@ else:
 
         with st.expander("View Saturation Analysis Data"):
             display_efficiency = efficiency_summary[
-                [
-                    "Ratio_Bin",
-                    "Records",
-                    "Median_Efficiency",
-                    "Efficiency_Retention_Percent"
-                ]
+                ["Ratio_Bin", "Records", "Median_Efficiency", "Efficiency_Retention_Percent"]
             ].copy()
 
             display_efficiency.columns = [
-                "Solvent Ratio Range",
-                "Records",
-                "Median Efficiency (s/%)",
-                "Efficiency Retention (%)"
+                "Solvent Ratio Range", "Records", "Median Efficiency (s/%)", "Efficiency Retention (%)"
             ]
-
-            st.dataframe(
-                display_efficiency,
-                use_container_width=True,
-                hide_index=True
-            )
+            st.dataframe(display_efficiency, use_container_width=True, hide_index=True)
 
 # =========================================================
 # 7. WORD EXPORT - A4 FORMAT
@@ -669,7 +539,6 @@ try:
     graph_stream = io.BytesIO(graph_png)
     doc = Document()
 
-    # A4 portrait
     section = doc.sections[0]
     section.page_width = Inches(8.27)
     section.page_height = Inches(11.69)
@@ -678,11 +547,7 @@ try:
     section.left_margin = Inches(0.60)
     section.right_margin = Inches(0.60)
 
-    # Report title
-    title = doc.add_heading(
-        "Solvent Consumption & Viscosity Control Report",
-        level=0
-    )
+    title = doc.add_heading("Solvent Consumption & Viscosity Control Report", level=0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
     report_vendor = doc.add_paragraph()
@@ -693,27 +558,17 @@ try:
     report_period.alignment = WD_ALIGN_PARAGRAPH.CENTER
     report_period.add_run(f"Analysis Period: {date_range_str}")
 
-    # Figure 1: hierarchy
     doc.add_heading("1. Solvent Consumption Hierarchy", level=1)
     hierarchy_p = doc.add_paragraph()
     hierarchy_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     hierarchy_p.add_run().add_picture(graph_stream, width=Inches(7.0))
 
-    hierarchy_caption = doc.add_paragraph(
-        "Figure 1. Solvent consumption hierarchy by resin and solvent type."
-    )
+    hierarchy_caption = doc.add_paragraph("Figure 1. Solvent consumption hierarchy by resin, position, and solvent type.")
     hierarchy_caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    # Figure 2: saturation chart
     if fig_efficiency is not None:
         chart_stream = io.BytesIO()
-        fig_efficiency.savefig(
-            chart_stream,
-            format="png",
-            dpi=300,
-            bbox_inches="tight",
-            facecolor="white"
-        )
+        fig_efficiency.savefig(chart_stream, format="png", dpi=300, bbox_inches="tight", facecolor="white")
         chart_stream.seek(0)
 
         doc.add_heading("2. Dilution Efficiency & Saturation Analysis", level=1)
@@ -723,11 +578,10 @@ try:
 
         chart_caption = doc.add_paragraph(
             "Figure 2. Dilution efficiency versus solvent blending ratio "
-            f"(Resin: {selected_resin}; Solvent: {selected_solvent})."
+            f"(Resin: {selected_resin}; Position: {selected_pos}; Solvent: {selected_solvent})."
         )
         chart_caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-        # Key results table
         doc.add_heading("3. Key Results", level=1)
         result_table = doc.add_table(rows=1, cols=3)
         result_table.style = "Table Grid"
@@ -777,14 +631,8 @@ try:
     st.download_button(
         label="📄 Download A4 Word Report",
         data=doc_io,
-        file_name=(
-            f"Solvent_Viscosity_Report_"
-            f"{selected_vendor}_{selected_resin}_{selected_solvent}.docx"
-        ),
-        mime=(
-            "application/vnd.openxmlformats-officedocument."
-            "wordprocessingml.document"
-        )
+        file_name=f"Solvent_Viscosity_Report_{selected_vendor}_{selected_resin}_{selected_pos}_{selected_solvent}.docx",
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
 
 except Exception as e:
