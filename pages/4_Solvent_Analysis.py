@@ -341,11 +341,10 @@ graph.attr("edge", color="#B0B0B0", penwidth="1.2", arrowsize="0.7")
 total_vendor_paint = tree_summary["Total_Paint"].sum()
 total_vendor_solv = tree_summary["Total_Solvent"].sum()
 avg_delta_v = filtered_df["Delta_V"].mean()
-total_dilution_base = filtered_df["Dilution_Base_kg"].sum()
 
 avg_solvent_ratio = (
-    total_vendor_solv / total_dilution_base * 100
-    if total_dilution_base > 0 else 0
+    total_vendor_solv / total_vendor_paint * 100
+    if total_vendor_paint > 0 else 0
 )
 
 date_range_str = "All Available Data"
