@@ -276,6 +276,7 @@ tab1, tab2, tab3 = st.tabs([
 ])
 
 # ==========================================
+# ==========================================
 # TAB 1: PROCESS UNDERSTANDING
 # ==========================================
 with tab1:
@@ -298,6 +299,7 @@ with tab1:
         customdata=system_data[['黏度(秒)_1', 'Viscosity_Reduction']].values,
         hovertemplate='Initial: %{y:.1f}s<br>Final: %{customdata[0]:.1f}s<br>Drop: %{customdata[1]:.1f}s<extra></extra>'
     ))
+    
     # After Points
     fig_scatter.add_trace(go.Scatter(
         x=system_data['Solvent_Ratio_Percent'], y=system_data['黏度(秒)_1'], mode='markers',
@@ -306,10 +308,41 @@ with tab1:
         hovertemplate='Initial: %{customdata[0]:.1f}s<br>Final: %{y:.1f}s<br>Drop: %{customdata[1]:.1f}s<extra></extra>'
     ))
 
-    fig_scatter.update_layout(plot_bgcolor='white', height=400, margin=dict(l=40, r=40, t=30, b=30), hovermode='closest', legend=dict(orientation="h", y=1.05, x=0.5, xanchor="center"))
+    # --- BẮT ĐẦU PHẦN CẬP NHẬT TIÊU ĐỀ VÀ SỐ BATCH ---
+    batch_count = len(system_data)
+    chart_title = (
+        f"Viscosity Transition by Solvent Ratio<br>"
+        f"<sup>Resin: {master_resin} | Position: {master_pos} | Vendor: {master_vendor} | Solvent: {master_solvent} <b>(n={batch_count} batches)</b></sup>"
+    )
+
+    fig_scatter.update_layout(
+        title=dict(
+            text=chart_title,
+            x=0.5,
+            xanchor="center",
+            y=0.98,
+            yanchor="top",
+            font=dict(size=18, color="#1F3855")
+        ),
+        plot_bgcolor='white', 
+        height=450, # Tăng chiều cao tổng thể để chứa tiêu đề
+        margin=dict(l=40, r=40, t=80, b=30), # Tăng lề trên (t=80) 
+        hovermode='closest', 
+        legend=dict(
+            orientation="h", 
+            y=1.08, # Đẩy legend lên sát ngay dưới tiêu đề
+            x=0.5, 
+            xanchor="center"
+        )
+    )
+    # --- KẾT THÚC PHẦN CẬP NHẬT ---
+
     fig_scatter.update_xaxes(title="Solvent Blending Ratio (%)", showgrid=True, gridcolor='#EAEAEA', linecolor='black')
     fig_scatter.update_yaxes(title="Viscosity (seconds)", showgrid=True, gridcolor='#EAEAEA', linecolor='black')
     st.plotly_chart(fig_scatter, use_container_width=True)
+
+    col_h1, col_h2 = st.columns(2)
+    # ... (Phần code Histogram bên dưới giữ nguyên) ...
 
     col_h1, col_h2 = st.columns(2)
     
