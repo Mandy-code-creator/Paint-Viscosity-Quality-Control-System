@@ -409,12 +409,13 @@ def build_saturation_profile(df):
 # =========================================================
 master_df = process_data(st.session_state["group_a_data"])
 # =========================================================
-# DEBUG: FIND 5 RECORDS LOST BEFORE P1-P99
+# DEBUG: CHECK WHERE THE 5 RECORDS DISAPPEAR
 # =========================================================
-source_df = st.session_state["group_a_data"].copy()
-
-if "塗裝位置" not in source_df.columns:
-    source_df["塗裝位置"] = "Unknown"
+source_candidates = {
+    "raw_data": st.session_state.get("raw_data"),
+    "group_a_data": st.session_state.get("group_a_data"),
+    "master_df": master_df
+}
 
 pos_mapping = {
     "TP": "Primer", "正底漆": "Primer",
@@ -423,94 +424,46 @@ pos_mapping = {
     "BF": "Back Finish", "背面漆": "Back Finish"
 }
 
-source_df["Position_UI"] = (
-    source_df["塗裝位置"]
-    .map(pos_mapping)
-    .fillna(source_df["塗裝位置"])
-)
+debug_summary = []
 
-# Filter exactly like Excel condition first:
-excel_like_df = source_df[
-    (source_df["Resin"] == "EPOXY")
-    & (source_df["Position_UI"] == "Primer")
-    & (source_df["Vendor"] == "Yungchi")
-    & (source_df["Solvent_Type"].astype(str) == "5203")
-    & (source_df["黏度(秒)"] >= 71)
-    & (source_df["黏度(秒)"] <= 90)
-].copy()
+for source_name, temp_df in source_candidates.items():
+    if temp_df is None or temp_df.empty:
+        continue
 
-# Check which basic rule fails
-excel_like_df["Fail_Add_Weight"] = (
-    excel_like_df["添加重量"].isna()
-    | (excel_like_df["添加重量"] <= 0)
-)
+    temp_df = temp_df.copy()
 
-excel_like_df["Fail_Paint_Weight"] = (
-    excel_like_df["塗料重量"].isna()
-    | (excel_like_df["塗料重量"] <= 0)
-)
+    if "塗裝位置" not in temp_df.columns:
+        temp_df["塗裝位置"] = "Unknown"
 
-excel_like_df["Fail_Viscosity"] = (
-    excel_like_df["黏度(秒)"].isna()
-    | excel_like_df["黏度(秒)_1"].isna()
-    | (excel_like_df["黏度(秒)"] <= excel_like_df["黏度(秒)_1"])
-)
+    temp_df["Position_UI_Debug"] = (
+        temp_df["塗裝位置"]
+        .map(pos_mapping)
+        .fillna(temp_df["塗裝位置"])
+    )
 
-excel_like_df["Fail_Resin"] = excel_like_df["Resin"].isna()
-excel_like_df["Fail_Vendor"] = excel_like_df["Vendor"].isna()
-excel_like_df["Fail_Solvent"] = (
-    excel_like_df["Solvent_Type"].isna()
-    | (excel_like_df["Solvent_Type"].astype(str).str.strip() == "")
-)
+    # Ưu tiên cột Solvent_Type, nếu không có thì dùng 稀釋劑
+    solvent_col = "Solvent_Type" if "Solvent_Type" in temp_df.columns else "稀釋劑"
 
-excel_like_df["Pass_Basic_Filter"] = ~(
-    excel_like_df["Fail_Add_Weight"]
-    | excel_like_df["Fail_Paint_Weight"]
-    | excel_like_df["Fail_Viscosity"]
-    | excel_like_df["Fail_Resin"]
-    | excel_like_df["Fail_Vendor"]
-    | excel_like_df["Fail_Solvent"]
-)
+    selected = temp_df[
+        (temp_df["Resin"] == "EPOXY")
+        & (temp_df["Position_UI_Debug"] == "Primer")
+        & (temp_df["Vendor"] == "Yungchi")
+        & (temp_df[solvent_col].astype(str) == "5203")
+        & (temp_df["黏度(秒)"] >= 71)
+        & (temp_df["黏度(秒)"] <= 90)
+    ].copy()
 
-lost_before_p1p99 = excel_like_df[
-    ~excel_like_df["Pass_Basic_Filter"]
-].copy()
-
-st.write("Excel-like selected records:", len(excel_like_df))
-st.write(
-    "Passed app basic filter:",
-    excel_like_df["Pass_Basic_Filter"].sum()
-)
-st.write(
-    "Lost before P1-P99:",
-    len(lost_before_p1p99)
-)
-
-show_cols = [
-    "塗料批號",
-    "塗料編號",
-    "塗裝位置",
-    "黏度(秒)",
-    "黏度(秒)_1",
-    "添加重量",
-    "塗料重量",
-    "Solvent_Type",
-    "Resin",
-    "Vendor",
-    "Fail_Add_Weight",
-    "Fail_Paint_Weight",
-    "Fail_Viscosity",
-    "Fail_Resin",
-    "Fail_Vendor",
-    "Fail_Solvent"
-]
+    debug_summary.append({
+        "Data Stage": source_name,
+        "Record Count": len(selected),
+        "Unique Batch Count": selected["塗料批號"].nunique()
+    })
 
 st.dataframe(
-    lost_before_p1p99[show_cols],
+    pd.DataFrame(debug_summary),
     use_container_width=True,
     hide_index=True
 )
-
 
 # =========================================================
 # STATE MANAGEMENT
