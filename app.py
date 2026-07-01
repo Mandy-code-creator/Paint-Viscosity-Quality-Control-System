@@ -26,7 +26,8 @@ if "rejected_data" not in st.session_state:
 
 if "raw_data_loaded" not in st.session_state:
     st.session_state["raw_data_loaded"] = False
-
+if "raw_data" not in st.session_state:
+    st.session_state["raw_data"] = None
 
 # =========================================================
 # 3. LOAD + PROCESS FILE
@@ -50,7 +51,7 @@ def load_and_process_file(uploaded_file):
 
     group_a, rejected_data = process_and_validate(raw_df)
 
-    return group_a, rejected_data
+    return raw_df, group_a, rejected_data
 
 
 # =========================================================
@@ -78,11 +79,11 @@ with st.sidebar:
 
         try:
             with st.spinner("Processing data..."):
-                group_a, rejected_data = load_and_process_file(uploaded_file)
+                raw_df, group_a, rejected_data = load_and_process_file(uploaded_file)
 
+            st.session_state["raw_data"] = raw_df
             st.session_state["group_a_data"] = group_a
             st.session_state["rejected_data"] = rejected_data
-            st.session_state["raw_data_loaded"] = True
 
             st.rerun()
 
@@ -137,11 +138,12 @@ with st.sidebar:
         ):
 
             for key in [
-                "group_a_data",
-                "rejected_data",
-                "raw_data_loaded"
-            ]:
-                st.session_state.pop(key, None)
+            "raw_data",
+            "group_a_data",
+            "rejected_data",
+            "raw_data_loaded"
+        ]:
+            st.session_state.pop(key, None)
 
             st.cache_data.clear()
             st.rerun()
