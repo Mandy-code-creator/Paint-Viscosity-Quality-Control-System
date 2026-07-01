@@ -825,7 +825,7 @@ with tab4:
         Ratio_P95=("Solvent_Ratio_Percent", lambda x: x.quantile(0.95))
     ).reset_index()
 
-    worker_sop = worker_sop[worker_sop["Adjustment_Records"] >= 5].copy()
+    worker_sop = worker_sop[worker_sop["History_Batches"] > 30].copy()
 
     if worker_sop.empty:
         st.warning("無足夠歷史資料可建立現場參考表。每個條件組合至少需要5筆有效調整紀錄。")
