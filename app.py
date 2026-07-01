@@ -143,7 +143,7 @@ with st.sidebar:
             "rejected_data",
             "raw_data_loaded"
         ]:
-            st.session_state.pop(key, None)
+                st.session_state.pop(key, None)
 
             st.cache_data.clear()
             st.rerun()
