@@ -410,75 +410,15 @@ def build_saturation_profile(df):
 master_df = process_data(st.session_state["group_a_data"])
 # =========================================================
 # DEBUG: 5 RECORDS EXCLUDED BEFORE group_a_data
-raw_debug = st.session_state["raw_data"].copy()
-
-pos_mapping = {
-    "TP": "Primer", "正底漆": "Primer",
-    "BP": "Primer", "背底漆": "Primer",
-    "TF": "Top Finish", "正面漆": "Top Finish",
-    "BF": "Back Finish", "背面漆": "Back Finish"
-}
-
-raw_debug["Paint_Code"] = (
-    raw_debug["塗料編號"]
-    .fillna("")
-    .astype(str)
-    .str.upper()
-    .str.strip()
-)
-
-raw_debug["Solvent_Type"] = (
+KeyError: This app has encountered an error. The original error message is redacted to prevent data leaks. Full error details have been recorded in the logs (if you're on Streamlit Cloud, click on 'Manage app' in the lower right of your app).
+Traceback:
+File "/mount/src/paint-viscosity-quality-control-system/pages/1_Executive_Summary.py", line 431, in <module>
     raw_debug["稀釋劑"]
-    .fillna("")
-    .astype(str)
-    .str.upper()
-    .str.strip()
-)
-
-decoded_df = raw_debug["Paint_Code"].apply(decode_paint_code)
-
-if isinstance(decoded_df.iloc[0], (list, tuple)):
-    decoded_df = pd.DataFrame(
-        decoded_df.tolist(),
-        index=raw_debug.index
-    )
-
-decoded_df.columns = [
-    "Vendor",
-    "Resin",
-    "Feature",
-    "Color",
-    "Char_1"
-]
-
-raw_debug = pd.concat([raw_debug, decoded_df], axis=1)
-
-raw_debug["Position_UI"] = (
-    raw_debug["塗裝位置"]
-    .map(pos_mapping)
-    .fillna(raw_debug["塗裝位置"])
-)
-
-raw_selected = raw_debug[
-    (raw_debug["Resin"] == "EPOXY")
-    & (raw_debug["Position_UI"] == "Primer")
-    & (raw_debug["Vendor"] == "Yungchi")
-    & (raw_debug["Solvent_Type"].astype(str) == "5203")
-    & (raw_debug["黏度(秒)"] >= 71)
-    & (raw_debug["黏度(秒)"] <= 90)
-].copy()
-
-group_selected = st.session_state["group_a_data"][
-    (st.session_state["group_a_data"]["Resin"] == "EPOXY")
-    & (st.session_state["group_a_data"]["Position_UI"] == "Primer")
-    & (st.session_state["group_a_data"]["Vendor"] == "Yungchi")
-    & (st.session_state["group_a_data"]["Solvent_Type"].astype(str) == "5203")
-    & (st.session_state["group_a_data"]["黏度(秒)"] >= 71)
-    & (st.session_state["group_a_data"]["黏度(秒)"] <= 90)
-].copy()
-
-st.write("Raw selected:", len(raw_selected))
-st.write("Group A selected:", len(group_selected))
+    ~~~~~~~~~^^^^^^^^^^
+File "/home/adminuser/venv/lib/python3.14/site-packages/pandas/core/frame.py", line 4378, in __getitem__
+    indexer = self.columns.get_loc(key)
+File "/home/adminuser/venv/lib/python3.14/site-packages/pandas/core/indexes/base.py", line 3648, in get_loc
+    raise KeyError(key) from err
 
 # =========================================================
 # STATE MANAGEMENT
