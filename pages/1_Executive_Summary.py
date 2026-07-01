@@ -409,13 +409,9 @@ def build_saturation_profile(df):
 # =========================================================
 master_df = process_data(st.session_state["group_a_data"])
 # =========================================================
-# DEBUG: CHECK WHERE THE 5 RECORDS DISAPPEAR
+# DEBUG: 5 RECORDS EXCLUDED BEFORE group_a_data
 # =========================================================
-source_candidates = {
-    "raw_data": st.session_state.get("raw_data"),
-    "group_a_data": st.session_state.get("group_a_data"),
-    "master_df": master_df
-}
+debug_rejected = st.session_state["rejected_data"].copy()
 
 pos_mapping = {
     "TP": "Primer", "正底漆": "Primer",
@@ -424,43 +420,38 @@ pos_mapping = {
     "BF": "Back Finish", "背面漆": "Back Finish"
 }
 
-debug_summary = []
+debug_rejected["Position_UI"] = (
+    debug_rejected["塗裝位置"]
+    .map(pos_mapping)
+    .fillna(debug_rejected["塗裝位置"])
+)
 
-for source_name, temp_df in source_candidates.items():
-    if temp_df is None or temp_df.empty:
-        continue
+missing_5 = debug_rejected[
+    (debug_rejected["Resin"] == "EPOXY")
+    & (debug_rejected["Position_UI"] == "Primer")
+    & (debug_rejected["Vendor"] == "Yungchi")
+    & (debug_rejected["Solvent_Type"].astype(str) == "5203")
+    & (debug_rejected["黏度(秒)"] >= 71)
+    & (debug_rejected["黏度(秒)"] <= 90)
+].copy()
 
-    temp_df = temp_df.copy()
-
-    if "塗裝位置" not in temp_df.columns:
-        temp_df["塗裝位置"] = "Unknown"
-
-    temp_df["Position_UI_Debug"] = (
-        temp_df["塗裝位置"]
-        .map(pos_mapping)
-        .fillna(temp_df["塗裝位置"])
-    )
-
-    # Ưu tiên cột Solvent_Type, nếu không có thì dùng 稀釋劑
-    solvent_col = "Solvent_Type" if "Solvent_Type" in temp_df.columns else "稀釋劑"
-
-    selected = temp_df[
-        (temp_df["Resin"] == "EPOXY")
-        & (temp_df["Position_UI_Debug"] == "Primer")
-        & (temp_df["Vendor"] == "Yungchi")
-        & (temp_df[solvent_col].astype(str) == "5203")
-        & (temp_df["黏度(秒)"] >= 71)
-        & (temp_df["黏度(秒)"] <= 90)
-    ].copy()
-
-    debug_summary.append({
-        "Data Stage": source_name,
-        "Record Count": len(selected),
-        "Unique Batch Count": selected["塗料批號"].nunique()
-    })
+st.write("Records excluded before group_a_data:", len(missing_5))
 
 st.dataframe(
-    pd.DataFrame(debug_summary),
+    missing_5[
+        [
+            "塗料批號",
+            "塗料編號",
+            "塗裝位置",
+            "黏度(秒)",
+            "黏度(秒)_1",
+            "添加重量",
+            "塗料重量",
+            "稀釋劑",
+            "Delta_V",
+            "Reject_Reason"
+        ]
+    ],
     use_container_width=True,
     hide_index=True
 )
