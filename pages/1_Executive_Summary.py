@@ -58,14 +58,14 @@ def export_chart_to_word(
     table.style = "Table Grid"
 
     headers = [
-        "Valid Batches",
+        "Valid Paint Batches",
         "Median Sensitivity",
         "P10-P90 Ratio Range",
         "Maximum Viscosity Drop"
     ]
 
     values = [
-        f"{len(system_df):,}",
+        f"{system_df['塗料批號'].nunique():,}",
         f"{system_df['Sensitivity'].median():.2f} s/%",
         (
             f"{system_df['Solvent_Ratio_Percent'].quantile(0.10):.1f}%"
@@ -238,15 +238,90 @@ def process_data(df):
     if data.empty:
         return data
 
+    # =====================================================
+    # BATCH-LEVEL CONSOLIDATION
+    # One paint batch (塗料批號) = one complete adjustment result.
+    # For a batch with multiple adjustment records:
+    # - Initial viscosity = first valid record before adjustment
+    # - Final viscosity = final valid record after adjustment
+    # - Added solvent = total solvent added across the full batch
+    # =====================================================
+    if "攪拌日期" in data.columns:
+        data["攪拌日期"] = pd.to_datetime(
+            data["攪拌日期"],
+            errors="coerce"
+        )
+    else:
+        data["攪拌日期"] = pd.NaT
+
+    # Preserve original source order when multiple records share a date
+    data["_row_order"] = np.arange(len(data))
+
+    batch_group_cols = [
+        "Resin",
+        "Position_UI",
+        "Vendor",
+        "Solvent_Type",
+        "塗料批號"
+    ]
+
+    data = data.sort_values(
+        by=batch_group_cols + ["攪拌日期", "_row_order"],
+        na_position="last"
+    ).copy()
+
+    def summarize_one_batch(batch_df):
+        batch_df = batch_df.sort_values(
+            by=["攪拌日期", "_row_order"],
+            na_position="last"
+        )
+
+        return pd.Series({
+            # First viscosity before the first solvent adjustment
+            "黏度(秒)": batch_df["黏度(秒)"].iloc[0],
+            # Final viscosity after the final solvent adjustment
+            "黏度(秒)_1": batch_df["黏度(秒)_1"].iloc[-1],
+            # Total solvent added across all records in this paint batch
+            "添加重量": batch_df["添加重量"].sum(),
+            # Paint weight is normally constant; median protects against input variation
+            "塗料重量": batch_df["塗料重量"].median(),
+            "Adjustment_Count": len(batch_df)
+        })
+
+    data = (
+        data.groupby(
+            batch_group_cols,
+            sort=False,
+            observed=False
+        )
+        .apply(summarize_one_batch, include_groups=False)
+        .reset_index()
+    )
+
+    data = data.dropna(
+        subset=[
+            "黏度(秒)",
+            "黏度(秒)_1",
+            "添加重量",
+            "塗料重量"
+        ]
+    ).copy()
+
+    # Recalculate all metrics at paint-batch level
     data["Delta_V"] = data["黏度(秒)"] - data["黏度(秒)_1"]
-    data = data[data["Delta_V"] > 0]
+
+    data = data[
+        (data["Delta_V"] > 0)
+        & (data["添加重量"] > 0)
+        & (data["塗料重量"] > 0)
+    ].copy()
 
     if data.empty:
         return data
 
     # Dilution base = actual paint weight only
     data["Dilution_Base"] = data["塗料重量"]
-    
+
     data["Solvent_Ratio_Percent"] = (
         data["添加重量"] / data["Dilution_Base"]
     ) * 100
@@ -255,6 +330,10 @@ def process_data(df):
         data["Delta_V"]
         / data["Solvent_Ratio_Percent"].replace(0, np.nan)
     )
+
+    data = data.dropna(
+        subset=["Solvent_Ratio_Percent", "Sensitivity"]
+    ).copy()
 
     def assign_zone(v):
         if v <= 70:
@@ -522,12 +601,15 @@ with tab1:
     st.markdown(
         "Validate data stability before enforcing automated SOPs. "
         "*Hover over points to trace individual batches from their "
-        "Initial (Orange) to Final (Blue) state.*"
+        "Initial (Orange) to Final (Blue) state. Each point pair represents one paint batch.*"
     )
 
     c1, c2, c3, c4 = st.columns(4)
 
-    c1.metric("Valid Batches (n ≥ 30)", len(system_df))
+    c1.metric(
+        "Valid Paint Batches (n ≥ 30)",
+        system_df["塗料批號"].nunique()
+    )
 
     c2.metric(
         "Median Sensitivity",
@@ -796,14 +878,14 @@ with tab2:
                     system_df["Initial_Viscosity_Zone"] == curr_zone
                 ]
 
-                if len(zone_data) >= 5:
+                if zone_data["塗料批號"].nunique() >= 5:
                     ref_data = zone_data
-                    record_count = len(zone_data)
+                    record_count = zone_data["塗料批號"].nunique()
                     ref_source = f"Zone-Specific ({curr_zone})"
 
                 else:
                     ref_data = system_df
-                    record_count = len(system_df)
+                    record_count = system_df["塗料批號"].nunique()
                     ref_source = "Overall System Fallback"
 
                 if record_count >= 10:
