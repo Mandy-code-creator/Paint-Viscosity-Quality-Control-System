@@ -405,9 +405,52 @@ def build_saturation_profile(df):
 
 
 # =========================================================
+# =========================================================
 # LOAD DATA
 # =========================================================
-master_df = process_data(st.session_state["group_a_data"])
+group_a_data = st.session_state.get("group_a_data")
+
+if group_a_data is None or group_a_data.empty:
+    st.warning("⚠️ 請先於首頁重新上傳原始資料檔案。")
+    st.stop()
+
+master_df = process_data(group_a_data)
+
+# process_data có thể trả về空 DataFrame，
+# 若所有資料未達 n ≥ 30 或被過濾，避免後續 KeyError
+if master_df is None or master_df.empty:
+    st.warning(
+        "⚠️ 無可用歷史資料。可能原因：\n\n"
+        "1. 資料未達系統門檻（至少 30 個不同塗料批號）。\n\n"
+        "2. 資料在有效性篩選或極端值篩選後已無剩餘紀錄。\n\n"
+        "3. 請按首頁「Clear Data & Upload New File」後重新上傳。"
+    )
+    st.stop()
+
+required_columns = [
+    "Resin",
+    "Position_UI",
+    "Vendor",
+    "Solvent_Type",
+    "塗料批號",
+    "黏度(秒)",
+    "黏度(秒)_1",
+    "添加重量",
+    "塗料重量"
+]
+
+missing_columns = [
+    col for col in required_columns
+    if col not in master_df.columns
+]
+
+if missing_columns:
+    st.error(
+        "⚠️ 資料欄位不足："
+        + "、".join(missing_columns)
+    )
+    st.stop()
+
 
 # =========================================================
 # STATE MANAGEMENT
