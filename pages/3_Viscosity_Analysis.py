@@ -4,6 +4,183 @@ import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
 
+from io import BytesIO
+from docx import Document
+from docx.shared import Inches, Pt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.section import WD_ORIENT
+
+# =========================================================
+# EXPORT HISTORICAL CHART TO WORD
+# =========================================================
+def export_chart_to_word(
+    selected_resin,
+    selected_pos,
+    selected_vendor,
+    selected_solvent,
+    system_df
+):
+    doc = Document()
+
+    section = doc.sections[0]
+    section.orientation = WD_ORIENT.LANDSCAPE
+    section.page_width = Inches(11.69)
+    section.page_height = Inches(8.27)
+
+    section.top_margin = Inches(0.45)
+    section.bottom_margin = Inches(0.45)
+    section.left_margin = Inches(0.45)
+    section.right_margin = Inches(0.45)
+
+    title = doc.add_paragraph()
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    title_run = title.add_run("Historical Viscosity Transition Analysis")
+    title_run.bold = True
+    title_run.font.size = Pt(18)
+
+    subtitle = doc.add_paragraph()
+    subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    subtitle_run = subtitle.add_run(
+        f"Resin: {selected_resin} | "
+        f"Position: {selected_pos} | "
+        f"Vendor: {selected_vendor} | "
+        f"Solvent Type: {selected_solvent}"
+    )
+    subtitle_run.font.size = Pt(10)
+
+    doc.add_paragraph("")
+
+    table = doc.add_table(rows=2, cols=4)
+    table.style = "Table Grid"
+
+    headers = [
+        "Valid Batches",
+        "Median Sensitivity",
+        "P10-P90 Ratio Range",
+        "Maximum Viscosity Drop"
+    ]
+
+    values = [
+        f"{len(system_df):,}",
+        f"{system_df['Historical_Efficiency'].median():.2f} s/%",
+        (
+            f"{system_df['Solvent_Ratio_Percent'].quantile(0.10):.1f}%"
+            f" - "
+            f"{system_df['Solvent_Ratio_Percent'].quantile(0.90):.1f}%"
+        ),
+        f"{system_df['Viscosity_Reduction'].max():.1f} s"
+    ]
+
+    for i, header in enumerate(headers):
+        cell = table.cell(0, i)
+        cell.text = header
+        for paragraph in cell.paragraphs:
+            for run in paragraph.runs:
+                run.bold = True
+                run.font.size = Pt(9)
+
+    for i, value in enumerate(values):
+        cell = table.cell(1, i)
+        cell.text = value
+        for paragraph in cell.paragraphs:
+            for run in paragraph.runs:
+                run.font.size = Pt(9)
+
+    doc.add_paragraph("")
+
+    try:
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(figsize=(10.2, 5.2))
+
+        for _, row in system_df.iterrows():
+            ratio = row["Solvent_Ratio_Percent"]
+            visc_before = row["黏度(秒)"]
+            visc_after = row["黏度(秒)_1"]
+
+            ax.plot(
+                [ratio, ratio],
+                [visc_before, visc_after],
+                linestyle=":",
+                linewidth=0.8,
+                color="lightgray",
+                zorder=1
+            )
+
+        ax.scatter(
+            system_df["Solvent_Ratio_Percent"],
+            system_df["黏度(秒)"],
+            s=35,
+            color="#ED7D31",
+            edgecolors="white",
+            linewidths=0.5,
+            label="Initial Viscosity (Before)",
+            zorder=3
+        )
+
+        ax.scatter(
+            system_df["Solvent_Ratio_Percent"],
+            system_df["黏度(秒)_1"],
+            s=35,
+            color="#4472C4",
+            edgecolors="white",
+            linewidths=0.5,
+            label="Final Viscosity (After)",
+            zorder=3
+        )
+
+        ax.set_title(
+            "Viscosity Transition by Solvent Ratio\n"
+            f"Resin: {selected_resin} | Position: {selected_pos} | Vendor: {selected_vendor} | Solvent: {selected_solvent}",
+            fontsize=14,
+            fontweight="bold",
+            pad=16
+        )
+
+        ax.set_xlabel("Solvent Blending Ratio (%)", fontsize=10)
+        ax.set_ylabel("Viscosity (seconds)", fontsize=10)
+        ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.5)
+
+        ax.legend(
+            loc="upper center",
+            bbox_to_anchor=(0.5, 1.02),
+            ncol=2,
+            frameon=False
+        )
+
+        plt.tight_layout()
+
+        chart_stream = BytesIO()
+        fig.savefig(chart_stream, format="png", dpi=260, bbox_inches="tight")
+        chart_stream.seek(0)
+        plt.close(fig)
+
+        chart_paragraph = doc.add_paragraph()
+        chart_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        chart_paragraph.add_run().add_picture(chart_stream, width=Inches(9.6))
+
+    except Exception as e:
+        error_paragraph = doc.add_paragraph()
+        error_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        error_run = error_paragraph.add_run(f"\n[CHART EXPORT FAILED]\n{str(e)}")
+        error_run.bold = True
+
+    note = doc.add_paragraph()
+    note_run = note.add_run(
+        "Note: Orange points represent viscosity before solvent addition. "
+        "Blue points represent viscosity after solvent addition. "
+        "The dotted line connects the same mixing batch."
+    )
+    note_run.italic = True
+    note_run.font.size = Pt(9)
+
+    output = BytesIO()
+    doc.save(output)
+    output.seek(0)
+
+    return output.getvalue()
+
 # --- 1. PAGE CONFIGURATION ---
 st.set_page_config(page_title="Viscosity & SOP Report", page_icon="📊", layout="wide")
 st.title("📊 Viscosity Optimization & SOP Dashboard")
@@ -17,9 +194,24 @@ if not st.session_state.get('raw_data_loaded', False):
 group_a = st.session_state['group_a_data'].copy()
 group_a['Solvent_Type'] = group_a['Solvent_Type'].astype(str)
 
-# Data Normalization
+# Position Mapping
+if "塗裝位置" not in group_a.columns:
+    group_a["塗裝位置"] = "Unknown"
+
+pos_mapping = {
+    "TP": "Primer", "正底漆": "Primer",
+    "BP": "Primer", "背底漆": "Primer",
+    "TF": "Top Finish", "正面漆": "Top Finish",
+    "BF": "Back Finish", "背面漆": "Back Finish"
+}
+group_a["Position_UI"] = group_a["塗裝位置"].map(pos_mapping).fillna(group_a["塗裝位置"])
+
+# Data Normalization (Không cộng 120kg theo quy trình chuẩn)
 group_a['Solvent_Ratio_Percent'] = (group_a['添加重量'] / group_a['塗料重量'].replace(0, 1)) * 100
 group_a['Viscosity_Reduction'] = group_a['黏度(秒)'] - group_a['黏度(秒)_1']
+
+group_a = group_a[group_a['Viscosity_Reduction'] > 0].copy()
+
 group_a['Historical_Efficiency'] = group_a['Viscosity_Reduction'] / group_a['Solvent_Ratio_Percent'].replace(0, np.nan)
 
 
@@ -27,23 +219,37 @@ group_a['Historical_Efficiency'] = group_a['Viscosity_Reduction'] / group_a['Sol
 st.markdown("---")
 st.subheader("🎯 Master System Selection")
 
-valid_groups = group_a.groupby(['Resin', 'Vendor', 'Solvent_Type']).filter(lambda x: x['塗料批號'].nunique() >= 10)
+# Lọc các nhóm có >= 10 mẻ hợp lệ (Bao gồm cả Position)
+valid_groups = group_a.groupby(['Resin', 'Position_UI', 'Vendor', 'Solvent_Type']).filter(lambda x: x['塗料批號'].nunique() >= 10)
 
 if valid_groups.empty:
     st.error("❌ No groups found with 10+ historical batches. Please upload a larger dataset.")
     st.stop()
 
-col_m1, col_m2, col_m3 = st.columns(3)
+col_m1, col_m2, col_m3, col_m4 = st.columns(4)
 with col_m1:
     master_resin = st.selectbox("Select Resin:", sorted(valid_groups['Resin'].unique()))
 with col_m2:
-    master_vendor = st.selectbox("Select Vendor:", sorted(valid_groups[valid_groups['Resin'] == master_resin]['Vendor'].unique()))
+    master_pos = st.selectbox("Select Position:", sorted(valid_groups[valid_groups['Resin'] == master_resin]['Position_UI'].unique()))
 with col_m3:
-    master_solvent = st.selectbox("Select Solvent Type:", sorted(valid_groups[(valid_groups['Resin'] == master_resin) & (valid_groups['Vendor'] == master_vendor)]['Solvent_Type'].unique()))
+    master_vendor = st.selectbox(
+        "Select Vendor:", 
+        sorted(valid_groups[(valid_groups['Resin'] == master_resin) & (valid_groups['Position_UI'] == master_pos)]['Vendor'].unique())
+    )
+with col_m4:
+    master_solvent = st.selectbox(
+        "Select Solvent Type:", 
+        sorted(valid_groups[
+            (valid_groups['Resin'] == master_resin) & 
+            (valid_groups['Position_UI'] == master_pos) & 
+            (valid_groups['Vendor'] == master_vendor)
+        ]['Solvent_Type'].unique())
+    )
 
 # Extract data for the chosen system
 system_data = valid_groups[
     (valid_groups['Resin'] == master_resin) & 
+    (valid_groups['Position_UI'] == master_pos) & 
     (valid_groups['Vendor'] == master_vendor) & 
     (valid_groups['Solvent_Type'] == master_solvent)
 ].copy()
@@ -105,15 +311,13 @@ with tab1:
     fig_scatter.update_yaxes(title="Viscosity (seconds)", showgrid=True, gridcolor='#EAEAEA', linecolor='black')
     st.plotly_chart(fig_scatter, use_container_width=True)
 
-    # ĐÃ SỬA LỖI HIỂN THỊ HISTOGRAM
     col_h1, col_h2 = st.columns(2)
     
-    # Tính toán kích thước bước nhảy (step) cho trục X để đẹp nhất
     max_sol = system_data['Solvent_Ratio_Percent'].max()
-    sol_step = 1.0 if max_sol <= 25 else 2.0  # Mỗi cột đại diện cho 1%
+    sol_step = 1.0 if max_sol <= 25 else 2.0  
     
     max_drop = system_data['Viscosity_Reduction'].max()
-    drop_step = 5.0 if max_drop <= 100 else 10.0 # Mỗi cột đại diện cho 5s
+    drop_step = 5.0 if max_drop <= 100 else 10.0 
     
     with col_h1:
         st.markdown("#### 2. Histogram: Solvent Addition (%)")
@@ -123,15 +327,14 @@ with tab1:
             color_discrete_sequence=['#7030A0'],
             text_auto=True 
         )
-        # Khóa cứng độ rộng mỗi cột là 1% (hoặc 2%) để không bị vỡ vụn
         fig_hist1.update_traces(
             marker_line_color='white', marker_line_width=1, opacity=0.85,
             xbins=dict(start=0, size=sol_step)
         )
         fig_hist1.update_layout(
             plot_bgcolor='white', height=350, margin=dict(l=20, r=20, t=30, b=20),
-            bargap=0.05, # Khoảng cách nhỏ liên kết các khối
-            xaxis=dict(title="Solvent Ratio (%)", showgrid=True, gridcolor='#EAEAEA', linecolor='black', dtick=sol_step), # Trục X khớp đúng độ rộng cột
+            bargap=0.05,
+            xaxis=dict(title="Solvent Ratio (%)", showgrid=True, gridcolor='#EAEAEA', linecolor='black', dtick=sol_step),
             yaxis=dict(title="Frequency (Batches)", showgrid=True, gridcolor='#EAEAEA', linecolor='black')
         )
         st.plotly_chart(fig_hist1, use_container_width=True)
@@ -144,7 +347,6 @@ with tab1:
             color_discrete_sequence=['#2CA02C'],
             text_auto=True
         )
-        # Khóa cứng độ rộng mỗi cột là 5 giây để gom nhóm chuẩn xác
         fig_hist2.update_traces(
             marker_line_color='white', marker_line_width=1, opacity=0.85,
             xbins=dict(start=0, size=drop_step)
@@ -152,11 +354,28 @@ with tab1:
         fig_hist2.update_layout(
             plot_bgcolor='white', height=350, margin=dict(l=20, r=20, t=30, b=20),
             bargap=0.05,
-            xaxis=dict(title="Viscosity Drop (seconds)", showgrid=True, gridcolor='#EAEAEA', linecolor='black', dtick=drop_step), # Trục X nhảy theo đúng số giây
+            xaxis=dict(title="Viscosity Drop (seconds)", showgrid=True, gridcolor='#EAEAEA', linecolor='black', dtick=drop_step),
             yaxis=dict(title="Frequency (Batches)", showgrid=True, gridcolor='#EAEAEA', linecolor='black')
         )
         st.plotly_chart(fig_hist2, use_container_width=True)
 
+    # Word Export Button
+    word_data = export_chart_to_word(
+        selected_resin=master_resin,
+        selected_pos=master_pos,
+        selected_vendor=master_vendor,
+        selected_solvent=master_solvent,
+        system_df=system_data
+    )
+
+    file_name = f"Viscosity_Report_{master_resin}_{master_pos}_{master_vendor}_{master_solvent}.docx"
+
+    st.download_button(
+        label="📄 Export Historical Chart to Word",
+        data=word_data,
+        file_name=file_name,
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
 
 # ==========================================
 # TAB 2: OPTIMIZATION
@@ -232,7 +451,7 @@ with tab3:
     # Operator Inputs
     col_i1, col_i2, col_i3 = st.columns(3)
     with col_i1:
-        paint_weight = st.number_input("Paint Weight (kg):", min_value=1.0, value=120.0, step=10.0, help="Optional: Used to calculate absolute kg volume.")
+        paint_weight = st.number_input("Paint Weight in Barrel (kg):", min_value=1.0, value=100.0, step=10.0, help="Enter the exact paint weight in the mixing barrel before adding solvent.")
     with col_i2:
         current_visc = st.number_input("Current Viscosity (seconds):", min_value=1.0, value=120.0, step=1.0)
     with col_i3:
@@ -248,6 +467,8 @@ with tab3:
         st.error(f"🚨 **CRITICAL DANGER:** Target ({target_visc}s) is below the physical saturation floor ({viscosity_floor:.1f}s). Action aborted.")
     else:
         predicted_ratio_needed = delta_v_target / baseline_efficiency
+        
+        # TÍNH TOÁN THEO TRỌNG LƯỢNG SƠN THỰC TẾ TRONG THÙNG (Bỏ 120 kg)
         recommended_solvent_kg = (paint_weight * predicted_ratio_needed) / 100
         
         try:
@@ -273,7 +494,7 @@ with tab3:
             conf_color = "red"
             status_msg = "Saturation Overload Risk"
 
-        st.markdown(f"### 📊 Result for: `{master_resin} | {master_vendor} | {master_solvent}`")
+        st.markdown(f"### 📊 Result for: `{master_resin} | {master_pos} | {master_vendor} | {master_solvent}`")
         
         mc1, mc2, mc3 = st.columns(3)
         
