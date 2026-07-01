@@ -408,7 +408,71 @@ def build_saturation_profile(df):
 # LOAD DATA
 # =========================================================
 master_df = process_data(st.session_state["group_a_data"])
+# =========================================================
+# DEBUG: CHECK RECORD COUNT FOR EPOXY / PRIMER / YUNGCHI / 5203 / 71-90
+# =========================================================
+debug_df = master_df[
+    (master_df["Resin"] == "EPOXY")
+    & (master_df["Position_UI"] == "Primer")
+    & (master_df["Vendor"] == "Yungchi")
+    & (master_df["Solvent_Type"].astype(str) == "5203")
+    & (master_df["黏度(秒)"] >= 71)
+    & (master_df["黏度(秒)"] <= 90)
+].copy()
 
+st.write("Debug records in master_df:", len(debug_df))
+st.write("Debug unique paint batches:", debug_df["塗料批號"].nunique())
+
+debug_cols = [
+    "塗料批號",
+    "塗料編號",
+    "塗裝位置",
+    "黏度(秒)",
+    "黏度(秒)_1",
+    "添加重量",
+    "塗料重量",
+    "Solvent_Type",
+    "Resin",
+    "Vendor"
+]
+
+st.dataframe(
+    debug_df[debug_cols].sort_values(
+        ["塗料批號", "黏度(秒)", "黏度(秒)_1"]
+    ),
+    use_container_width=True,
+    hide_index=True
+)
+
+duplicate_check_cols = [
+    "塗料批號",
+    "塗料編號",
+    "塗裝位置",
+    "黏度(秒)",
+    "黏度(秒)_1",
+    "添加重量",
+    "塗料重量",
+    "Solvent_Type",
+    "Resin",
+    "Vendor"
+]
+
+duplicate_rows = debug_df[
+    debug_df.duplicated(
+        subset=duplicate_check_cols,
+        keep=False
+    )
+].copy()
+
+st.write("Exact duplicated records:", len(duplicate_rows))
+
+st.dataframe(
+    duplicate_rows[debug_cols].sort_values(
+        ["塗料批號", "黏度(秒)", "黏度(秒)_1"]
+    ),
+    use_container_width=True,
+    hide_index=True
+)
 if master_df.empty or "Resin" not in master_df.columns:
     st.error(
         "⚠️ No valid historical data available. All systems failed to meet "
