@@ -238,10 +238,10 @@ def process_data(df):
     if data.empty:
         return data
 
-    q01 = data.groupby(group_cols)["Sensitivity"].transform(lambda x: x.quantile(0.01))
-    q99 = data.groupby(group_cols)["Sensitivity"].transform(lambda x: x.quantile(0.99))
-
-    return data[data["Sensitivity"].between(q01, q99)].copy()
+    # Keep every valid adjustment record.
+    # P1/P99 outlier removal is intentionally not applied here so the
+    # shop-floor reference table matches the valid records filtered manually.
+    return data.copy()
 
 
 # =========================================================
