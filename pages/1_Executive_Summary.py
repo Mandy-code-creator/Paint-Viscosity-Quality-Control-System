@@ -10,7 +10,7 @@ from docx import Document
 from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.section import WD_ORIENT
-
+from modules.paint_decoder import decode_paint_code
 
 # =========================================================
 # EXPORT HISTORICAL CHART TO WORD
@@ -409,106 +409,63 @@ def build_saturation_profile(df):
 # =========================================================
 master_df = process_data(st.session_state["group_a_data"])
 # =========================================================
-# =========================================================
-# DEBUG: Raw → Group A → Master
-# =========================================================
-raw_data = st.session_state.get("raw_data")
-group_a_data = st.session_state.get("group_a_data")
+def get_target_rows(df_debug):
+    temp = df_debug.copy()
 
-if raw_data is not None and group_a_data is not None:
-    raw_debug = raw_data.copy()
-    group_debug = group_a_data.copy()
-    master_debug = master_df.copy()
+    # Raw data chưa có Resin / Vendor thì tạo từ Paint_Code
+    if "Resin" not in temp.columns or "Vendor" not in temp.columns:
+        if "Paint_Code" not in temp.columns:
+            temp["Paint_Code"] = (
+                temp["塗料編號"]
+                .fillna("")
+                .astype(str)
+                .str.upper()
+                .str.strip()
+            )
 
-    for df_debug in [raw_debug, group_debug, master_debug]:
-        df_debug.columns = df_debug.columns.astype(str).str.strip()
+        decoded = temp["Paint_Code"].apply(decode_paint_code)
 
-        if "塗裝位置" not in df_debug.columns:
-            df_debug["塗裝位置"] = ""
+        if len(decoded) > 0 and isinstance(decoded.iloc[0], (list, tuple)):
+            decoded = pd.DataFrame(
+                decoded.tolist(),
+                index=temp.index
+            )
 
-        if "Solvent_Type" not in df_debug.columns:
-            if "稀釋劑" in df_debug.columns:
-                df_debug["Solvent_Type"] = df_debug["稀釋劑"]
-            else:
-                df_debug["Solvent_Type"] = ""
-
-        df_debug["Solvent_Type"] = (
-            df_debug["Solvent_Type"]
-            .fillna("")
-            .astype(str)
-            .str.strip()
-            .str.upper()
-        )
-
-        for col in ["黏度(秒)", "黏度(秒)_1"]:
-            if col in df_debug.columns:
-                df_debug[col] = pd.to_numeric(
-                    df_debug[col],
-                    errors="coerce"
-                )
-
-        position_map = {
-            "TP": "Primer",
-            "BP": "Primer",
-            "正底漆": "Primer",
-            "背底漆": "Primer",
-            "TF": "Top Finish",
-            "正面漆": "Top Finish",
-            "BF": "Back Finish",
-            "背面漆": "Back Finish"
-        }
-
-        df_debug["Position_UI_Debug"] = (
-            df_debug["塗裝位置"]
-            .fillna("")
-            .astype(str)
-            .str.strip()
-            .map(position_map)
-            .fillna(df_debug["塗裝位置"])
-        )
-
-    def get_target_rows(df_debug):
-        return df_debug[
-            (df_debug["Resin"] == "EPOXY")
-            & (df_debug["Vendor"].astype(str).str.upper() == "YUNGCHI")
-            & (df_debug["Position_UI_Debug"] == "Primer")
-            & (df_debug["Solvent_Type"] == "5203")
-            & (df_debug["黏度(秒)"] >= 71)
-            & (df_debug["黏度(秒)"] <= 90)
-        ].copy()
-
-    raw_selected = get_target_rows(raw_debug)
-    group_selected = get_target_rows(group_debug)
-    master_selected = get_target_rows(master_debug)
-
-    debug_result = pd.DataFrame(
-        {
-            "Data Stage": [
-                "Raw Data",
-                "Valid Group A",
-                "Master DF"
-            ],
-            "Records": [
-                len(raw_selected),
-                len(group_selected),
-                len(master_selected)
-            ],
-            "Unique Paint Batches": [
-                raw_selected["塗料批號"].nunique(),
-                group_selected["塗料批號"].nunique(),
-                master_selected["塗料批號"].nunique()
+            decoded.columns = [
+                "Vendor",
+                "Resin",
+                "Feature",
+                "Color",
+                "Char_1"
             ]
-        }
+
+            temp["Vendor"] = decoded["Vendor"]
+            temp["Resin"] = decoded["Resin"]
+
+    temp["Vendor"] = (
+        temp["Vendor"]
+        .fillna("")
+        .astype(str)
+        .str.upper()
+        .str.strip()
     )
 
-    st.subheader("Debug: Raw → Group A → Master")
-    st.dataframe(
-        debug_result,
-        use_container_width=True,
-        hide_index=True
+    temp["Resin"] = (
+        temp["Resin"]
+        .fillna("")
+        .astype(str)
+        .str.upper()
+        .str.strip()
     )
-else:
-    st.warning("請先 Clear Data 後重新上傳檔案。")
+
+    return temp[
+        (temp["Resin"] == "EPOXY")
+        & (temp["Vendor"] == "YUNGCHI")
+        & (temp["Position_UI_Debug"] == "Primer")
+        & (temp["Solvent_Type"] == "5203")
+        & (temp["黏度(秒)"] >= 71)
+        & (temp["黏度(秒)"] <= 90)
+    ].copy()
 
 # =========================================================
 # STATE MANAGEMENT
