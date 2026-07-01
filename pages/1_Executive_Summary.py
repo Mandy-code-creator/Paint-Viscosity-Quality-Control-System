@@ -409,12 +409,12 @@ def build_saturation_profile(df):
 # =========================================================
 master_df = process_data(st.session_state["group_a_data"])
 # =========================================================
-# DEBUG: RAW vs OUTLIER REMOVED RECORDS
+# DEBUG: FIND 5 RECORDS LOST BEFORE P1-P99
 # =========================================================
-raw_debug = st.session_state["group_a_data"].copy()
+source_df = st.session_state["group_a_data"].copy()
 
-if "塗裝位置" not in raw_debug.columns:
-    raw_debug["塗裝位置"] = "Unknown"
+if "塗裝位置" not in source_df.columns:
+    source_df["塗裝位置"] = "Unknown"
 
 pos_mapping = {
     "TP": "Primer", "正底漆": "Primer",
@@ -423,61 +423,68 @@ pos_mapping = {
     "BF": "Back Finish", "背面漆": "Back Finish"
 }
 
-raw_debug["Position_UI"] = (
-    raw_debug["塗裝位置"]
+source_df["Position_UI"] = (
+    source_df["塗裝位置"]
     .map(pos_mapping)
-    .fillna(raw_debug["塗裝位置"])
+    .fillna(source_df["塗裝位置"])
 )
 
-# Chỉ lấy các record hợp lệ cơ bản, trước P1-P99
-raw_debug = raw_debug[
-    (raw_debug["添加重量"] > 0)
-    & (raw_debug["塗料重量"] > 0)
-    & (raw_debug["黏度(秒)"] > raw_debug["黏度(秒)_1"])
-    & (raw_debug["Resin"].notna())
-    & (raw_debug["Vendor"].notna())
-    & (raw_debug["Solvent_Type"].notna())
+# Filter exactly like Excel condition first:
+excel_like_df = source_df[
+    (source_df["Resin"] == "EPOXY")
+    & (source_df["Position_UI"] == "Primer")
+    & (source_df["Vendor"] == "Yungchi")
+    & (source_df["Solvent_Type"].astype(str) == "5203")
+    & (source_df["黏度(秒)"] >= 71)
+    & (source_df["黏度(秒)"] <= 90)
 ].copy()
 
-raw_debug["Delta_V"] = (
-    raw_debug["黏度(秒)"] - raw_debug["黏度(秒)_1"]
+# Check which basic rule fails
+excel_like_df["Fail_Add_Weight"] = (
+    excel_like_df["添加重量"].isna()
+    | (excel_like_df["添加重量"] <= 0)
 )
 
-raw_debug["Solvent_Ratio_Percent"] = (
-    raw_debug["添加重量"] / raw_debug["塗料重量"]
-) * 100
-
-raw_debug["Sensitivity"] = (
-    raw_debug["Delta_V"]
-    / raw_debug["Solvent_Ratio_Percent"].replace(0, np.nan)
+excel_like_df["Fail_Paint_Weight"] = (
+    excel_like_df["塗料重量"].isna()
+    | (excel_like_df["塗料重量"] <= 0)
 )
 
-debug_raw = raw_debug[
-    (raw_debug["Resin"] == "EPOXY")
-    & (raw_debug["Position_UI"] == "Primer")
-    & (raw_debug["Vendor"] == "Yungchi")
-    & (raw_debug["Solvent_Type"].astype(str) == "5203")
-    & (raw_debug["黏度(秒)"] >= 71)
-    & (raw_debug["黏度(秒)"] <= 90)
+excel_like_df["Fail_Viscosity"] = (
+    excel_like_df["黏度(秒)"].isna()
+    | excel_like_df["黏度(秒)_1"].isna()
+    | (excel_like_df["黏度(秒)"] <= excel_like_df["黏度(秒)_1"])
+)
+
+excel_like_df["Fail_Resin"] = excel_like_df["Resin"].isna()
+excel_like_df["Fail_Vendor"] = excel_like_df["Vendor"].isna()
+excel_like_df["Fail_Solvent"] = (
+    excel_like_df["Solvent_Type"].isna()
+    | (excel_like_df["Solvent_Type"].astype(str).str.strip() == "")
+)
+
+excel_like_df["Pass_Basic_Filter"] = ~(
+    excel_like_df["Fail_Add_Weight"]
+    | excel_like_df["Fail_Paint_Weight"]
+    | excel_like_df["Fail_Viscosity"]
+    | excel_like_df["Fail_Resin"]
+    | excel_like_df["Fail_Vendor"]
+    | excel_like_df["Fail_Solvent"]
+)
+
+lost_before_p1p99 = excel_like_df[
+    ~excel_like_df["Pass_Basic_Filter"]
 ].copy()
 
-debug_after_outlier = master_df[
-    (master_df["Resin"] == "EPOXY")
-    & (master_df["Position_UI"] == "Primer")
-    & (master_df["Vendor"] == "Yungchi")
-    & (master_df["Solvent_Type"].astype(str) == "5203")
-    & (master_df["黏度(秒)"] >= 71)
-    & (master_df["黏度(秒)"] <= 90)
-].copy()
-
-st.write("Raw valid records before P1-P99:", len(debug_raw))
-st.write("Records after P1-P99:", len(debug_after_outlier))
-st.write("Removed by P1-P99:", len(debug_raw) - len(debug_after_outlier))
-
-# Dùng index gốc để xác định record bị loại
-removed_rows = debug_raw.loc[
-    ~debug_raw.index.isin(debug_after_outlier.index)
-].copy()
+st.write("Excel-like selected records:", len(excel_like_df))
+st.write(
+    "Passed app basic filter:",
+    excel_like_df["Pass_Basic_Filter"].sum()
+)
+st.write(
+    "Lost before P1-P99:",
+    len(lost_before_p1p99)
+)
 
 show_cols = [
     "塗料批號",
@@ -487,15 +494,19 @@ show_cols = [
     "黏度(秒)_1",
     "添加重量",
     "塗料重量",
-    "Delta_V",
-    "Solvent_Ratio_Percent",
-    "Sensitivity"
+    "Solvent_Type",
+    "Resin",
+    "Vendor",
+    "Fail_Add_Weight",
+    "Fail_Paint_Weight",
+    "Fail_Viscosity",
+    "Fail_Resin",
+    "Fail_Vendor",
+    "Fail_Solvent"
 ]
 
 st.dataframe(
-    removed_rows[show_cols].sort_values(
-        ["Sensitivity", "塗料批號"]
-    ),
+    lost_before_p1p99[show_cols],
     use_container_width=True,
     hide_index=True
 )
