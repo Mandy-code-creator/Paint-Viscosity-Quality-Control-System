@@ -409,16 +409,106 @@ def build_saturation_profile(df):
 # =========================================================
 master_df = process_data(st.session_state["group_a_data"])
 # =========================================================
-# DEBUG: 5 RECORDS EXCLUDED BEFORE group_a_data
-KeyError: This app has encountered an error. The original error message is redacted to prevent data leaks. Full error details have been recorded in the logs (if you're on Streamlit Cloud, click on 'Manage app' in the lower right of your app).
-Traceback:
-File "/mount/src/paint-viscosity-quality-control-system/pages/1_Executive_Summary.py", line 431, in <module>
-    raw_debug["稀釋劑"]
-    ~~~~~~~~~^^^^^^^^^^
-File "/home/adminuser/venv/lib/python3.14/site-packages/pandas/core/frame.py", line 4378, in __getitem__
-    indexer = self.columns.get_loc(key)
-File "/home/adminuser/venv/lib/python3.14/site-packages/pandas/core/indexes/base.py", line 3648, in get_loc
-    raise KeyError(key) from err
+# =========================================================
+# DEBUG: Raw → Group A → Master
+# =========================================================
+raw_data = st.session_state.get("raw_data")
+group_a_data = st.session_state.get("group_a_data")
+
+if raw_data is not None and group_a_data is not None:
+    raw_debug = raw_data.copy()
+    group_debug = group_a_data.copy()
+    master_debug = master_df.copy()
+
+    for df_debug in [raw_debug, group_debug, master_debug]:
+        df_debug.columns = df_debug.columns.astype(str).str.strip()
+
+        if "塗裝位置" not in df_debug.columns:
+            df_debug["塗裝位置"] = ""
+
+        if "Solvent_Type" not in df_debug.columns:
+            if "稀釋劑" in df_debug.columns:
+                df_debug["Solvent_Type"] = df_debug["稀釋劑"]
+            else:
+                df_debug["Solvent_Type"] = ""
+
+        df_debug["Solvent_Type"] = (
+            df_debug["Solvent_Type"]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .str.upper()
+        )
+
+        for col in ["黏度(秒)", "黏度(秒)_1"]:
+            if col in df_debug.columns:
+                df_debug[col] = pd.to_numeric(
+                    df_debug[col],
+                    errors="coerce"
+                )
+
+        position_map = {
+            "TP": "Primer",
+            "BP": "Primer",
+            "正底漆": "Primer",
+            "背底漆": "Primer",
+            "TF": "Top Finish",
+            "正面漆": "Top Finish",
+            "BF": "Back Finish",
+            "背面漆": "Back Finish"
+        }
+
+        df_debug["Position_UI_Debug"] = (
+            df_debug["塗裝位置"]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .map(position_map)
+            .fillna(df_debug["塗裝位置"])
+        )
+
+    def get_target_rows(df_debug):
+        return df_debug[
+            (df_debug["Resin"] == "EPOXY")
+            & (df_debug["Vendor"].astype(str).str.upper() == "YUNGCHI")
+            & (df_debug["Position_UI_Debug"] == "Primer")
+            & (df_debug["Solvent_Type"] == "5203")
+            & (df_debug["黏度(秒)"] >= 71)
+            & (df_debug["黏度(秒)"] <= 90)
+        ].copy()
+
+    raw_selected = get_target_rows(raw_debug)
+    group_selected = get_target_rows(group_debug)
+    master_selected = get_target_rows(master_debug)
+
+    debug_result = pd.DataFrame(
+        {
+            "Data Stage": [
+                "Raw Data",
+                "Valid Group A",
+                "Master DF"
+            ],
+            "Records": [
+                len(raw_selected),
+                len(group_selected),
+                len(master_selected)
+            ],
+            "Unique Paint Batches": [
+                raw_selected["塗料批號"].nunique(),
+                group_selected["塗料批號"].nunique(),
+                master_selected["塗料批號"].nunique()
+            ]
+        }
+    )
+
+    st.subheader("Debug: Raw → Group A → Master")
+    st.dataframe(
+        debug_result,
+        use_container_width=True,
+        hide_index=True
+    )
+else:
+    st.warning("請先 Clear Data 後重新上傳檔案。")
 
 # =========================================================
 # STATE MANAGEMENT
