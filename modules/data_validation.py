@@ -113,39 +113,35 @@ def process_and_validate(raw_df):
     df = pd.concat([df, decoded_df], axis=1)
 
     # =========================================================
-    # 5. TẠO COIL ID
     # =========================================================
-    if 'Coil_ID' not in df.columns:
-
-        batch_no = (
-            df['塗料批號']
-            .fillna('')
-            .astype(str)
-            .str.strip()
-        )
-
-        bucket_no = (
-            df['塗料桶號']
-            .fillna('')
-            .astype(str)
-            .str.strip()
-        )
-
-        df['Coil_ID'] = batch_no + '_' + bucket_no
-
-        # Nếu không có batch hoặc bucket, dùng index làm ID
-        empty_coil_mask = (
-            df['Coil_ID'].isin([
-                '_',
-                'NAN_NAN',
-                'nan_nan',
-                ''
-            ])
-        )
-
-        df.loc[empty_coil_mask, 'Coil_ID'] = (
-            'ROW_' + df.loc[empty_coil_mask].index.astype(str)
-        )
+    # 5. TẠO PAINT BATCH + BUCKET ID
+    # =========================================================
+    batch_no = (
+        df["塗料批號"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+    )
+    
+    bucket_no = (
+        df["塗料桶號"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+    )
+    
+    df["Paint_Batch_Bucket_ID"] = batch_no + "_" + bucket_no
+    
+    empty_id_mask = df["Paint_Batch_Bucket_ID"].isin([
+        "_",
+        "NAN_NAN",
+        "nan_nan",
+        ""
+    ])
+    
+    df.loc[empty_id_mask, "Paint_Batch_Bucket_ID"] = (
+        "ROW_" + df.loc[empty_id_mask].index.astype(str)
+    )
 
     # =========================================================
     # 6. TÍNH DELTA V
