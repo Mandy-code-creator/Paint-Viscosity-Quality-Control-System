@@ -409,9 +409,59 @@ def build_saturation_profile(df):
 # =========================================================
 master_df = process_data(st.session_state["group_a_data"])
 # =========================================================
-# DEBUG: CHECK RECORD COUNT FOR EPOXY / PRIMER / YUNGCHI / 5203 / 71-90
+# DEBUG: RAW vs OUTLIER REMOVED RECORDS
 # =========================================================
-debug_df = master_df[
+raw_debug = st.session_state["group_a_data"].copy()
+
+if "塗裝位置" not in raw_debug.columns:
+    raw_debug["塗裝位置"] = "Unknown"
+
+pos_mapping = {
+    "TP": "Primer", "正底漆": "Primer",
+    "BP": "Primer", "背底漆": "Primer",
+    "TF": "Top Finish", "正面漆": "Top Finish",
+    "BF": "Back Finish", "背面漆": "Back Finish"
+}
+
+raw_debug["Position_UI"] = (
+    raw_debug["塗裝位置"]
+    .map(pos_mapping)
+    .fillna(raw_debug["塗裝位置"])
+)
+
+# Chỉ lấy các record hợp lệ cơ bản, trước P1-P99
+raw_debug = raw_debug[
+    (raw_debug["添加重量"] > 0)
+    & (raw_debug["塗料重量"] > 0)
+    & (raw_debug["黏度(秒)"] > raw_debug["黏度(秒)_1"])
+    & (raw_debug["Resin"].notna())
+    & (raw_debug["Vendor"].notna())
+    & (raw_debug["Solvent_Type"].notna())
+].copy()
+
+raw_debug["Delta_V"] = (
+    raw_debug["黏度(秒)"] - raw_debug["黏度(秒)_1"]
+)
+
+raw_debug["Solvent_Ratio_Percent"] = (
+    raw_debug["添加重量"] / raw_debug["塗料重量"]
+) * 100
+
+raw_debug["Sensitivity"] = (
+    raw_debug["Delta_V"]
+    / raw_debug["Solvent_Ratio_Percent"].replace(0, np.nan)
+)
+
+debug_raw = raw_debug[
+    (raw_debug["Resin"] == "EPOXY")
+    & (raw_debug["Position_UI"] == "Primer")
+    & (raw_debug["Vendor"] == "Yungchi")
+    & (raw_debug["Solvent_Type"].astype(str) == "5203")
+    & (raw_debug["黏度(秒)"] >= 71)
+    & (raw_debug["黏度(秒)"] <= 90)
+].copy()
+
+debug_after_outlier = master_df[
     (master_df["Resin"] == "EPOXY")
     & (master_df["Position_UI"] == "Primer")
     & (master_df["Vendor"] == "Yungchi")
@@ -420,66 +470,35 @@ debug_df = master_df[
     & (master_df["黏度(秒)"] <= 90)
 ].copy()
 
-st.write("Debug records in master_df:", len(debug_df))
-st.write("Debug unique paint batches:", debug_df["塗料批號"].nunique())
+st.write("Raw valid records before P1-P99:", len(debug_raw))
+st.write("Records after P1-P99:", len(debug_after_outlier))
+st.write("Removed by P1-P99:", len(debug_raw) - len(debug_after_outlier))
 
-debug_cols = [
-    "塗料批號",
-    "塗料編號",
-    "塗裝位置",
-    "黏度(秒)",
-    "黏度(秒)_1",
-    "添加重量",
-    "塗料重量",
-    "Solvent_Type",
-    "Resin",
-    "Vendor"
-]
-
-st.dataframe(
-    debug_df[debug_cols].sort_values(
-        ["塗料批號", "黏度(秒)", "黏度(秒)_1"]
-    ),
-    use_container_width=True,
-    hide_index=True
-)
-
-duplicate_check_cols = [
-    "塗料批號",
-    "塗料編號",
-    "塗裝位置",
-    "黏度(秒)",
-    "黏度(秒)_1",
-    "添加重量",
-    "塗料重量",
-    "Solvent_Type",
-    "Resin",
-    "Vendor"
-]
-
-duplicate_rows = debug_df[
-    debug_df.duplicated(
-        subset=duplicate_check_cols,
-        keep=False
-    )
+# Dùng index gốc để xác định record bị loại
+removed_rows = debug_raw.loc[
+    ~debug_raw.index.isin(debug_after_outlier.index)
 ].copy()
 
-st.write("Exact duplicated records:", len(duplicate_rows))
+show_cols = [
+    "塗料批號",
+    "塗料編號",
+    "塗裝位置",
+    "黏度(秒)",
+    "黏度(秒)_1",
+    "添加重量",
+    "塗料重量",
+    "Delta_V",
+    "Solvent_Ratio_Percent",
+    "Sensitivity"
+]
 
 st.dataframe(
-    duplicate_rows[debug_cols].sort_values(
-        ["塗料批號", "黏度(秒)", "黏度(秒)_1"]
+    removed_rows[show_cols].sort_values(
+        ["Sensitivity", "塗料批號"]
     ),
     use_container_width=True,
     hide_index=True
 )
-if master_df.empty or "Resin" not in master_df.columns:
-    st.error(
-        "⚠️ No valid historical data available. All systems failed to meet "
-        "the strict statistical requirement (n ≥ 30 batches) or basic SOP "
-        "logic constraints."
-    )
-    st.stop()
 
 
 # =========================================================
