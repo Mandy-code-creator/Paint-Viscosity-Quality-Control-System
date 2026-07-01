@@ -18,17 +18,20 @@ st.set_page_config(
 # =========================================================
 # 2. GLOBAL SESSION STATE
 # =========================================================
-if "raw_data" not in st.session_state:
-    st.session_state["raw_data"] = None
+def initialize_session_state():
+    defaults = {
+        "raw_data": None,
+        "group_a_data": None,
+        "rejected_data": None,
+        "raw_data_loaded": False,
+    }
 
-if "group_a_data" not in st.session_state:
-    st.session_state["group_a_data"] = None
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
 
-if "rejected_data" not in st.session_state:
-    st.session_state["rejected_data"] = None
 
-if "raw_data_loaded" not in st.session_state:
-    st.session_state["raw_data_loaded"] = False
+initialize_session_state()
 
 
 # =========================================================
@@ -36,29 +39,20 @@ if "raw_data_loaded" not in st.session_state:
 # =========================================================
 @st.cache_data(show_spinner=False)
 def load_and_process_file(uploaded_file):
-    """
-    Read uploaded CSV / Excel file and run validation logic.
-    """
+    """Read uploaded CSV / Excel file and run validation logic."""
 
     file_name = uploaded_file.name.lower()
 
     if file_name.endswith(".csv"):
         try:
-            raw_df = pd.read_csv(
-                uploaded_file,
-                encoding="utf-8-sig"
-            )
+            raw_df = pd.read_csv(uploaded_file, encoding="utf-8-sig")
         except UnicodeDecodeError:
             uploaded_file.seek(0)
-            raw_df = pd.read_csv(
-                uploaded_file,
-                encoding="big5"
-            )
+            raw_df = pd.read_csv(uploaded_file, encoding="big5")
     else:
         raw_df = pd.read_excel(uploaded_file)
 
     group_a, rejected_data = process_and_validate(raw_df)
-
     return raw_df, group_a, rejected_data
 
 
@@ -72,7 +66,6 @@ st.title("🧪 Paint Viscosity Analytics & SPC Control")
 # 5. SIDEBAR
 # =========================================================
 with st.sidebar:
-
     st.header("⚙️ System Initialization")
 
     uploaded_file = st.file_uploader(
@@ -81,36 +74,19 @@ with st.sidebar:
     )
 
     # -----------------------------------------------------
-    # LOAD FILE ONLY WHEN NO FILE IS CURRENTLY LOCKED
+    # LOAD FILE
     # -----------------------------------------------------
-    if uploaded_file is not None:
-
-    need_reload = (
-        not st.session_state.get("raw_data_loaded", False)
-        or st.session_state.get("group_a_data") is None
-        or st.session_state["group_a_data"].empty
-    )
-
-    if need_reload:
+    if uploaded_file is not None and not st.session_state["raw_data_loaded"]:
         try:
             with st.spinner("Processing data..."):
-                raw_df, group_a, rejected_data = load_and_process_file(
-                    uploaded_file
-                )
+                raw_df, group_a, rejected_data = load_and_process_file(uploaded_file)
 
             st.session_state["raw_data"] = raw_df.copy()
             st.session_state["group_a_data"] = group_a.copy()
             st.session_state["rejected_data"] = rejected_data.copy()
+            st.session_state["raw_data_loaded"] = True
 
-            # Chỉ xem là load thành công khi Group A thật sự có dữ liệu
-            st.session_state["raw_data_loaded"] = not group_a.empty
-
-            if group_a.empty:
-                st.warning(
-                    "⚠️ 檔案已讀取，但沒有符合 Group A 條件的有效資料。"
-                )
-            else:
-                st.rerun()
+            st.rerun()
 
         except Exception as e:
             st.session_state["raw_data_loaded"] = False
@@ -120,20 +96,11 @@ with st.sidebar:
     # DATA HEALTH STATUS
     # -----------------------------------------------------
     if st.session_state["raw_data_loaded"]:
-
-        group_a = st.session_state.get(
-            "group_a_data",
-            pd.DataFrame()
-        )
-
-        rejected_data = st.session_state.get(
-            "rejected_data",
-            pd.DataFrame()
-        )
+        group_a = st.session_state.get("group_a_data")
+        rejected_data = st.session_state.get("rejected_data")
 
         if group_a is None:
             group_a = pd.DataFrame()
-
         if rejected_data is None:
             rejected_data = pd.DataFrame()
 
@@ -176,20 +143,11 @@ with st.sidebar:
 # 6. MAIN PAGE CONTENT
 # =========================================================
 if st.session_state["raw_data_loaded"]:
-
-    group_a = st.session_state.get(
-        "group_a_data",
-        pd.DataFrame()
-    )
-
-    rejected_data = st.session_state.get(
-        "rejected_data",
-        pd.DataFrame()
-    )
+    group_a = st.session_state.get("group_a_data")
+    rejected_data = st.session_state.get("rejected_data")
 
     if group_a is None:
         group_a = pd.DataFrame()
-
     if rejected_data is None:
         rejected_data = pd.DataFrame()
 
@@ -197,24 +155,13 @@ if st.session_state["raw_data_loaded"]:
 
     col1, col2, col3 = st.columns(3)
 
-    col1.metric(
-        "Total Records",
-        f"{len(group_a) + len(rejected_data):,}"
-    )
+    col1.metric("Total Records", f"{len(group_a) + len(rejected_data):,}")
+    col2.metric("Valid Group A", f"{len(group_a):,}")
+    col3.metric("Excluded Records", f"{len(rejected_data):,}")
 
-    col2.metric(
-        "Valid Group A",
-        f"{len(group_a):,}"
-    )
-
-    col3.metric(
-        "Excluded Records",
-        f"{len(rejected_data):,}"
-    )
-
-    st.info(
-        "Please select a module from the navigation menu to continue analysis."
-    )
-
+    if group_a.empty:
+        st.warning("⚠️ 檔案已讀取，但沒有符合 Group A 條件的有效資料。")
+    else:
+        st.info("Please select a module from the navigation menu to continue analysis.")
 else:
     st.info("Awaiting data upload...")
