@@ -410,8 +410,7 @@ def build_saturation_profile(df):
 master_df = process_data(st.session_state["group_a_data"])
 # =========================================================
 # DEBUG: 5 RECORDS EXCLUDED BEFORE group_a_data
-# =========================================================
-debug_rejected = st.session_state["rejected_data"].copy()
+raw_debug = st.session_state["raw_data"].copy()
 
 pos_mapping = {
     "TP": "Primer", "正底漆": "Primer",
@@ -420,41 +419,66 @@ pos_mapping = {
     "BF": "Back Finish", "背面漆": "Back Finish"
 }
 
-debug_rejected["Position_UI"] = (
-    debug_rejected["塗裝位置"]
-    .map(pos_mapping)
-    .fillna(debug_rejected["塗裝位置"])
+raw_debug["Paint_Code"] = (
+    raw_debug["塗料編號"]
+    .fillna("")
+    .astype(str)
+    .str.upper()
+    .str.strip()
 )
 
-missing_5 = debug_rejected[
-    (debug_rejected["Resin"] == "EPOXY")
-    & (debug_rejected["Position_UI"] == "Primer")
-    & (debug_rejected["Vendor"] == "Yungchi")
-    & (debug_rejected["Solvent_Type"].astype(str) == "5203")
-    & (debug_rejected["黏度(秒)"] >= 71)
-    & (debug_rejected["黏度(秒)"] <= 90)
+raw_debug["Solvent_Type"] = (
+    raw_debug["稀釋劑"]
+    .fillna("")
+    .astype(str)
+    .str.upper()
+    .str.strip()
+)
+
+decoded_df = raw_debug["Paint_Code"].apply(decode_paint_code)
+
+if isinstance(decoded_df.iloc[0], (list, tuple)):
+    decoded_df = pd.DataFrame(
+        decoded_df.tolist(),
+        index=raw_debug.index
+    )
+
+decoded_df.columns = [
+    "Vendor",
+    "Resin",
+    "Feature",
+    "Color",
+    "Char_1"
+]
+
+raw_debug = pd.concat([raw_debug, decoded_df], axis=1)
+
+raw_debug["Position_UI"] = (
+    raw_debug["塗裝位置"]
+    .map(pos_mapping)
+    .fillna(raw_debug["塗裝位置"])
+)
+
+raw_selected = raw_debug[
+    (raw_debug["Resin"] == "EPOXY")
+    & (raw_debug["Position_UI"] == "Primer")
+    & (raw_debug["Vendor"] == "Yungchi")
+    & (raw_debug["Solvent_Type"].astype(str) == "5203")
+    & (raw_debug["黏度(秒)"] >= 71)
+    & (raw_debug["黏度(秒)"] <= 90)
 ].copy()
 
-st.write("Records excluded before group_a_data:", len(missing_5))
+group_selected = st.session_state["group_a_data"][
+    (st.session_state["group_a_data"]["Resin"] == "EPOXY")
+    & (st.session_state["group_a_data"]["Position_UI"] == "Primer")
+    & (st.session_state["group_a_data"]["Vendor"] == "Yungchi")
+    & (st.session_state["group_a_data"]["Solvent_Type"].astype(str) == "5203")
+    & (st.session_state["group_a_data"]["黏度(秒)"] >= 71)
+    & (st.session_state["group_a_data"]["黏度(秒)"] <= 90)
+].copy()
 
-st.dataframe(
-    missing_5[
-        [
-            "塗料批號",
-            "塗料編號",
-            "塗裝位置",
-            "黏度(秒)",
-            "黏度(秒)_1",
-            "添加重量",
-            "塗料重量",
-            "稀釋劑",
-            "Delta_V",
-            "Reject_Reason"
-        ]
-    ],
-    use_container_width=True,
-    hide_index=True
-)
+st.write("Raw selected:", len(raw_selected))
+st.write("Group A selected:", len(group_selected))
 
 # =========================================================
 # STATE MANAGEMENT
