@@ -54,17 +54,19 @@ def export_chart_to_word(
 
     doc.add_paragraph("")
 
-    table = doc.add_table(rows=2, cols=4)
+    table = doc.add_table(rows=2, cols=5)
     table.style = "Table Grid"
 
     headers = [
-        "Valid Batches",
-        "Median Sensitivity",
-        "P10-P90 Ratio Range",
-        "Maximum Viscosity Drop"
+    "Valid Paint Batches",
+    "Valid Adjustment Records",
+    "Median Sensitivity",
+    "P10-P90 Ratio Range",
+    "Maximum Viscosity Drop"
     ]
-
+    
     values = [
+        f"{system_df['塗料批號'].nunique():,}",
         f"{len(system_df):,}",
         f"{system_df['Sensitivity'].median():.2f} s/%",
         (
@@ -525,26 +527,41 @@ with tab1:
         "Initial (Orange) to Final (Blue) state.*"
     )
 
-    c1, c2, c3, c4 = st.columns(4)
+    unique_batch_count = system_df["塗料批號"].nunique()
+    adjustment_record_count = len(system_df)
 
-    c1.metric("Valid Batches (n ≥ 30)", len(system_df))
-
+    c1, c2, c3, c4, c5 = st.columns(5)
+    
+    c1.metric(
+        "Valid Paint Batches (n ≥ 30)",
+        f"{unique_batch_count:,}",
+        help="Number of unique paint batch numbers (塗料批號)."
+    )
+    
     c2.metric(
+        "Valid Adjustment Records",
+        f"{adjustment_record_count:,}",
+        help=(
+            "Each record represents one valid solvent adjustment. "
+            "One paint batch may have multiple adjustment records."
+        )
+    )
+    
+    c3.metric(
         "Median Sensitivity",
         f"{system_df['Sensitivity'].median():.2f} s/%"
     )
-
-    c3.metric(
+    
+    c4.metric(
         "P10 - P90 Ratio Range",
         f"{system_df['Solvent_Ratio_Percent'].quantile(0.1):.1f}% - "
         f"{system_df['Solvent_Ratio_Percent'].quantile(0.9):.1f}%"
     )
-
-    c4.metric(
+    
+    c5.metric(
         "Max Drop (Delta V)",
         f"{system_df['Delta_V'].max():.1f} s"
     )
-
     fig_scatter = go.Figure()
 
     plot_df = system_df.reset_index(drop=True).copy()
