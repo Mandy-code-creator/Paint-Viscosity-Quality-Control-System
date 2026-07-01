@@ -94,25 +94,42 @@ def process_and_validate(raw_df):
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # =========================================================
+    # =========================================================
     # 4. DECODE PAINT CODE
     # =========================================================
-    if df.empty:
-        return df.copy(), df.copy()
-
-    decoded_series = df["Paint_Code"].apply(decode_paint_code)
-
-    decoded_df = pd.DataFrame(
-        decoded_series.tolist(),
-        index=df.index,
-        columns=[
-            "Vendor",
-            "Resin",
-            "Feature",
-            "Color",
-            "Char_1",
-        ],
-    )
-
+    decoded_df = df["Paint_Code"].apply(decode_paint_code)
+    
+    # decode_paint_code có thể trả về DataFrame, Series, list hoặc tuple
+    if isinstance(decoded_df, pd.DataFrame):
+        decoded_df = decoded_df.copy()
+    
+    elif isinstance(decoded_df, pd.Series):
+        if len(decoded_df) == 0:
+            decoded_df = pd.DataFrame(
+                index=df.index,
+                columns=["Vendor", "Resin", "Feature", "Color", "Char_1"]
+            )
+    
+        elif isinstance(decoded_df.iloc[0], (list, tuple)):
+            decoded_df = pd.DataFrame(
+                decoded_df.tolist(),
+                index=df.index
+            )
+    
+        else:
+            decoded_df = pd.DataFrame(
+                decoded_df.tolist(),
+                index=df.index
+            )
+    
+    decoded_df.columns = [
+        "Vendor",
+        "Resin",
+        "Feature",
+        "Color",
+        "Char_1"
+    ]
+    
     df = pd.concat([df, decoded_df], axis=1)
 
     # =========================================================
