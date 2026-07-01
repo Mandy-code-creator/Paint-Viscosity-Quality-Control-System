@@ -10,7 +10,7 @@ from docx import Document
 from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.section import WD_ORIENT
-from modules.paint_decoder import decode_paint_code
+
 
 # =========================================================
 # EXPORT HISTORICAL CHART TO WORD
@@ -408,64 +408,6 @@ def build_saturation_profile(df):
 # LOAD DATA
 # =========================================================
 master_df = process_data(st.session_state["group_a_data"])
-# =========================================================
-def get_target_rows(df_debug):
-    temp = df_debug.copy()
-
-    # Raw data chưa có Resin / Vendor thì tạo từ Paint_Code
-    if "Resin" not in temp.columns or "Vendor" not in temp.columns:
-        if "Paint_Code" not in temp.columns:
-            temp["Paint_Code"] = (
-                temp["塗料編號"]
-                .fillna("")
-                .astype(str)
-                .str.upper()
-                .str.strip()
-            )
-
-        decoded = temp["Paint_Code"].apply(decode_paint_code)
-
-        if len(decoded) > 0 and isinstance(decoded.iloc[0], (list, tuple)):
-            decoded = pd.DataFrame(
-                decoded.tolist(),
-                index=temp.index
-            )
-
-            decoded.columns = [
-                "Vendor",
-                "Resin",
-                "Feature",
-                "Color",
-                "Char_1"
-            ]
-
-            temp["Vendor"] = decoded["Vendor"]
-            temp["Resin"] = decoded["Resin"]
-
-    temp["Vendor"] = (
-        temp["Vendor"]
-        .fillna("")
-        .astype(str)
-        .str.upper()
-        .str.strip()
-    )
-
-    temp["Resin"] = (
-        temp["Resin"]
-        .fillna("")
-        .astype(str)
-        .str.upper()
-        .str.strip()
-    )
-
-    return temp[
-        (temp["Resin"] == "EPOXY")
-        & (temp["Vendor"] == "YUNGCHI")
-        & (temp["Position_UI_Debug"] == "Primer")
-        & (temp["Solvent_Type"] == "5203")
-        & (temp["黏度(秒)"] >= 71)
-        & (temp["黏度(秒)"] <= 90)
-    ].copy()
 
 # =========================================================
 # STATE MANAGEMENT
