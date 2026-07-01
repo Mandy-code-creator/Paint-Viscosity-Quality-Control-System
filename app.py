@@ -18,6 +18,9 @@ st.set_page_config(
 # =========================================================
 # 2. GLOBAL SESSION STATE
 # =========================================================
+if "raw_data" not in st.session_state:
+    st.session_state["raw_data"] = None
+
 if "group_a_data" not in st.session_state:
     st.session_state["group_a_data"] = None
 
@@ -26,8 +29,7 @@ if "rejected_data" not in st.session_state:
 
 if "raw_data_loaded" not in st.session_state:
     st.session_state["raw_data_loaded"] = False
-if "raw_data" not in st.session_state:
-    st.session_state["raw_data"] = None
+
 
 # =========================================================
 # 3. LOAD + PROCESS FILE
@@ -42,10 +44,16 @@ def load_and_process_file(uploaded_file):
 
     if file_name.endswith(".csv"):
         try:
-            raw_df = pd.read_csv(uploaded_file, encoding="utf-8-sig")
+            raw_df = pd.read_csv(
+                uploaded_file,
+                encoding="utf-8-sig"
+            )
         except UnicodeDecodeError:
             uploaded_file.seek(0)
-            raw_df = pd.read_csv(uploaded_file, encoding="big5")
+            raw_df = pd.read_csv(
+                uploaded_file,
+                encoding="big5"
+            )
     else:
         raw_df = pd.read_excel(uploaded_file)
 
@@ -75,15 +83,21 @@ with st.sidebar:
     # -----------------------------------------------------
     # LOAD FILE ONLY WHEN NO FILE IS CURRENTLY LOCKED
     # -----------------------------------------------------
-    if uploaded_file is not None and not st.session_state["raw_data_loaded"]:
+    if (
+        uploaded_file is not None
+        and not st.session_state["raw_data_loaded"]
+    ):
 
         try:
             with st.spinner("Processing data..."):
-                raw_df, group_a, rejected_data = load_and_process_file(uploaded_file)
+                raw_df, group_a, rejected_data = load_and_process_file(
+                    uploaded_file
+                )
 
             st.session_state["raw_data"] = raw_df
             st.session_state["group_a_data"] = group_a
             st.session_state["rejected_data"] = rejected_data
+            st.session_state["raw_data_loaded"] = True
 
             st.rerun()
 
@@ -105,14 +119,12 @@ with st.sidebar:
             pd.DataFrame()
         )
 
-        # Nếu session đang giữ None thì đổi thành DataFrame rỗng
         if group_a is None:
             group_a = pd.DataFrame()
 
         if rejected_data is None:
             rejected_data = pd.DataFrame()
 
-        # Total = Valid Group A + Excluded records
         total_count = len(group_a) + len(rejected_data)
         valid_count = len(group_a)
         excluded_count = len(rejected_data)
@@ -136,13 +148,12 @@ with st.sidebar:
             type="secondary",
             use_container_width=True
         ):
-
             for key in [
-            "raw_data",
-            "group_a_data",
-            "rejected_data",
-            "raw_data_loaded"
-        ]:
+                "raw_data",
+                "group_a_data",
+                "rejected_data",
+                "raw_data_loaded"
+            ]:
                 st.session_state.pop(key, None)
 
             st.cache_data.clear()
