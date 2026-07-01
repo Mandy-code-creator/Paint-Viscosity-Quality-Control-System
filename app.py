@@ -83,25 +83,37 @@ with st.sidebar:
     # -----------------------------------------------------
     # LOAD FILE ONLY WHEN NO FILE IS CURRENTLY LOCKED
     # -----------------------------------------------------
-    if (
-        uploaded_file is not None
-        and not st.session_state["raw_data_loaded"]
-    ):
+    if uploaded_file is not None:
 
+    need_reload = (
+        not st.session_state.get("raw_data_loaded", False)
+        or st.session_state.get("group_a_data") is None
+        or st.session_state["group_a_data"].empty
+    )
+
+    if need_reload:
         try:
             with st.spinner("Processing data..."):
                 raw_df, group_a, rejected_data = load_and_process_file(
                     uploaded_file
                 )
 
-            st.session_state["raw_data"] = raw_df
-            st.session_state["group_a_data"] = group_a
-            st.session_state["rejected_data"] = rejected_data
-            st.session_state["raw_data_loaded"] = True
+            st.session_state["raw_data"] = raw_df.copy()
+            st.session_state["group_a_data"] = group_a.copy()
+            st.session_state["rejected_data"] = rejected_data.copy()
 
-            st.rerun()
+            # Chỉ xem là load thành công khi Group A thật sự có dữ liệu
+            st.session_state["raw_data_loaded"] = not group_a.empty
+
+            if group_a.empty:
+                st.warning(
+                    "⚠️ 檔案已讀取，但沒有符合 Group A 條件的有效資料。"
+                )
+            else:
+                st.rerun()
 
         except Exception as e:
+            st.session_state["raw_data_loaded"] = False
             st.error(f"Error while processing file: {str(e)}")
 
     # -----------------------------------------------------
