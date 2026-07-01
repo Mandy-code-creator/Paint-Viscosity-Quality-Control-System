@@ -730,7 +730,31 @@ with tab4:
     st.warning("依相同條件查詢 → 添加參考稀釋劑量 → 混合5分鐘 → 量測黏度。不得超過飽和停止比例。")
     st.caption("註：稀釋劑添加比例計算基準為實際塗料重量，不包含管線內運轉塗料。")
 
-    matrix_df = master_df.copy()
+    # Tab 4 must use every valid Group A adjustment record directly.
+    # Do NOT use master_df here because master_df has already applied the
+    # >= 30 distinct paint-batch filter used only for Tabs 1–3.
+    matrix_df = group_a_data.copy()
+
+    # Keep the same position mapping used elsewhere in this page so that
+    # the shop-floor table groups records consistently with the manual filter.
+    if "塗裝位置" not in matrix_df.columns:
+        matrix_df["塗裝位置"] = "Unknown"
+
+    tab4_pos_mapping = {
+        "TP": "Primer", "正底漆": "Primer",
+        "BP": "Primer", "背底漆": "Primer",
+        "TF": "Top Finish", "正面漆": "Top Finish",
+        "BF": "Back Finish", "背面漆": "Back Finish"
+    }
+
+    matrix_df["Position_UI"] = (
+        matrix_df["塗裝位置"]
+        .fillna("Unknown")
+        .astype(str)
+        .str.strip()
+        .map(tab4_pos_mapping)
+        .fillna(matrix_df["塗裝位置"])
+    )
 
     def create_worker_viscosity_zone(df):
         temp_df = df.copy()
