@@ -756,6 +756,27 @@ with tab4:
         .fillna(matrix_df["塗裝位置"])
     )
 
+    # group_a_data is produced by data_validation.py. It stores the same
+    # calculation under Viscosity_Sensitivity, while Tabs 1–3 use the
+    # shorter column name Sensitivity. Create the alias here so Tab 4 can
+    # run saturation analysis without excluding any valid adjustment record.
+    if "Delta_V" not in matrix_df.columns:
+        matrix_df["Delta_V"] = matrix_df["黏度(秒)"] - matrix_df["黏度(秒)_1"]
+
+    if "Solvent_Ratio_Percent" not in matrix_df.columns:
+        matrix_df["Solvent_Ratio_Percent"] = (
+            matrix_df["添加重量"] / matrix_df["塗料重量"] * 100
+        )
+
+    if "Sensitivity" not in matrix_df.columns:
+        if "Viscosity_Sensitivity" in matrix_df.columns:
+            matrix_df["Sensitivity"] = matrix_df["Viscosity_Sensitivity"]
+        else:
+            matrix_df["Sensitivity"] = (
+                matrix_df["Delta_V"]
+                / matrix_df["Solvent_Ratio_Percent"].replace(0, np.nan)
+            )
+
     def create_worker_viscosity_zone(df):
         temp_df = df.copy()
         group_cols = ["Resin", "Position_UI", "Vendor", "Solvent_Type"]
