@@ -1008,6 +1008,9 @@ try:
 
         chart_caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
+        # =========================================================
+        # 3. KEY RESULTS (GIỮ NGUYÊN BẢN CŨ)
+        # =========================================================
         doc.add_heading(
             "3. Key Results",
             level=1
@@ -1017,17 +1020,14 @@ try:
             rows=1,
             cols=3
         )
-
         result_table.style = "Table Grid"
 
         header_cells = result_table.rows[0].cells
-
         header_cells[0].text = "Baseline Efficiency"
         header_cells[1].text = "Warning Ratio"
         header_cells[2].text = "Stop Ratio"
 
         value_cells = result_table.add_row().cells
-
         value_cells[0].text = f"{baseline_efficiency:.2f} s/%"
         value_cells[1].text = f"{warning_ratio:.2f}%"
         value_cells[2].text = f"{stop_ratio:.2f}%"
@@ -1039,8 +1039,47 @@ try:
             "to avoid excessive solvent addition."
         )
 
+        # =========================================================
+        # 4. SATURATION ANALYSIS DATA (THÊM MỚI THEO YÊU CẦU)
+        # =========================================================
         doc.add_heading(
-            "4. 基準數據判定與計算範例 "
+            "4. Saturation Analysis Data",
+            level=1
+        )
+        
+        # Khởi tạo bảng với 4 cột
+        detail_table = doc.add_table(rows=1, cols=4)
+        detail_table.style = "Table Grid"
+
+        # Đặt tên tiêu đề cột
+        detail_hdr = detail_table.rows[0].cells
+        detail_hdr[0].text = "Solvent Ratio Range"
+        detail_hdr[1].text = "Records"
+        detail_hdr[2].text = "Median Efficiency (s/%)"
+        detail_hdr[3].text = "Efficiency Retention (%)"
+
+        # In đậm tiêu đề bảng
+        for cell in detail_hdr:
+            for paragraph in cell.paragraphs:
+                for run in paragraph.runs:
+                    run.bold = True
+
+        # Đổ dữ liệu từ dataframe efficiency_summary vào bảng
+        for _, row in efficiency_summary.iterrows():
+            row_cells = detail_table.add_row().cells
+            row_cells[0].text = str(row["Ratio_Bin"])
+            row_cells[1].text = str(int(row["Records"]))
+            row_cells[2].text = f"{row['Median_Efficiency']:.2f}"
+            
+            # Xử lý định dạng phần trăm để loại bỏ số 0 vô nghĩa ở đuôi giống y hệt trên app
+            retention_str = f"{row['Efficiency_Retention_Percent']:.4f}".rstrip('0').rstrip('.')
+            row_cells[3].text = retention_str
+
+        # =========================================================
+        # 5. BASELINE SAMPLE CALCULATION (ĐỔI SỐ TỪ 4 THÀNH 5)
+        # =========================================================
+        doc.add_heading(
+            "5. 基準數據判定與計算範例 "
             "(Baseline Sample Calculation)",
             level=1
         )
