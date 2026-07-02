@@ -153,7 +153,19 @@ def export_chart_to_word(
         )
 
         # Do NOT put a second long title inside the chart.
-        # Word title/subtitle already show all conditions.
+        chart_title = (
+            "Viscosity Transition by Solvent Ratio\n"
+            f"Resin: {selected_resin} | Position: {selected_pos} | "
+            f"Vendor: {selected_vendor} | Solvent: {selected_solvent}"
+        )
+        
+        ax.set_title(
+            chart_title,
+            fontsize=13,
+            fontweight="bold",
+            pad=18
+        )
+        
         ax.set_xlabel("Solvent Blending Ratio (%)", fontsize=10)
         ax.set_ylabel("Viscosity (seconds)", fontsize=10)
 
@@ -167,7 +179,7 @@ def export_chart_to_word(
         # Put legend inside chart area to avoid image crop.
         ax.legend(
             loc="upper center",
-            bbox_to_anchor=(0.5, 0.99),
+            bbox_to_anchor=(0.5, 1.00),
             ncol=2,
             frameon=False,
             fontsize=9
@@ -179,8 +191,8 @@ def export_chart_to_word(
         fig.subplots_adjust(
             left=0.10,
             right=0.98,
-            top=0.90,
-            bottom=0.18
+            top=0.73,
+            bottom=0.17
         )
 
         chart_stream = BytesIO()
