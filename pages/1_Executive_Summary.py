@@ -163,7 +163,7 @@ def export_chart_to_word(
             chart_title,
             fontsize=13,
             fontweight="bold",
-            pad=18
+            pad=34
         )
         
         ax.set_xlabel("Solvent Blending Ratio (%)", fontsize=10)
@@ -179,7 +179,7 @@ def export_chart_to_word(
         # Put legend inside chart area to avoid image crop.
         ax.legend(
             loc="upper center",
-            bbox_to_anchor=(0.5, -0.14),
+            bbox_to_anchor=(0.5, 1.04),
             ncol=2,
             frameon=False,
             fontsize=9
@@ -191,8 +191,8 @@ def export_chart_to_word(
         fig.subplots_adjust(
             left=0.10,
             right=0.98,
-            top=0.73,
-            bottom=0.28
+            top=0.68,
+            bottom=0.18
         )
 
         chart_stream = BytesIO()
