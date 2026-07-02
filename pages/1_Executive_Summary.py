@@ -23,6 +23,9 @@ MIXING_TIME_MINUTES = 5
 # =========================================================
 # EXPORT HISTORICAL CHART TO WORD
 # =========================================================
+# =========================================================
+# EXPORT HISTORICAL CHART TO WORD - FIXED VERSION
+# =========================================================
 def export_chart_to_word(
     selected_resin,
     selected_pos,
@@ -36,27 +39,35 @@ def export_chart_to_word(
     section.orientation = WD_ORIENT.LANDSCAPE
     section.page_width = Inches(11.69)
     section.page_height = Inches(8.27)
-    section.top_margin = Inches(0.45)
-    section.bottom_margin = Inches(0.45)
-    section.left_margin = Inches(0.45)
-    section.right_margin = Inches(0.45)
+    section.top_margin = Inches(0.35)
+    section.bottom_margin = Inches(0.35)
+    section.left_margin = Inches(0.40)
+    section.right_margin = Inches(0.40)
 
+    # -----------------------------------------------------
+    # DOCUMENT TITLE
+    # -----------------------------------------------------
     title = doc.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title.paragraph_format.space_after = Pt(2)
+
     title_run = title.add_run("Historical Viscosity Transition Analysis")
     title_run.bold = True
-    title_run.font.size = Pt(18)
+    title_run.font.size = Pt(16)
 
     subtitle = doc.add_paragraph()
     subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    subtitle.paragraph_format.space_after = Pt(5)
+
     subtitle_run = subtitle.add_run(
         f"Resin: {selected_resin} | Position: {selected_pos} | "
         f"Vendor: {selected_vendor} | Solvent Type: {selected_solvent}"
     )
-    subtitle_run.font.size = Pt(10)
+    subtitle_run.font.size = Pt(9)
 
-    doc.add_paragraph("")
-
+    # -----------------------------------------------------
+    # KPI TABLE
+    # -----------------------------------------------------
     table = doc.add_table(rows=2, cols=5)
     table.style = "Table Grid"
 
@@ -80,29 +91,41 @@ def export_chart_to_word(
     ]
 
     for i, header in enumerate(headers):
-        table.cell(0, i).text = header
-        for paragraph in table.cell(0, i).paragraphs:
+        cell = table.cell(0, i)
+        cell.text = header
+
+        for paragraph in cell.paragraphs:
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            paragraph.paragraph_format.space_after = Pt(0)
+
             for run in paragraph.runs:
                 run.bold = True
-                run.font.size = Pt(9)
+                run.font.size = Pt(8)
 
     for i, value in enumerate(values):
-        table.cell(1, i).text = value
-        for paragraph in table.cell(1, i).paragraphs:
+        cell = table.cell(1, i)
+        cell.text = value
+
+        for paragraph in cell.paragraphs:
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            paragraph.paragraph_format.space_after = Pt(0)
+
             for run in paragraph.runs:
-                run.font.size = Pt(9)
+                run.font.size = Pt(8)
 
-    doc.add_paragraph("")
-
+    # -----------------------------------------------------
+    # CHART
+    # -----------------------------------------------------
     try:
-        fig, ax = plt.subplots(figsize=(10.2, 5.2))
+        # Reduced height so chart always fits one landscape A4 page.
+        fig, ax = plt.subplots(figsize=(9.2, 3.65))
 
         for _, row in system_df.iterrows():
             ax.plot(
                 [row["Solvent_Ratio_Percent"], row["Solvent_Ratio_Percent"]],
                 [row["黏度(秒)"], row["黏度(秒)_1"]],
                 linestyle=":",
-                linewidth=0.8,
+                linewidth=0.7,
                 color="lightgray",
                 zorder=1
             )
@@ -110,10 +133,10 @@ def export_chart_to_word(
         ax.scatter(
             system_df["Solvent_Ratio_Percent"],
             system_df["黏度(秒)"],
-            s=35,
+            s=28,
             color="#ED7D31",
             edgecolors="white",
-            linewidths=0.5,
+            linewidths=0.4,
             label="Initial Viscosity (Before)",
             zorder=3
         )
@@ -121,68 +144,91 @@ def export_chart_to_word(
         ax.scatter(
             system_df["Solvent_Ratio_Percent"],
             system_df["黏度(秒)_1"],
-            s=35,
+            s=28,
             color="#4472C4",
             edgecolors="white",
-            linewidths=0.5,
+            linewidths=0.4,
             label="Final Viscosity (After)",
             zorder=3
         )
 
-        ax.set_title(
-            "Viscosity Transition by Solvent Ratio\n"
-            f"Resin: {selected_resin} | Position: {selected_pos} | "
-            f"Vendor: {selected_vendor} | Solvent: {selected_solvent}",
-            fontsize=14,
-            fontweight="bold",
-            pad=16
-        )
-
+        # Do NOT put a second long title inside the chart.
+        # Word title/subtitle already show all conditions.
         ax.set_xlabel("Solvent Blending Ratio (%)", fontsize=10)
         ax.set_ylabel("Viscosity (seconds)", fontsize=10)
-        ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.5)
-        ax.legend(
-            loc="upper center",
-            bbox_to_anchor=(0.5, 1.02),
-            ncol=2,
-            frameon=False
+
+        ax.grid(
+            True,
+            linestyle="--",
+            linewidth=0.5,
+            alpha=0.45
         )
 
-        plt.tight_layout()
+        # Put legend inside chart area to avoid image crop.
+        ax.legend(
+            loc="upper center",
+            bbox_to_anchor=(0.5, 0.99),
+            ncol=2,
+            frameon=False,
+            fontsize=9
+        )
+
+        ax.tick_params(axis="both", labelsize=9)
+
+        # Manual margin control. Do not use tight_layout here.
+        fig.subplots_adjust(
+            left=0.10,
+            right=0.98,
+            top=0.90,
+            bottom=0.18
+        )
 
         chart_stream = BytesIO()
+
         fig.savefig(
             chart_stream,
             format="png",
-            dpi=260,
-            bbox_inches="tight"
+            dpi=220,
+            facecolor="white"
         )
+
         chart_stream.seek(0)
         plt.close(fig)
 
         chart_paragraph = doc.add_paragraph()
         chart_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        chart_paragraph.paragraph_format.space_before = Pt(4)
+        chart_paragraph.paragraph_format.space_after = Pt(2)
+
         chart_paragraph.add_run().add_picture(
             chart_stream,
-            width=Inches(9.6)
+            width=Inches(9.15)
         )
 
     except Exception as e:
         error_paragraph = doc.add_paragraph()
         error_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
         error_run = error_paragraph.add_run(
-            f"\n[CHART EXPORT FAILED]\n{str(e)}"
+            f"[CHART EXPORT FAILED] {str(e)}"
         )
         error_run.bold = True
 
+    # -----------------------------------------------------
+    # FOOTNOTE
+    # -----------------------------------------------------
     note = doc.add_paragraph()
+    note.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    note.paragraph_format.space_before = Pt(0)
+    note.paragraph_format.space_after = Pt(0)
+
     note_run = note.add_run(
         "Note: Orange points represent viscosity before solvent addition. "
         "Blue points represent viscosity after solvent addition. "
         "The dotted line connects the same adjustment record."
     )
     note_run.italic = True
-    note_run.font.size = Pt(9)
+    note_run.font.size = Pt(8)
 
     output = BytesIO()
     doc.save(output)
