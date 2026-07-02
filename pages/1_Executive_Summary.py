@@ -179,7 +179,7 @@ def export_chart_to_word(
         # Put legend inside chart area to avoid image crop.
         ax.legend(
             loc="upper center",
-            bbox_to_anchor=(0.5, 1.00),
+            bbox_to_anchor=(0.5, -0.14),
             ncol=2,
             frameon=False,
             fontsize=9
@@ -192,7 +192,7 @@ def export_chart_to_word(
             left=0.10,
             right=0.98,
             top=0.73,
-            bottom=0.17
+            bottom=0.28
         )
 
         chart_stream = BytesIO()
