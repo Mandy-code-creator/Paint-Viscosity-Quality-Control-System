@@ -22,8 +22,249 @@ MIXING_TIME_MINUTES = 5
 
 # =========================================================
 # EXPORT HISTORICAL CHART TO WORD
+# EXPORT HISTORICAL CHART TO WORD - STABLE VERSION
 # =========================================================
-def export_chart_to_word
+def export_chart_to_word(
+    selected_resin,
+    selected_pos,
+    selected_vendor,
+    selected_solvent,
+    system_df
+):
+    doc = Document()
+
+    section = doc.sections[0]
+    section.orientation = WD_ORIENT.LANDSCAPE
+    section.page_width = Inches(11.69)
+    section.page_height = Inches(8.27)
+    section.top_margin = Inches(0.35)
+    section.bottom_margin = Inches(0.35)
+    section.left_margin = Inches(0.40)
+    section.right_margin = Inches(0.40)
+
+    # =====================================================
+    # REPORT TITLE
+    # =====================================================
+    title = doc.add_paragraph()
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title.paragraph_format.space_after = Pt(2)
+
+    title_run = title.add_run("Historical Viscosity Transition Analysis")
+    title_run.bold = True
+    title_run.font.size = Pt(16)
+
+    subtitle = doc.add_paragraph()
+    subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    subtitle.paragraph_format.space_after = Pt(5)
+
+    subtitle_run = subtitle.add_run(
+        f"Resin: {selected_resin} | Position: {selected_pos} | "
+        f"Vendor: {selected_vendor} | Solvent Type: {selected_solvent}"
+    )
+    subtitle_run.font.size = Pt(9)
+
+    # =====================================================
+    # KPI TABLE
+    # =====================================================
+    table = doc.add_table(rows=2, cols=5)
+    table.style = "Table Grid"
+
+    headers = [
+        "Valid Paint Batches",
+        "Valid Adjustment Records",
+        "Median Sensitivity",
+        "P10-P90 Ratio Range",
+        "Maximum Viscosity Drop"
+    ]
+
+    values = [
+        f"{system_df['塗料批號'].nunique():,}",
+        f"{len(system_df):,}",
+        f"{system_df['Sensitivity'].median():.2f} s/%",
+        (
+            f"{system_df['Solvent_Ratio_Percent'].quantile(0.10):.1f}%"
+            f" - {system_df['Solvent_Ratio_Percent'].quantile(0.90):.1f}%"
+        ),
+        f"{system_df['Delta_V'].max():.1f} s"
+    ]
+
+    for i, header in enumerate(headers):
+        cell = table.cell(0, i)
+        cell.text = header
+
+        for paragraph in cell.paragraphs:
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            paragraph.paragraph_format.space_after = Pt(0)
+
+            for run in paragraph.runs:
+                run.bold = True
+                run.font.size = Pt(8)
+
+    for i, value in enumerate(values):
+        cell = table.cell(1, i)
+        cell.text = value
+
+        for paragraph in cell.paragraphs:
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            paragraph.paragraph_format.space_after = Pt(0)
+
+            for run in paragraph.runs:
+                run.font.size = Pt(8)
+
+    # =====================================================
+    # CHART
+    # =====================================================
+    try:
+        # Fixed canvas. Do NOT use tight_layout or subplots_adjust.
+        fig = plt.figure(figsize=(9.7, 4.45), facecolor="white")
+
+        # Fixed axes position: [left, bottom, width, height]
+        ax = fig.add_axes([0.10, 0.18, 0.86, 0.55])
+
+        # ----- Chart title, same style as app -----
+        fig.text(
+            0.5,
+            0.95,
+            "Viscosity Transition by Solvent Ratio",
+            ha="center",
+            va="center",
+            fontsize=14,
+            fontweight="bold"
+        )
+
+        fig.text(
+            0.5,
+            0.89,
+            f"Resin: {selected_resin} | Position: {selected_pos} | "
+            f"Vendor: {selected_vendor} | Solvent: {selected_solvent}",
+            ha="center",
+            va="center",
+            fontsize=11,
+            fontweight="bold"
+        )
+
+        # ----- Connector lines -----
+        for _, row in system_df.iterrows():
+            ax.plot(
+                [
+                    row["Solvent_Ratio_Percent"],
+                    row["Solvent_Ratio_Percent"]
+                ],
+                [
+                    row["黏度(秒)"],
+                    row["黏度(秒)_1"]
+                ],
+                linestyle=":",
+                linewidth=0.7,
+                color="lightgray",
+                zorder=1
+            )
+
+        # ----- Before viscosity -----
+        before_points = ax.scatter(
+            system_df["Solvent_Ratio_Percent"],
+            system_df["黏度(秒)"],
+            s=30,
+            color="#ED7D31",
+            edgecolors="white",
+            linewidths=0.4,
+            label="Initial Viscosity (Before)",
+            zorder=3
+        )
+
+        # ----- After viscosity -----
+        after_points = ax.scatter(
+            system_df["Solvent_Ratio_Percent"],
+            system_df["黏度(秒)_1"],
+            s=30,
+            color="#4472C4",
+            edgecolors="white",
+            linewidths=0.4,
+            label="Final Viscosity (After)",
+            zorder=3
+        )
+
+        ax.set_xlabel("Solvent Blending Ratio (%)", fontsize=10)
+        ax.set_ylabel("Viscosity (seconds)", fontsize=10)
+
+        ax.tick_params(
+            axis="both",
+            labelsize=9
+        )
+
+        ax.grid(
+            True,
+            linestyle="--",
+            linewidth=0.5,
+            alpha=0.45
+        )
+
+        # Legend is outside data area, between subtitle and plot.
+        fig.legend(
+            handles=[before_points, after_points],
+            labels=[
+                "Initial Viscosity (Before)",
+                "Final Viscosity (After)"
+            ],
+            loc="upper center",
+            bbox_to_anchor=(0.5, 0.855),
+            ncol=2,
+            frameon=False,
+            fontsize=9
+        )
+
+        chart_stream = BytesIO()
+
+        # Important: do not use bbox_inches="tight"
+        fig.savefig(
+            chart_stream,
+            format="png",
+            dpi=220,
+            facecolor="white"
+        )
+
+        chart_stream.seek(0)
+        plt.close(fig)
+
+        chart_paragraph = doc.add_paragraph()
+        chart_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        chart_paragraph.paragraph_format.space_before = Pt(5)
+        chart_paragraph.paragraph_format.space_after = Pt(2)
+
+        chart_paragraph.add_run().add_picture(
+            chart_stream,
+            width=Inches(9.55)
+        )
+
+    except Exception as e:
+        error_paragraph = doc.add_paragraph()
+        error_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        error_run = error_paragraph.add_run(
+            f"[CHART EXPORT FAILED] {str(e)}"
+        )
+        error_run.bold = True
+
+    # =====================================================
+    # NOTE
+    # =====================================================
+    note = doc.add_paragraph()
+    note.paragraph_format.space_before = Pt(0)
+    note.paragraph_format.space_after = Pt(0)
+
+    note_run = note.add_run(
+        "Note: Orange points represent viscosity before solvent addition. "
+        "Blue points represent viscosity after solvent addition. "
+        "The dotted line connects the same adjustment record."
+    )
+    note_run.italic = True
+    note_run.font.size = Pt(8)
+
+    output = BytesIO()
+    doc.save(output)
+    output.seek(0)
+
+    return output.getvalue()
 
 
 # =========================================================
