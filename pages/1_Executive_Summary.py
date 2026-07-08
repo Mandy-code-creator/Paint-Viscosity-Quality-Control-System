@@ -14,7 +14,7 @@ from docx.enum.section import WD_ORIENT
 # =========================================================
 # GLOBAL CONFIGURATION
 # =========================================================
-MIN_SYSTEM_BATCHES = 30          # System / SOP table requirement: > 30 unique paint batches
+MIN_SYSTEM_BATCHES = 5          # System / SOP table requirement: > 5 unique paint batches
 MIN_REFERENCE_RECORDS = 5        # Minimum adjustment records to use zone-specific reference
 FIRST_ADD_PERCENT = 0.60         # First addition = 60% of calculated total
 MIXING_TIME_MINUTES = 5
@@ -493,29 +493,10 @@ def prepare_valid_records(df):
 @st.cache_data(show_spinner=False)
 def build_master_system_data(valid_df):
     """
-    Tabs 1–3 only use systems with >30 unique paint batches.
+    Tabs 1–3 use all valid historical records.
+    No minimum batch-count restriction is applied.
     """
-    if valid_df.empty:
-        return valid_df
-
-    group_cols = [
-        "Resin",
-        "Position_UI",
-        "Vendor",
-        "Solvent_Type"
-    ]
-
-    batch_count = (
-        valid_df
-        .groupby(group_cols)["塗料批號"]
-        .transform("nunique")
-    )
-
-    master_df = valid_df[
-        batch_count > MIN_SYSTEM_BATCHES
-    ].copy()
-
-    return master_df
+    return valid_df.copy()
 
 
 # =========================================================
@@ -771,9 +752,7 @@ master_df = build_master_system_data(valid_df)
 
 if master_df.empty:
     st.warning(
-        "⚠️ 無可用歷史資料。請確認至少有一個系統符合："
-        f"超過 {MIN_SYSTEM_BATCHES} 個不同塗料批號，"
-        "且具有有效加料前後黏度資料。"
+        "⚠️ 無可用歷史資料，請確認是否具有有效加料前後黏度資料。"
     )
     st.stop()
 
@@ -889,8 +868,8 @@ with tab1:
     c1, c2, c3, c4, c5 = st.columns(5)
 
     c1.metric(
-        f"Valid Paint Batches (> {MIN_SYSTEM_BATCHES})",
-        f"{unique_batch_count:,}"
+    "Valid Paint Batches",
+    f"{unique_batch_count:,}"
     )
 
     c2.metric(
@@ -1297,12 +1276,12 @@ with tab2:
                     )
 
                 else:
-                    if reference_info["batch_count"] > MIN_SYSTEM_BATCHES:
-                        confidence = "🟢 Reliable"
-                    elif reference_info["record_count"] >= 10:
-                        confidence = "🟡 Usable with Caution"
+                    if reference_info["record_count"] >= 20:
+                        confidence = "🟢 Historical Reference Available"
+                    elif reference_info["record_count"] >= MIN_REFERENCE_RECORDS:
+                        confidence = "🟡 Limited Historical Reference"
                     else:
-                        confidence = "🟠 Limited Historical Support"
+                        confidence = "🟠 Insufficient Historical Support"
 
                     result_col1, result_col2, result_col3, result_col4 = st.columns(4)
 
@@ -1888,28 +1867,22 @@ with tab4:
     )
 
     # SOP is only released when the exact condition has >30 unique paint batches.
-    worker_sop = worker_sop[
-        worker_sop["History_Batches"] > MIN_SYSTEM_BATCHES
-    ].copy()
-
+    # Keep all valid historical combinations as reference.
+    # A low batch count does not automatically mean the data is unusable.
     if worker_sop.empty:
-        st.warning(
-            "無足夠歷史資料可建立現場參考表。每個 "
-            "樹脂／塗裝位置／供應商／稀釋劑／初始黏度區間組合，"
-            f"必須涵蓋超過 {MIN_SYSTEM_BATCHES} 個不同塗料批號。"
-        )
+        st.warning("無有效歷史資料可建立現場參考表。")
         st.stop()
-
-    worker_sop["Historical_Final_Visc_Range"] = (
-        worker_sop.apply(
-            lambda row: format_range(
-                row["Final_Visc_P25"],
-                row["Final_Visc_P75"],
-                decimals=1
-            ),
-            axis=1
+    
+        worker_sop["Historical_Final_Visc_Range"] = (
+            worker_sop.apply(
+                lambda row: format_range(
+                    row["Final_Visc_P25"],
+                    row["Final_Visc_P75"],
+                    decimals=1
+                ),
+                axis=1
+            )
         )
-    )
 
     worker_sop["Historical_Temp_Range"] = (
         worker_sop.apply(
