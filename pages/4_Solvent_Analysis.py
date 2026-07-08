@@ -228,9 +228,10 @@ def calculate_advanced_metrics(group):
             "Sat_Limit": np.nan
         })
 
-    bins = [0, 3, 5, 7, 9, 11, np.inf]
-    labels = ["0-3", "3-5", "5-7", "7-9", "9-11", ">11"]
-    midpoints = [1.5, 4, 6, 8, 10, 12]
+    # Expanded Bins for finer granularity
+    bins = [0, 3, 5] + list(range(7, 26)) + [np.inf]
+    labels = ["0-3", "3-5", "5-7"] + [f"{i}-{i+1}" for i in range(7, 25)] + [">25"]
+    midpoints = [1.5, 4, 6] + [i + 0.5 for i in range(7, 25)] + [26]
 
     df_calc = group.copy()
 
@@ -533,9 +534,10 @@ if len(saturation_df) < 5:
 
 else:
 
-    bins = [0, 3, 5, 7, 9, 11, np.inf]
-    labels = ["0–3%", "3–5%", "5–7%", "7–9%", "9–11%", ">11%"]
-    midpoints = [1.5, 4, 6, 8, 10, 12]
+    # Expanded Bins for finer UI granularity
+    bins = [0, 3, 5] + list(range(7, 26)) + [np.inf]
+    labels = ["0–3%", "3–5%", "5–7%"] + [f"{i}–{i+1}%" for i in range(7, 25)] + [">25%"]
+    midpoints = [1.5, 4, 6] + [i + 0.5 for i in range(7, 25)] + [26]
 
     saturation_df["Ratio_Bin"] = pd.cut(
         saturation_df["Solvent_Ratio_Percent"],
@@ -1009,7 +1011,7 @@ try:
         chart_caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
         # =========================================================
-        # 3. KEY RESULTS (GIỮ NGUYÊN BẢN CŨ)
+        # 3. KEY RESULTS (KEEP ORIGINAL)
         # =========================================================
         doc.add_heading(
             "3. Key Results",
@@ -1040,43 +1042,43 @@ try:
         )
 
         # =========================================================
-        # 4. SATURATION ANALYSIS DATA (THÊM MỚI THEO YÊU CẦU)
+        # 4. SATURATION ANALYSIS DATA (ADDED AS REQUESTED)
         # =========================================================
         doc.add_heading(
             "4. Saturation Analysis Data",
             level=1
         )
         
-        # Khởi tạo bảng với 4 cột
+        # Initialize table with 4 columns
         detail_table = doc.add_table(rows=1, cols=4)
         detail_table.style = "Table Grid"
 
-        # Đặt tên tiêu đề cột
+        # Set column headers
         detail_hdr = detail_table.rows[0].cells
         detail_hdr[0].text = "Solvent Ratio Range"
         detail_hdr[1].text = "Records"
         detail_hdr[2].text = "Median Efficiency (s/%)"
         detail_hdr[3].text = "Efficiency Retention (%)"
 
-        # In đậm tiêu đề bảng
+        # Bold table headers
         for cell in detail_hdr:
             for paragraph in cell.paragraphs:
                 for run in paragraph.runs:
                     run.bold = True
 
-        # Đổ dữ liệu từ dataframe efficiency_summary vào bảng
+        # Populate data from efficiency_summary dataframe
         for _, row in efficiency_summary.iterrows():
             row_cells = detail_table.add_row().cells
             row_cells[0].text = str(row["Ratio_Bin"])
             row_cells[1].text = str(int(row["Records"]))
             row_cells[2].text = f"{row['Median_Efficiency']:.2f}"
             
-            # Xử lý định dạng phần trăm để loại bỏ số 0 vô nghĩa ở đuôi giống y hệt trên app
+            # Format percentage to remove trailing zeros matching the app
             retention_str = f"{row['Efficiency_Retention_Percent']:.4f}".rstrip('0').rstrip('.')
             row_cells[3].text = retention_str
 
         # =========================================================
-        # 5. BASELINE SAMPLE CALCULATION (ĐỔI SỐ TỪ 4 THÀNH 5)
+        # 5. BASELINE SAMPLE CALCULATION (CHANGE NUMBER FROM 4 TO 5)
         # =========================================================
         doc.add_heading(
             "5. 基準數據判定與計算範例 "
