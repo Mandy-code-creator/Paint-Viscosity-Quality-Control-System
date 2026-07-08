@@ -14,7 +14,6 @@ from docx.enum.section import WD_ORIENT
 # =========================================================
 # GLOBAL CONFIGURATION
 # =========================================================
-MIN_SYSTEM_BATCHES = 5          # System / SOP table requirement: > 5 unique paint batches
 MIN_REFERENCE_RECORDS = 5        # Minimum adjustment records to use zone-specific reference
 FIRST_ADD_PERCENT = 0.60         # First addition = 60% of calculated total
 MIXING_TIME_MINUTES = 5
@@ -1866,23 +1865,22 @@ with tab4:
         .reset_index()
     )
 
-    # SOP is only released when the exact condition has >30 unique paint batches.
-    # Keep all valid historical combinations as reference.
-    # A low batch count does not automatically mean the data is unusable.
+    # Keep all valid historical combinations as references.
+    # Low batch count does not automatically mean that the data is unusable.
     if worker_sop.empty:
         st.warning("無有效歷史資料可建立現場參考表。")
         st.stop()
-    
-        worker_sop["Historical_Final_Visc_Range"] = (
-            worker_sop.apply(
-                lambda row: format_range(
-                    row["Final_Visc_P25"],
-                    row["Final_Visc_P75"],
-                    decimals=1
-                ),
-                axis=1
-            )
+
+    worker_sop["Historical_Final_Visc_Range"] = (
+        worker_sop.apply(
+            lambda row: format_range(
+                row["Final_Visc_P25"],
+                row["Final_Visc_P75"],
+                decimals=1
+            ),
+            axis=1
         )
+    )
 
     worker_sop["Historical_Temp_Range"] = (
         worker_sop.apply(
@@ -1977,62 +1975,6 @@ with tab4:
         })
         .fillna(worker_sop["Position_UI"])
     )
-
-    # =========================================================
-# Ensure required SOP columns exist before output selection
-# =========================================================
-required_sop_columns = {
-    "Resin": np.nan,
-    "塗裝位置": np.nan,
-    "Vendor": np.nan,
-    "Solvent_Type": np.nan,
-    "Worker_Viscosity_Zone": np.nan,
-    "Adjustment_Records": 0,
-    "History_Batches": 0,
-    "Ref_Start_Visc": np.nan,
-    "Historical_Total_Ratio": np.nan,
-    "First_Add_Ratio": np.nan,
-    "Historical_Final_Visc_Range": "-",
-    "Historical_Temp_Range": "-",
-    "Saturation_Warning_Ratio": np.nan,
-    "Saturation_Stop_Ratio": np.nan
-}
-
-for col, default_value in required_sop_columns.items():
-    if col not in worker_sop.columns:
-        worker_sop[col] = default_value
-
-
-# 若飽和分析欄位未成功產生，改以 P90 / P95 作為備用管制值
-if "Ratio_P90" in worker_sop.columns:
-    worker_sop["Saturation_Warning_Ratio"] = (
-        worker_sop["Saturation_Warning_Ratio"]
-        .fillna(worker_sop["Ratio_P90"])
-    )
-
-if "Ratio_P95" in worker_sop.columns:
-    worker_sop["Saturation_Stop_Ratio"] = (
-        worker_sop["Saturation_Stop_Ratio"]
-        .fillna(worker_sop["Ratio_P95"])
-    )
-
-worker_sop["Saturation_Stop_Ratio"] = np.maximum(
-    worker_sop["Saturation_Stop_Ratio"],
-    worker_sop["Saturation_Warning_Ratio"]
-)
-
-
-# 塗裝位置顯示名稱
-worker_sop["塗裝位置"] = (
-    worker_sop["Position_UI"]
-    .map({
-        "Primer": "底漆 (P)",
-        "Top Finish": "正面漆 (TF)",
-        "Back Finish": "背面漆 (BF)"
-    })
-    .fillna(worker_sop["Position_UI"])
-)
-
 
     # =========================================================
     # Worker SOP output table
@@ -2137,7 +2079,6 @@ worker_sop["塗裝位置"] = (
     )
 
     st.markdown("---")
-
     st.markdown("### 現場 SOP 使用方式")
 
     st.markdown(
