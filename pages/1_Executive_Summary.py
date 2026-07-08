@@ -1978,6 +1978,65 @@ with tab4:
         .fillna(worker_sop["Position_UI"])
     )
 
+    # =========================================================
+# Ensure required SOP columns exist before output selection
+# =========================================================
+required_sop_columns = {
+    "Resin": np.nan,
+    "塗裝位置": np.nan,
+    "Vendor": np.nan,
+    "Solvent_Type": np.nan,
+    "Worker_Viscosity_Zone": np.nan,
+    "Adjustment_Records": 0,
+    "History_Batches": 0,
+    "Ref_Start_Visc": np.nan,
+    "Historical_Total_Ratio": np.nan,
+    "First_Add_Ratio": np.nan,
+    "Historical_Final_Visc_Range": "-",
+    "Historical_Temp_Range": "-",
+    "Saturation_Warning_Ratio": np.nan,
+    "Saturation_Stop_Ratio": np.nan
+}
+
+for col, default_value in required_sop_columns.items():
+    if col not in worker_sop.columns:
+        worker_sop[col] = default_value
+
+
+# 若飽和分析欄位未成功產生，改以 P90 / P95 作為備用管制值
+if "Ratio_P90" in worker_sop.columns:
+    worker_sop["Saturation_Warning_Ratio"] = (
+        worker_sop["Saturation_Warning_Ratio"]
+        .fillna(worker_sop["Ratio_P90"])
+    )
+
+if "Ratio_P95" in worker_sop.columns:
+    worker_sop["Saturation_Stop_Ratio"] = (
+        worker_sop["Saturation_Stop_Ratio"]
+        .fillna(worker_sop["Ratio_P95"])
+    )
+
+worker_sop["Saturation_Stop_Ratio"] = np.maximum(
+    worker_sop["Saturation_Stop_Ratio"],
+    worker_sop["Saturation_Warning_Ratio"]
+)
+
+
+# 塗裝位置顯示名稱
+worker_sop["塗裝位置"] = (
+    worker_sop["Position_UI"]
+    .map({
+        "Primer": "底漆 (P)",
+        "Top Finish": "正面漆 (TF)",
+        "Back Finish": "背面漆 (BF)"
+    })
+    .fillna(worker_sop["Position_UI"])
+)
+
+
+    # =========================================================
+    # Worker SOP output table
+    # =========================================================
     worker_output = worker_sop[
         [
             "Resin",
