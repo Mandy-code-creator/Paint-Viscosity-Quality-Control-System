@@ -809,7 +809,7 @@ else:
         )
 
         ax.set_ylabel(
-            "Median Dilution Efficiency (seconds / %)",
+            "Median Dilution Efficiency (s/%)",
             fontsize=10
         )
 
