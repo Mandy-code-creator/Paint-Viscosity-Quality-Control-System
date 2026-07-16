@@ -535,37 +535,10 @@ if filter_df.empty:
 
 
 # =========================================================
+# =========================================================
 # 11. FILTER SUMMARY
 # =========================================================
 period_label = analysis_period_text(filter_df)
-
-summary_col1, summary_col2, summary_col3, summary_col4 = st.columns(4)
-
-summary_col1.metric(
-    "Analysis Period",
-    period_label,
-)
-
-summary_col2.metric(
-    "Records Included",
-    f"{len(filter_df):,}",
-)
-
-summary_col3.metric(
-    "Paint Codes Included",
-    f"{filter_df['Paint_Code'].nunique():,}",
-)
-
-summary_col4.metric(
-    "Production Lines Included",
-    f"{filter_df['線別'].nunique():,}",
-)
-
-st.caption(
-    "All tabs below use this same filtered dataset. "
-    "No additional Vendor, Resin, Position, Solvent, Line, or Date filters are applied later."
-)
-
 
 # =========================================================
 # 12. MAIN TABS
