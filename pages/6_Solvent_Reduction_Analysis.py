@@ -11,17 +11,15 @@ import matplotlib.pyplot as plt
 st.set_page_config(
     page_title="Solvent Reduction Analysis",
     page_icon="🎨",
-    layout="wide"
+    layout="wide",
 )
 
 st.title("🎨 Paint Viscosity Improvement & Solvent Reduction")
 
 st.markdown(
     """
-    This module identifies frequently used paint codes with high solvent
-    consumption and compares viscosity performance across production lines.
-    The results support supplier discussions regarding suitable delivery
-    viscosity and solvent-reduction opportunities.
+    This module identifies paint codes that are frequently used and consume
+    large amounts of solvent. All analyses below follow one common filter set.
     """
 )
 
@@ -39,10 +37,12 @@ plt.rcParams["axes.unicode_minus"] = False
 
 
 # =========================================================
-# 3. LOAD DATA
+# 3. LOAD GROUP A DATA
 # =========================================================
 if not st.session_state.get("raw_data_loaded", False):
-    st.warning("⚠️ Please return to the Main App page and upload the raw data first.")
+    st.warning(
+        "⚠️ Please return to the Main App page and upload the raw data first."
+    )
     st.stop()
 
 group_a = st.session_state.get("group_a_data")
@@ -57,7 +57,7 @@ df = group_a.copy()
 # =========================================================
 # 4. REQUIRED COLUMNS
 # =========================================================
-text_defaults = [
+text_columns = [
     "Vendor",
     "Resin",
     "Solvent_Type",
@@ -66,21 +66,18 @@ text_defaults = [
     "塗裝位置",
 ]
 
-numeric_defaults = [
+numeric_columns = [
     "塗料重量",
     "添加重量",
     "黏度(秒)",
     "黏度(秒)_1",
-    "Delta_V",
-    "Solvent_Ratio_Percent",
-    "Viscosity_Sensitivity",
 ]
 
-for col in text_defaults:
+for col in text_columns:
     if col not in df.columns:
         df[col] = "Unknown"
 
-for col in numeric_defaults:
+for col in numeric_columns:
     if col not in df.columns:
         df[col] = np.nan
 
@@ -98,7 +95,7 @@ if "Paint_Code" not in df.columns:
 
 
 # =========================================================
-# 5. NORMALIZE TEXT FIELDS
+# 5. NORMALIZE TEXT
 # =========================================================
 invalid_text_values = {
     "",
@@ -111,17 +108,15 @@ invalid_text_values = {
     "--",
 }
 
-text_columns = [
+for col in [
     "Vendor",
     "Resin",
     "Paint_Code",
     "Solvent_Type",
-    "線別",
     "塗料批號",
+    "線別",
     "塗裝位置",
-]
-
-for col in text_columns:
+]:
     df[col] = (
         df[col]
         .fillna("")
@@ -142,14 +137,14 @@ for col in [
 ]:
     df.loc[
         df[col].str.upper().isin(invalid_text_values),
-        col
+        col,
     ] = "Unknown"
 
 df["Batch_ID"] = df["塗料批號"].copy()
 
 
 # =========================================================
-# 6. COATING POSITION MAPPING
+# 6. COATING POSITION
 # =========================================================
 position_mapping = {
     "TP": "Primer",
@@ -170,14 +165,14 @@ df["Position_UI"] = (
 
 df.loc[
     df["Position_UI"].astype(str).str.upper().isin(invalid_text_values),
-    "Position_UI"
+    "Position_UI",
 ] = "Unknown"
 
 
 # =========================================================
-# 7. NUMERIC CLEANING & CORE CALCULATIONS
+# 7. NUMERIC CLEANING & CALCULATIONS
 # =========================================================
-for col in numeric_defaults:
+for col in numeric_columns:
     df[col] = pd.to_numeric(df[col], errors="coerce")
 
 df["Delta_V"] = df["黏度(秒)"] - df["黏度(秒)_1"]
@@ -211,7 +206,34 @@ if df.empty:
 
 
 # =========================================================
-# 8. HELPER FUNCTIONS
+# 8. DATE COLUMN DETECTION
+# =========================================================
+DATE_CANDIDATES = [
+    "攪拌日期",
+    "調整日期",
+    "生產日期",
+    "日期",
+    "Date",
+    "date",
+    "DATE",
+]
+
+date_column = next(
+    (col for col in DATE_CANDIDATES if col in df.columns),
+    None,
+)
+
+if date_column is not None:
+    df["_Analysis_Date"] = pd.to_datetime(
+        df[date_column],
+        errors="coerce",
+    )
+else:
+    df["_Analysis_Date"] = pd.NaT
+
+
+# =========================================================
+# 9. HELPER FUNCTIONS
 # =========================================================
 def clean_options(series):
     values = (
@@ -228,7 +250,7 @@ def clean_options(series):
     return sorted(values.unique().tolist())
 
 
-def distinct_batch_count(series):
+def valid_batch_count(series):
     values = (
         series
         .dropna()
@@ -243,21 +265,6 @@ def distinct_batch_count(series):
     return values.nunique()
 
 
-def percentile_range(series, low=0.10, high=0.90):
-    valid = pd.to_numeric(series, errors="coerce").dropna()
-
-    if valid.empty:
-        return "-"
-
-    p_low = valid.quantile(low)
-    p_high = valid.quantile(high)
-
-    if np.isclose(p_low, p_high):
-        return f"{p_low:.1f}"
-
-    return f"{p_low:.1f} – {p_high:.1f}"
-
-
 def safe_metric(value, decimals=1, suffix=""):
     if value is None or pd.isna(value):
         return "-"
@@ -265,17 +272,28 @@ def safe_metric(value, decimals=1, suffix=""):
     return f"{value:,.{decimals}f}{suffix}"
 
 
-def apply_filter(data, column, selected_value):
-    if selected_value == "All":
-        return data.copy()
+def format_range(series, low=0.10, high=0.90):
+    valid = pd.to_numeric(series, errors="coerce").dropna()
 
-    return data[
-        data[column].astype(str) == str(selected_value)
-    ].copy()
+    if valid.empty:
+        return "-"
+
+    lower = valid.quantile(low)
+    upper = valid.quantile(high)
+
+    if np.isclose(lower, upper):
+        return f"{lower:.1f}"
+
+    return f"{lower:.1f} – {upper:.1f}"
 
 
-def select_all_filter(label, source_df, column, key):
+def select_all(label, source_df, column, key):
     options = ["All"] + clean_options(source_df[column])
+
+    current_value = st.session_state.get(key, "All")
+
+    if current_value not in options:
+        st.session_state[key] = "All"
 
     return st.selectbox(
         label,
@@ -284,11 +302,20 @@ def select_all_filter(label, source_df, column, key):
     )
 
 
-def build_priority_summary(source_df):
+def apply_single_filter(source_df, column, value):
+    if value == "All":
+        return source_df.copy()
+
+    return source_df[
+        source_df[column].astype(str) == str(value)
+    ].copy()
+
+
+def build_paint_code_summary(source_df):
     if source_df.empty:
         return pd.DataFrame()
 
-    group_columns = [
+    group_cols = [
         "Vendor",
         "Resin",
         "Position_UI",
@@ -297,22 +324,22 @@ def build_priority_summary(source_df):
     ]
 
     summary = source_df.groupby(
-        group_columns,
+        group_cols,
         observed=False,
         dropna=False,
     ).agg(
         Adjustment_Records=("Paint_Code", "size"),
-        Historical_Batches=("Batch_ID", distinct_batch_count),
+        Historical_Batches=("Batch_ID", valid_batch_count),
         Production_Lines=("線別", lambda x: x[x != "Unknown"].nunique()),
         Total_Paint_kg=("塗料重量", "sum"),
         Total_Solvent_kg=("添加重量", "sum"),
         Median_Paint_kg=("塗料重量", "median"),
         Median_Solvent_kg=("添加重量", "median"),
         Median_Ratio_Percent=("Solvent_Ratio_Percent", "median"),
-        Median_Viscosity_Before=("黏度(秒)", "median"),
-        Median_Viscosity_After=("黏度(秒)_1", "median"),
-        Median_Delta_V=("Delta_V", "median"),
-        Median_Efficiency=("Viscosity_Sensitivity", "median"),
+        Median_Before_Viscosity=("黏度(秒)", "median"),
+        Median_After_Viscosity=("黏度(秒)_1", "median"),
+        Median_Viscosity_Drop=("Delta_V", "median"),
+        Median_Dilution_Efficiency=("Viscosity_Sensitivity", "median"),
     ).reset_index()
 
     summary["Weighted_Ratio_Percent"] = np.where(
@@ -323,353 +350,251 @@ def build_priority_summary(source_df):
         np.nan,
     )
 
-    summary["Solvent_Per_Batch_kg"] = np.where(
-        summary["Historical_Batches"] > 0,
-        summary["Total_Solvent_kg"]
-        / summary["Historical_Batches"],
-        np.nan,
-    )
-
-    summary["Batch_Score"] = (
-        summary["Historical_Batches"]
-        .rank(method="average", pct=True)
-    )
-
-    summary["Solvent_Score"] = (
-        summary["Total_Solvent_kg"]
-        .rank(method="average", pct=True)
-    )
-
-    summary["Ratio_Score"] = (
-        summary["Weighted_Ratio_Percent"]
-        .rank(method="average", pct=True)
-    )
-
-    summary["Opportunity_Score"] = (
-        summary["Batch_Score"] * 0.35
-        + summary["Solvent_Score"] * 0.45
-        + summary["Ratio_Score"] * 0.20
-    ) * 100
-
-    summary["Priority_Level"] = pd.cut(
-        summary["Opportunity_Score"],
-        bins=[-np.inf, 40, 70, np.inf],
-        labels=["Normal", "Medium Priority", "High Priority"],
-    ).astype(str)
-
-    summary = summary.sort_values(
-        by=[
-            "Opportunity_Score",
-            "Total_Solvent_kg",
-            "Historical_Batches",
-        ],
-        ascending=[False, False, False],
-    ).reset_index(drop=True)
-
-    summary["Priority_Rank"] = np.arange(
-        1,
-        len(summary) + 1,
-    )
-
     return summary
 
 
-def prepare_priority_display(summary_df):
-    if summary_df.empty:
+def build_line_summary(source_df):
+    if source_df.empty:
         return pd.DataFrame()
 
-    display_df = summary_df[
-        [
-            "Priority_Rank",
-            "Priority_Level",
-            "Vendor",
-            "Resin",
-            "Position_UI",
-            "Paint_Code",
-            "Solvent_Type",
-            "Adjustment_Records",
-            "Historical_Batches",
-            "Production_Lines",
-            "Total_Paint_kg",
-            "Total_Solvent_kg",
-            "Weighted_Ratio_Percent",
-            "Solvent_Per_Batch_kg",
-            "Median_Viscosity_Before",
-            "Median_Viscosity_After",
-            "Opportunity_Score",
-        ]
-    ].copy()
-
-    display_df.columns = [
-        "Rank",
-        "Priority Level",
-        "Vendor",
-        "Resin Type",
-        "Coating Position",
-        "Paint Code",
-        "Solvent Type",
-        "Adjustment Records",
-        "Historical Batches",
-        "Production Lines",
-        "Total Paint (kg)",
-        "Total Solvent (kg)",
-        "Weighted Ratio (%)",
-        "Average Solvent per Batch (kg)",
-        "Median Before Viscosity (s)",
-        "Median After Viscosity (s)",
-        "Opportunity Score",
-    ]
-
-    numeric_columns = [
-        "Total Paint (kg)",
-        "Total Solvent (kg)",
-        "Weighted Ratio (%)",
-        "Average Solvent per Batch (kg)",
-        "Median Before Viscosity (s)",
-        "Median After Viscosity (s)",
-        "Opportunity Score",
-    ]
-
-    for col in numeric_columns:
-        display_df[col] = pd.to_numeric(
-            display_df[col],
-            errors="coerce",
-        ).round(2)
-
-    return display_df
-
-
-def build_line_comparison_candidates(
-    source_df,
-    min_records_per_line=3,
-):
-    line_group_columns = [
-        "Vendor",
-        "Resin",
-        "Position_UI",
-        "Paint_Code",
-        "Solvent_Type",
+    line_summary = source_df.groupby(
         "線別",
-    ]
-
-    line_level = source_df.groupby(
-        line_group_columns,
         observed=False,
         dropna=False,
     ).agg(
-        Records=("Paint_Code", "size"),
-        Batches=("Batch_ID", distinct_batch_count),
+        Adjustment_Records=("Paint_Code", "size"),
+        Historical_Batches=("Batch_ID", valid_batch_count),
         Total_Paint_kg=("塗料重量", "sum"),
         Total_Solvent_kg=("添加重量", "sum"),
         Median_Paint_kg=("塗料重量", "median"),
         Median_Solvent_kg=("添加重量", "median"),
-        Median_Before=("黏度(秒)", "median"),
-        Median_After=("黏度(秒)_1", "median"),
-        Median_Delta=("Delta_V", "median"),
-        Median_Efficiency=("Viscosity_Sensitivity", "median"),
+        Median_Before_Viscosity=("黏度(秒)", "median"),
+        Median_After_Viscosity=("黏度(秒)_1", "median"),
+        Median_Viscosity_Drop=("Delta_V", "median"),
+        Median_Dilution_Efficiency=("Viscosity_Sensitivity", "median"),
     ).reset_index()
 
-    line_level = line_level[
-        (line_level["線別"] != "Unknown")
-        & (line_level["Records"] >= min_records_per_line)
-    ].copy()
-
-    if line_level.empty:
-        return pd.DataFrame(), pd.DataFrame()
-
-    line_level["Weighted_Ratio"] = np.where(
-        line_level["Total_Paint_kg"] > 0,
-        line_level["Total_Solvent_kg"]
-        / line_level["Total_Paint_kg"]
+    line_summary["Weighted_Ratio_Percent"] = np.where(
+        line_summary["Total_Paint_kg"] > 0,
+        line_summary["Total_Solvent_kg"]
+        / line_summary["Total_Paint_kg"]
         * 100,
         np.nan,
     )
 
-    group_columns = [
+    return line_summary.sort_values("線別").reset_index(drop=True)
+
+
+def analysis_period_text(source_df):
+    valid_dates = source_df["_Analysis_Date"].dropna()
+
+    if valid_dates.empty:
+        return "All available data"
+
+    min_date = valid_dates.min().strftime("%Y/%m/%d")
+    max_date = valid_dates.max().strftime("%Y/%m/%d")
+
+    return f"{min_date} – {max_date}"
+
+
+# =========================================================
+# 10. GLOBAL FILTERS — APPLIED ONCE
+# =========================================================
+st.markdown("---")
+st.subheader("Global Analysis Filters")
+
+filter_df = df.copy()
+
+# -------------------------
+# Date filter
+# -------------------------
+if filter_df["_Analysis_Date"].notna().any():
+    min_date = filter_df["_Analysis_Date"].min().date()
+    max_date = filter_df["_Analysis_Date"].max().date()
+
+    selected_dates = st.date_input(
+        "Analysis Period",
+        value=(min_date, max_date),
+        min_value=min_date,
+        max_value=max_date,
+        key="global_analysis_period",
+    )
+
+    if isinstance(selected_dates, tuple) and len(selected_dates) == 2:
+        start_date, end_date = selected_dates
+
+        filter_df = filter_df[
+            filter_df["_Analysis_Date"].dt.date.between(
+                start_date,
+                end_date,
+                inclusive="both",
+            )
+        ].copy()
+else:
+    st.info(
+        "No recognized date column was found. "
+        "All available records will be analyzed."
+    )
+
+# -------------------------
+# Cascading common filters
+# -------------------------
+g1, g2, g3 = st.columns(3)
+
+with g1:
+    selected_vendor = select_all(
         "Vendor",
+        filter_df,
+        "Vendor",
+        "global_vendor",
+    )
+
+filter_df = apply_single_filter(
+    filter_df,
+    "Vendor",
+    selected_vendor,
+)
+
+with g2:
+    selected_resin = select_all(
+        "Resin Type",
+        filter_df,
         "Resin",
+        "global_resin",
+    )
+
+filter_df = apply_single_filter(
+    filter_df,
+    "Resin",
+    selected_resin,
+)
+
+with g3:
+    selected_position = select_all(
+        "Coating Position",
+        filter_df,
         "Position_UI",
-        "Paint_Code",
+        "global_position",
+    )
+
+filter_df = apply_single_filter(
+    filter_df,
+    "Position_UI",
+    selected_position,
+)
+
+g4, g5 = st.columns(2)
+
+with g4:
+    selected_solvent = select_all(
+        "Solvent Type",
+        filter_df,
         "Solvent_Type",
+        "global_solvent",
+    )
+
+filter_df = apply_single_filter(
+    filter_df,
+    "Solvent_Type",
+    selected_solvent,
+)
+
+with g5:
+    line_options = clean_options(filter_df["線別"])
+
+    previous_lines = st.session_state.get(
+        "global_lines",
+        line_options,
+    )
+
+    valid_previous_lines = [
+        line for line in previous_lines
+        if line in line_options
     ]
 
-    candidates = line_level.groupby(
-        group_columns,
-        observed=False,
-        dropna=False,
-    ).agg(
-        Production_Lines=("線別", "nunique"),
-        Total_Records=("Records", "sum"),
-        Total_Batches=("Batches", "sum"),
-        Total_Solvent_kg=("Total_Solvent_kg", "sum"),
-        Min_Weighted_Ratio=("Weighted_Ratio", "min"),
-        Max_Weighted_Ratio=("Weighted_Ratio", "max"),
-        Min_Before=("Median_Before", "min"),
-        Max_Before=("Median_Before", "max"),
-        Min_After=("Median_After", "min"),
-        Max_After=("Median_After", "max"),
-    ).reset_index()
+    if not valid_previous_lines:
+        valid_previous_lines = line_options
 
-    candidates = candidates[
-        candidates["Production_Lines"] >= 2
+    selected_lines = st.multiselect(
+        "Production Line",
+        options=line_options,
+        default=valid_previous_lines,
+        key="global_lines",
+    )
+
+if selected_lines:
+    filter_df = filter_df[
+        filter_df["線別"].isin(selected_lines)
     ].copy()
+else:
+    filter_df = filter_df.iloc[0:0].copy()
 
-    if candidates.empty:
-        return pd.DataFrame(), line_level
-
-    candidates["Ratio_Difference"] = (
-        candidates["Max_Weighted_Ratio"]
-        - candidates["Min_Weighted_Ratio"]
-    )
-
-    candidates["Before_Viscosity_Difference"] = (
-        candidates["Max_Before"]
-        - candidates["Min_Before"]
-    )
-
-    candidates["After_Viscosity_Difference"] = (
-        candidates["Max_After"]
-        - candidates["Min_After"]
-    )
-
-    candidates["Comparison_Score"] = (
-        candidates["Total_Records"].rank(pct=True) * 25
-        + candidates["Total_Solvent_kg"].rank(pct=True) * 35
-        + candidates["Ratio_Difference"].rank(pct=True) * 25
-        + candidates["Before_Viscosity_Difference"].rank(pct=True) * 15
-    )
-
-    candidates = candidates.sort_values(
-        by=[
-            "Comparison_Score",
-            "Total_Solvent_kg",
-            "Total_Records",
-        ],
-        ascending=[False, False, False],
-    ).reset_index(drop=True)
-
-    candidates["Condition_Label"] = (
-        candidates["Vendor"].astype(str)
-        + " | "
-        + candidates["Resin"].astype(str)
-        + " | "
-        + candidates["Position_UI"].astype(str)
-        + " | "
-        + candidates["Paint_Code"].astype(str)
-        + " | "
-        + candidates["Solvent_Type"].astype(str)
-        + " | "
-        + candidates["Production_Lines"].astype(int).astype(str)
-        + " Lines"
-    )
-
-    return candidates, line_level
+if filter_df.empty:
+    st.warning("⚠️ No records match the global analysis filters.")
+    st.stop()
 
 
 # =========================================================
-# 9. MAIN SUB-TABS
+# 11. FILTER SUMMARY
 # =========================================================
-tab_priority, tab_detail, tab_line = st.tabs([
-    "1. Reduction Priority",
+period_label = analysis_period_text(filter_df)
+
+summary_col1, summary_col2, summary_col3, summary_col4 = st.columns(4)
+
+summary_col1.metric(
+    "Analysis Period",
+    period_label,
+)
+
+summary_col2.metric(
+    "Records Included",
+    f"{len(filter_df):,}",
+)
+
+summary_col3.metric(
+    "Paint Codes Included",
+    f"{filter_df['Paint_Code'].nunique():,}",
+)
+
+summary_col4.metric(
+    "Production Lines Included",
+    f"{filter_df['線別'].nunique():,}",
+)
+
+st.caption(
+    "All tabs below use this same filtered dataset. "
+    "No additional Vendor, Resin, Position, Solvent, Line, or Date filters are applied later."
+)
+
+
+# =========================================================
+# 12. MAIN TABS
+# =========================================================
+tab_ranking, tab_detail, tab_line = st.tabs([
+    "1. Paint Code Ranking",
     "2. Paint Code Details",
     "3. Production Line Comparison",
 ])
 
 
 # =========================================================
-# TAB 1: REDUCTION PRIORITY
+# TAB 1 — PAINT CODE RANKING
 # =========================================================
-with tab_priority:
-    st.subheader("1. Solvent Reduction Priority")
+with tab_ranking:
+    st.subheader("1. Paint Code Solvent Consumption Ranking")
 
     st.caption(
-        "Rank paint codes using historical batch count, total solvent usage, "
-        "and weighted solvent ratio."
+        f"Analysis Period: {period_label} | "
+        f"Records Included: {len(filter_df):,}"
     )
 
-    st.markdown("#### Analysis Filters")
+    summary_df = build_paint_code_summary(filter_df)
 
-    f1, f2, f3, f4, f5 = st.columns(5)
-
-    with f1:
-        selected_vendor = select_all_filter(
-            "Vendor",
-            df,
-            "Vendor",
-            "priority_vendor",
-        )
-
-    priority_df = apply_filter(
-        df,
-        "Vendor",
-        selected_vendor,
-    )
-
-    with f2:
-        selected_resin = select_all_filter(
-            "Resin Type",
-            priority_df,
-            "Resin",
-            "priority_resin",
-        )
-
-    priority_df = apply_filter(
-        priority_df,
-        "Resin",
-        selected_resin,
-    )
-
-    with f3:
-        selected_position = select_all_filter(
-            "Coating Position",
-            priority_df,
-            "Position_UI",
-            "priority_position",
-        )
-
-    priority_df = apply_filter(
-        priority_df,
-        "Position_UI",
-        selected_position,
-    )
-
-    with f4:
-        selected_solvent = select_all_filter(
-            "Solvent Type",
-            priority_df,
-            "Solvent_Type",
-            "priority_solvent",
-        )
-
-    priority_df = apply_filter(
-        priority_df,
-        "Solvent_Type",
-        selected_solvent,
-    )
-
-    with f5:
-        selected_line = select_all_filter(
-            "Production Line",
-            priority_df,
-            "線別",
-            "priority_line",
-        )
-
-    priority_df = apply_filter(
-        priority_df,
-        "線別",
-        selected_line,
-    )
-
-    if priority_df.empty:
-        st.warning("⚠️ No records match the selected filters.")
+    if summary_df.empty:
+        st.warning("⚠️ No paint-code summary can be generated.")
     else:
-        priority_summary = build_priority_summary(priority_df)
-
-        total_paint_codes = priority_summary["Paint_Code"].nunique()
-        total_batches = priority_summary["Historical_Batches"].sum()
-        total_paint = priority_summary["Total_Paint_kg"].sum()
-        total_solvent = priority_summary["Total_Solvent_kg"].sum()
+        total_paint = summary_df["Total_Paint_kg"].sum()
+        total_solvent = summary_df["Total_Solvent_kg"].sum()
 
         overall_weighted_ratio = (
             total_solvent / total_paint * 100
@@ -677,68 +602,41 @@ with tab_priority:
             else np.nan
         )
 
-        k1, k2, k3, k4, k5 = st.columns(5)
+        k1, k2, k3, k4 = st.columns(4)
 
         k1.metric(
             "Paint Codes",
-            f"{total_paint_codes:,}",
+            f"{summary_df['Paint_Code'].nunique():,}",
         )
 
         k2.metric(
             "Historical Batches",
-            f"{int(total_batches):,}",
+            f"{int(summary_df['Historical_Batches'].sum()):,}",
         )
 
         k3.metric(
-            "Total Paint",
-            safe_metric(total_paint, 0, " kg"),
-        )
-
-        k4.metric(
-            "Total Solvent",
+            "Total Solvent Usage",
             safe_metric(total_solvent, 0, " kg"),
         )
 
-        k5.metric(
+        k4.metric(
             "Overall Weighted Ratio",
             safe_metric(overall_weighted_ratio, 2, "%"),
-        )
-
-        st.markdown("---")
-
-        top_n_limit = max(
-            1,
-            min(30, len(priority_summary)),
-        )
-
-        top_n_default = min(
-            15,
-            top_n_limit,
-        )
-
-        top_n = st.slider(
-            "Number of paint codes to display",
-            min_value=1,
-            max_value=top_n_limit,
-            value=top_n_default,
-            step=1,
-            key="priority_top_n",
         )
 
         ranking_mode = st.radio(
             "Ranking Method",
             options=[
-                "Overall Opportunity",
-                "Highest Usage Frequency",
-                "Highest Total Solvent",
-                "Highest Weighted Ratio",
+                "Highest Total Solvent Usage",
+                "Most Frequently Used",
+                "Highest Weighted Solvent Ratio",
             ],
             horizontal=True,
-            key="priority_ranking_mode",
+            key="ranking_mode",
         )
 
-        if ranking_mode == "Highest Usage Frequency":
-            ranked_df = priority_summary.sort_values(
+        if ranking_mode == "Most Frequently Used":
+            ranked_df = summary_df.sort_values(
                 by=[
                     "Historical_Batches",
                     "Adjustment_Records",
@@ -747,18 +645,8 @@ with tab_priority:
                 ascending=[False, False, False],
             ).copy()
 
-        elif ranking_mode == "Highest Total Solvent":
-            ranked_df = priority_summary.sort_values(
-                by=[
-                    "Total_Solvent_kg",
-                    "Historical_Batches",
-                    "Weighted_Ratio_Percent",
-                ],
-                ascending=[False, False, False],
-            ).copy()
-
-        elif ranking_mode == "Highest Weighted Ratio":
-            ranked_df = priority_summary.sort_values(
+        elif ranking_mode == "Highest Weighted Solvent Ratio":
+            ranked_df = summary_df.sort_values(
                 by=[
                     "Weighted_Ratio_Percent",
                     "Historical_Batches",
@@ -768,59 +656,61 @@ with tab_priority:
             ).copy()
 
         else:
-            ranked_df = priority_summary.sort_values(
+            ranked_df = summary_df.sort_values(
                 by=[
-                    "Opportunity_Score",
                     "Total_Solvent_kg",
                     "Historical_Batches",
+                    "Weighted_Ratio_Percent",
                 ],
                 ascending=[False, False, False],
             ).copy()
 
         ranked_df = ranked_df.reset_index(drop=True)
-        ranked_df["Priority_Rank"] = np.arange(
-            1,
-            len(ranked_df) + 1,
+        ranked_df.insert(
+            0,
+            "Rank",
+            np.arange(1, len(ranked_df) + 1),
         )
 
-        top_ranked = ranked_df.head(top_n).copy()
+        max_top_n = max(1, min(30, len(ranked_df)))
+
+        top_n = st.slider(
+            "Number of paint codes to display",
+            min_value=1,
+            max_value=max_top_n,
+            value=min(15, max_top_n),
+            step=1,
+            key="ranking_top_n",
+        )
+
+        top_df = ranked_df.head(top_n).copy()
 
         chart_col1, chart_col2 = st.columns(2)
 
         with chart_col1:
-            st.markdown("#### Paint Codes with Highest Total Solvent")
-
-            solvent_chart_df = (
-                priority_summary
-                .sort_values(
-                    "Total_Solvent_kg",
-                    ascending=False,
-                )
-                .head(top_n)
-                .sort_values(
-                    "Total_Solvent_kg",
-                    ascending=True,
-                )
+            chart_df = top_df.sort_values(
+                "Total_Solvent_kg",
+                ascending=True,
             )
 
             fig1, ax1 = plt.subplots(
-                figsize=(9, max(5, top_n * 0.42)),
+                figsize=(9, max(5, len(chart_df) * 0.42)),
                 dpi=150,
             )
 
             labels = (
-                solvent_chart_df["Paint_Code"]
+                chart_df["Paint_Code"]
                 + " | "
-                + solvent_chart_df["Vendor"]
+                + chart_df["Vendor"]
             )
 
             ax1.barh(
                 labels,
-                solvent_chart_df["Total_Solvent_kg"],
+                chart_df["Total_Solvent_kg"],
             )
 
             for index, value in enumerate(
-                solvent_chart_df["Total_Solvent_kg"]
+                chart_df["Total_Solvent_kg"]
             ):
                 ax1.text(
                     value,
@@ -830,6 +720,11 @@ with tab_priority:
                     fontsize=8,
                 )
 
+            ax1.set_title(
+                "Total Solvent Usage by Paint Code",
+                loc="left",
+                fontweight="bold",
+            )
             ax1.set_xlabel("Total Solvent Usage (kg)")
             ax1.set_ylabel("Paint Code")
             ax1.grid(
@@ -848,12 +743,13 @@ with tab_priority:
             plt.close(fig1)
 
         with chart_col2:
-            st.markdown("#### Usage Frequency vs Total Solvent")
-
-            scatter_df = priority_summary.copy()
+            fig2, ax2 = plt.subplots(
+                figsize=(9, 6),
+                dpi=150,
+            )
 
             size_values = (
-                scatter_df["Weighted_Ratio_Percent"]
+                summary_df["Weighted_Ratio_Percent"]
                 .fillna(0)
                 .clip(lower=0)
             )
@@ -864,29 +760,24 @@ with tab_priority:
                 ) + 50
             else:
                 marker_sizes = np.full(
-                    len(scatter_df),
+                    len(summary_df),
                     80,
                 )
 
-            fig2, ax2 = plt.subplots(
-                figsize=(9, 6),
-                dpi=150,
-            )
-
             ax2.scatter(
-                scatter_df["Historical_Batches"],
-                scatter_df["Total_Solvent_kg"],
+                summary_df["Historical_Batches"],
+                summary_df["Total_Solvent_kg"],
                 s=marker_sizes,
                 alpha=0.65,
             )
 
             label_df = (
-                scatter_df
+                summary_df
                 .sort_values(
-                    "Opportunity_Score",
+                    "Total_Solvent_kg",
                     ascending=False,
                 )
-                .head(min(10, len(scatter_df)))
+                .head(min(10, len(summary_df)))
             )
 
             for _, row in label_df.iterrows():
@@ -901,6 +792,11 @@ with tab_priority:
                     fontsize=8,
                 )
 
+            ax2.set_title(
+                "Usage Frequency vs Total Solvent",
+                loc="left",
+                fontweight="bold",
+            )
             ax2.set_xlabel("Historical Batches")
             ax2.set_ylabel("Total Solvent Usage (kg)")
             ax2.grid(
@@ -927,324 +823,220 @@ with tab_priority:
             st.pyplot(fig2, use_container_width=True)
             plt.close(fig2)
 
-        st.markdown(f"#### Ranking Table — {ranking_mode}")
+        display_df = top_df[
+            [
+                "Rank",
+                "Vendor",
+                "Resin",
+                "Position_UI",
+                "Paint_Code",
+                "Solvent_Type",
+                "Adjustment_Records",
+                "Historical_Batches",
+                "Production_Lines",
+                "Total_Paint_kg",
+                "Total_Solvent_kg",
+                "Median_Solvent_kg",
+                "Weighted_Ratio_Percent",
+                "Median_Before_Viscosity",
+                "Median_After_Viscosity",
+            ]
+        ].copy()
 
-        priority_display = prepare_priority_display(
-            top_ranked
-        )
+        display_df.columns = [
+            "Rank",
+            "Vendor",
+            "Resin Type",
+            "Coating Position",
+            "Paint Code",
+            "Solvent Type",
+            "Adjustment Records",
+            "Historical Batches",
+            "Production Lines",
+            "Total Paint (kg)",
+            "Total Solvent (kg)",
+            "Median Solvent Added (kg)",
+            "Weighted Solvent Ratio (%)",
+            "Median Before Viscosity (s)",
+            "Median After Viscosity (s)",
+        ]
+
+        numeric_display_cols = [
+            "Total Paint (kg)",
+            "Total Solvent (kg)",
+            "Median Solvent Added (kg)",
+            "Weighted Solvent Ratio (%)",
+            "Median Before Viscosity (s)",
+            "Median After Viscosity (s)",
+        ]
+
+        for col in numeric_display_cols:
+            display_df[col] = pd.to_numeric(
+                display_df[col],
+                errors="coerce",
+            ).round(2)
 
         st.dataframe(
-            priority_display,
+            display_df,
             use_container_width=True,
             hide_index=True,
         )
 
-        if not priority_summary.empty:
-            top_opportunity = priority_summary.iloc[0]
-
-            st.markdown("#### Improvement Recommendation")
-
-            st.info(
-                f"Paint code **{top_opportunity['Paint_Code']}** "
-                f"(Vendor: **{top_opportunity['Vendor']}**; "
-                f"Resin: **{top_opportunity['Resin']}**; "
-                f"Position: **{top_opportunity['Position_UI']}**) "
-                f"has **{int(top_opportunity['Historical_Batches'])} historical batches**, "
-                f"**{top_opportunity['Total_Solvent_kg']:,.0f} kg** total solvent usage, "
-                f"and a weighted solvent ratio of "
-                f"**{top_opportunity['Weighted_Ratio_Percent']:.2f}%**. "
-                f"It should be reviewed first with the supplier for delivery-viscosity improvement."
-            )
-
-        full_priority_display = prepare_priority_display(
-            priority_summary
-        )
-
-        csv_data = full_priority_display.to_csv(
+        csv_data = ranked_df.to_csv(
             index=False,
             encoding="utf-8-sig",
         ).encode("utf-8-sig")
 
         st.download_button(
-            label="📥 Download Full Priority Table",
+            label="📥 Download Full Paint Code Ranking",
             data=csv_data,
-            file_name="Solvent_Reduction_Priority.csv",
+            file_name="Paint_Code_Solvent_Ranking.csv",
             mime="text/csv",
-            key="download_priority_csv",
+            key="download_ranking_csv",
         )
 
 
 # =========================================================
-# TAB 2: PAINT CODE DETAILS
+# TAB 2 — PAINT CODE DETAILS
 # =========================================================
 with tab_detail:
     st.subheader("2. Paint Code Details")
 
     st.caption(
-        "Select a paint code to review its coating position, production lines, "
-        "solvent type, historical addition amount, and viscosity performance."
+        f"Analysis Period: {period_label} | "
+        f"Records Included: {len(filter_df):,}"
     )
 
-    st.markdown("#### Paint Code Selection")
+    paint_code_options = clean_options(
+        filter_df["Paint_Code"]
+    )
 
-    d1, d2, d3, d4, d5 = st.columns(5)
+    selected_paint_code = st.selectbox(
+        "Select Paint Code",
+        options=paint_code_options,
+        key="detail_paint_code",
+    )
 
-    with d1:
-        detail_vendor = st.selectbox(
-            "Vendor",
-            options=clean_options(df["Vendor"]),
-            key="detail_vendor",
-        )
-
-    detail_filter_df = df[
-        df["Vendor"] == detail_vendor
-    ].copy()
-
-    with d2:
-        detail_resin = st.selectbox(
-            "Resin Type",
-            options=clean_options(
-                detail_filter_df["Resin"]
-            ),
-            key="detail_resin",
-        )
-
-    detail_filter_df = detail_filter_df[
-        detail_filter_df["Resin"] == detail_resin
-    ].copy()
-
-    with d3:
-        detail_position = st.selectbox(
-            "Coating Position",
-            options=clean_options(
-                detail_filter_df["Position_UI"]
-            ),
-            key="detail_position",
-        )
-
-    detail_filter_df = detail_filter_df[
-        detail_filter_df["Position_UI"]
-        == detail_position
-    ].copy()
-
-    with d4:
-        detail_solvent = st.selectbox(
-            "Solvent Type",
-            options=clean_options(
-                detail_filter_df["Solvent_Type"]
-            ),
-            key="detail_solvent",
-        )
-
-    detail_filter_df = detail_filter_df[
-        detail_filter_df["Solvent_Type"]
-        == detail_solvent
-    ].copy()
-
-    with d5:
-        detail_paint_code = st.selectbox(
-            "Paint Code",
-            options=clean_options(
-                detail_filter_df["Paint_Code"]
-            ),
-            key="detail_paint_code",
-        )
-
-    detail_df = detail_filter_df[
-        detail_filter_df["Paint_Code"]
-        == detail_paint_code
+    detail_df = filter_df[
+        filter_df["Paint_Code"] == selected_paint_code
     ].copy()
 
     if detail_df.empty:
-        st.warning("⚠️ No records match the selected paint-code condition.")
+        st.warning("⚠️ No records are available for this paint code.")
     else:
         detail_records = len(detail_df)
-        detail_batches = distinct_batch_count(
+        detail_batches = valid_batch_count(
             detail_df["Batch_ID"]
         )
+        detail_lines = detail_df["線別"].nunique()
+        total_paint = detail_df["塗料重量"].sum()
+        total_solvent = detail_df["添加重量"].sum()
 
-        detail_lines = detail_df.loc[
-            detail_df["線別"] != "Unknown",
-            "線別",
-        ].nunique()
-
-        detail_total_paint = detail_df["塗料重量"].sum()
-        detail_total_solvent = detail_df["添加重量"].sum()
-
-        detail_weighted_ratio = (
-            detail_total_solvent
-            / detail_total_paint
-            * 100
-            if detail_total_paint > 0
+        weighted_ratio = (
+            total_solvent / total_paint * 100
+            if total_paint > 0
             else np.nan
         )
 
+        median_paint = detail_df["塗料重量"].median()
+        median_solvent = detail_df["添加重量"].median()
         median_before = detail_df["黏度(秒)"].median()
         median_after = detail_df["黏度(秒)_1"].median()
-        median_delta = detail_df["Delta_V"].median()
-        median_efficiency = (
-            detail_df["Viscosity_Sensitivity"].median()
-        )
+        median_drop = detail_df["Delta_V"].median()
+        median_efficiency = detail_df[
+            "Viscosity_Sensitivity"
+        ].median()
 
-        median_solvent = detail_df["添加重量"].median()
-        median_paint = detail_df["塗料重量"].median()
+        kpi1 = st.columns(5)
 
-        after_viscosity_range = percentile_range(
-            detail_df["黏度(秒)_1"]
-        )
-
-        ratio_range = percentile_range(
-            detail_df["Solvent_Ratio_Percent"]
-        )
-
-        kpi_row1 = st.columns(5)
-
-        kpi_row1[0].metric(
+        kpi1[0].metric(
             "Adjustment Records",
             f"{detail_records:,}",
         )
-
-        kpi_row1[1].metric(
+        kpi1[1].metric(
             "Historical Batches",
             f"{detail_batches:,}",
         )
-
-        kpi_row1[2].metric(
+        kpi1[2].metric(
             "Production Lines",
             f"{detail_lines:,}",
         )
-
-        kpi_row1[3].metric(
-            "Total Solvent",
-            safe_metric(
-                detail_total_solvent,
-                0,
-                " kg",
-            ),
+        kpi1[3].metric(
+            "Total Solvent Usage",
+            safe_metric(total_solvent, 0, " kg"),
+        )
+        kpi1[4].metric(
+            "Weighted Solvent Ratio",
+            safe_metric(weighted_ratio, 2, "%"),
         )
 
-        kpi_row1[4].metric(
-            "Weighted Ratio",
-            safe_metric(
-                detail_weighted_ratio,
-                2,
-                "%",
-            ),
-        )
+        kpi2 = st.columns(5)
 
-        kpi_row2 = st.columns(5)
-
-        kpi_row2[0].metric(
+        kpi2[0].metric(
             "Reference Paint Weight",
-            safe_metric(
-                median_paint,
-                1,
-                " kg",
-            ),
+            safe_metric(median_paint, 1, " kg"),
         )
-
-        kpi_row2[1].metric(
-            "Reference Solvent Addition",
-            safe_metric(
-                median_solvent,
-                1,
-                " kg",
-            ),
+        kpi2[1].metric(
+            "Median Solvent Added",
+            safe_metric(median_solvent, 1, " kg"),
         )
-
-        kpi_row2[2].metric(
+        kpi2[2].metric(
             "Median Before Viscosity",
-            safe_metric(
-                median_before,
-                1,
-                " s",
-            ),
+            safe_metric(median_before, 1, " s"),
         )
-
-        kpi_row2[3].metric(
+        kpi2[3].metric(
             "Median After Viscosity",
-            safe_metric(
-                median_after,
-                1,
-                " s",
-            ),
+            safe_metric(median_after, 1, " s"),
         )
-
-        kpi_row2[4].metric(
+        kpi2[4].metric(
             "Median Dilution Efficiency",
-            safe_metric(
-                median_efficiency,
-                2,
-                " s/%",
-            ),
+            safe_metric(median_efficiency, 2, " s/%"),
         )
-
-        st.markdown("---")
 
         st.markdown("#### Historical Reference")
 
-        reference_col1, reference_col2, reference_col3 = st.columns(3)
+        ref1, ref2, ref3 = st.columns(3)
 
-        reference_col1.info(
+        ref1.info(
             f"**After-viscosity P10–P90**\n\n"
-            f"{after_viscosity_range} s"
+            f"{format_range(detail_df['黏度(秒)_1'])} s"
         )
 
-        reference_col2.info(
+        ref2.info(
             f"**Solvent-ratio P10–P90**\n\n"
-            f"{ratio_range}%"
+            f"{format_range(detail_df['Solvent_Ratio_Percent'])}%"
         )
 
-        reference_col3.info(
+        ref3.info(
             f"**Median viscosity drop**\n\n"
-            f"{median_delta:.1f} s"
+            f"{median_drop:.1f} s"
         )
 
-        st.caption(
-            "The historical after-viscosity range is a production reference only. "
-            "Before setting a supplier delivery-viscosity specification, confirm "
-            "measurement temperature, method, coating position, and product requirements."
-        )
+        detail_chart1, detail_chart2 = st.columns(2)
 
-        detail_chart_col1, detail_chart_col2 = st.columns(2)
-
-        with detail_chart_col1:
-            st.markdown("#### Before Viscosity vs Solvent Ratio")
-
+        with detail_chart1:
             fig3, ax3 = plt.subplots(
                 figsize=(8.5, 5.5),
                 dpi=150,
             )
 
-            line_values = clean_options(
-                detail_df["線別"]
-            )
+            for line in clean_options(detail_df["線別"]):
+                line_df = detail_df[
+                    detail_df["線別"] == line
+                ]
 
-            if not line_values:
                 ax3.scatter(
-                    detail_df["黏度(秒)"],
-                    detail_df["Solvent_Ratio_Percent"],
+                    line_df["黏度(秒)"],
+                    line_df["Solvent_Ratio_Percent"],
+                    label=line,
                     alpha=0.7,
                 )
-            else:
-                for line in line_values:
-                    line_data = detail_df[
-                        detail_df["線別"] == line
-                    ]
 
-                    ax3.scatter(
-                        line_data["黏度(秒)"],
-                        line_data["Solvent_Ratio_Percent"],
-                        label=line,
-                        alpha=0.7,
-                    )
-
-                ax3.legend(
-                    title="Production Line",
-                    fontsize=8,
-                    title_fontsize=9,
-                )
-
+            ax3.set_title(
+                "Before Viscosity vs Solvent Ratio",
+                loc="left",
+                fontweight="bold",
+            )
             ax3.set_xlabel("Before Viscosity (s)")
             ax3.set_ylabel("Solvent Ratio (%)")
             ax3.grid(
@@ -1254,6 +1046,13 @@ with tab_detail:
                 alpha=0.4,
             )
 
+            if detail_lines > 1:
+                ax3.legend(
+                    title="Production Line",
+                    fontsize=8,
+                    title_fontsize=9,
+                )
+
             for spine in ax3.spines.values():
                 spine.set_visible(True)
                 spine.set_linewidth(1.0)
@@ -1262,25 +1061,8 @@ with tab_detail:
             st.pyplot(fig3, use_container_width=True)
             plt.close(fig3)
 
-        with detail_chart_col2:
-            st.markdown("#### Solvent Usage by Production Line")
-
-            line_usage = detail_df.groupby(
-                "線別",
-                observed=False,
-            ).agg(
-                Total_Solvent_kg=("添加重量", "sum"),
-                Total_Paint_kg=("塗料重量", "sum"),
-                Records=("Paint_Code", "size"),
-            ).reset_index()
-
-            line_usage["Weighted_Ratio_Percent"] = np.where(
-                line_usage["Total_Paint_kg"] > 0,
-                line_usage["Total_Solvent_kg"]
-                / line_usage["Total_Paint_kg"]
-                * 100,
-                np.nan,
-            )
+        with detail_chart2:
+            line_usage = build_line_summary(detail_df)
 
             line_usage = line_usage.sort_values(
                 "Total_Solvent_kg",
@@ -1305,12 +1087,17 @@ with tab_detail:
                     index,
                     (
                         f" {row['Total_Solvent_kg']:,.0f} kg"
-                        f" | {row['Weighted_Ratio_Percent']:.1f}%"
+                        f" | {row['Weighted_Ratio_Percent']:.2f}%"
                     ),
                     va="center",
                     fontsize=8,
                 )
 
+            ax4.set_title(
+                "Solvent Usage by Production Line",
+                loc="left",
+                fontweight="bold",
+            )
             ax4.set_xlabel("Total Solvent Usage (kg)")
             ax4.set_ylabel("Production Line")
             ax4.grid(
@@ -1328,91 +1115,24 @@ with tab_detail:
             st.pyplot(fig4, use_container_width=True)
             plt.close(fig4)
 
-        st.markdown("#### Solvent Reduction Simulation")
-
-        simulation_col1, simulation_col2 = st.columns(2)
-
-        with simulation_col1:
-            reduction_rate = st.select_slider(
-                "Expected Reduction Rate",
-                options=[5, 10, 15, 20, 25, 30],
-                value=10,
-                format_func=lambda x: f"{x}%",
-                key="detail_reduction_rate",
-            )
-
-        with simulation_col2:
-            solvent_unit_price = st.number_input(
-                "Solvent Unit Price per kg (optional)",
-                min_value=0.0,
-                value=0.0,
-                step=1.0,
-                key="detail_solvent_price",
-            )
-
-        estimated_reduction_kg = (
-            detail_total_solvent
-            * reduction_rate
-            / 100
-        )
-
-        estimated_saving = (
-            estimated_reduction_kg
-            * solvent_unit_price
-        )
-
-        sim1, sim2, sim3 = st.columns(3)
-
-        sim1.metric(
-            "Historical Total Solvent",
-            safe_metric(
-                detail_total_solvent,
-                0,
-                " kg",
-            ),
-        )
-
-        sim2.metric(
-            f"Estimated Reduction ({reduction_rate}%)",
-            safe_metric(
-                estimated_reduction_kg,
-                0,
-                " kg",
-            ),
-        )
-
-        sim3.metric(
-            "Estimated Cost Saving",
-            (
-                safe_metric(
-                    estimated_saving,
-                    0,
-                )
-                if solvent_unit_price > 0
-                else "Enter unit price"
-            ),
-        )
-
         with st.expander("View Historical Detail Records"):
-            detail_columns = [
-                "Vendor",
-                "Resin",
-                "Position_UI",
-                "Paint_Code",
-                "線別",
-                "Solvent_Type",
-                "塗料批號",
-                "塗料重量",
-                "添加重量",
-                "Solvent_Ratio_Percent",
-                "黏度(秒)",
-                "黏度(秒)_1",
-                "Delta_V",
-                "Viscosity_Sensitivity",
-            ]
-
             detail_display = detail_df[
-                detail_columns
+                [
+                    "Vendor",
+                    "Resin",
+                    "Position_UI",
+                    "Paint_Code",
+                    "線別",
+                    "Solvent_Type",
+                    "塗料批號",
+                    "塗料重量",
+                    "添加重量",
+                    "Solvent_Ratio_Percent",
+                    "黏度(秒)",
+                    "黏度(秒)_1",
+                    "Delta_V",
+                    "Viscosity_Sensitivity",
+                ]
             ].copy()
 
             detail_display.columns = [
@@ -1432,24 +1152,6 @@ with tab_detail:
                 "Dilution Efficiency (s/%)",
             ]
 
-            numeric_cols_detail = [
-                "Paint Weight (kg)",
-                "Solvent Added (kg)",
-                "Solvent Ratio (%)",
-                "Before Viscosity (s)",
-                "After Viscosity (s)",
-                "Viscosity Drop (s)",
-                "Dilution Efficiency (s/%)",
-            ]
-
-            for col in numeric_cols_detail:
-                detail_display[col] = (
-                    pd.to_numeric(
-                        detail_display[col],
-                        errors="coerce",
-                    ).round(2)
-                )
-
             st.dataframe(
                 detail_display,
                 use_container_width=True,
@@ -1458,254 +1160,91 @@ with tab_detail:
 
 
 # =========================================================
-# TAB 3: PRODUCTION LINE COMPARISON
+# TAB 3 — PRODUCTION LINE COMPARISON
 # =========================================================
 with tab_line:
     st.subheader("3. Production Line Comparison")
 
     st.caption(
-        "The system automatically identifies paint-code conditions used on "
-        "at least two production lines, ranks them, and allows one-click comparison."
+        f"Analysis Period: {period_label} | "
+        f"Records Included: {len(filter_df):,}"
     )
 
-    st.markdown("#### Automatic Screening Filters")
-
-    c1, c2, c3, c4 = st.columns(4)
-
-    with c1:
-        compare_vendor = select_all_filter(
-            "Vendor",
-            df,
-            "Vendor",
-            "compare_vendor",
-        )
-
-    compare_df = apply_filter(
-        df,
-        "Vendor",
-        compare_vendor,
+    line_paint_code = st.selectbox(
+        "Select Paint Code for Line Comparison",
+        options=clean_options(filter_df["Paint_Code"]),
+        key="line_paint_code",
     )
 
-    with c2:
-        compare_resin = select_all_filter(
-            "Resin Type",
-            compare_df,
-            "Resin",
-            "compare_resin",
-        )
+    comparison_df = filter_df[
+        filter_df["Paint_Code"] == line_paint_code
+    ].copy()
 
-    compare_df = apply_filter(
-        compare_df,
-        "Resin",
-        compare_resin,
-    )
+    line_summary = build_line_summary(comparison_df)
 
-    with c3:
-        compare_position = select_all_filter(
-            "Coating Position",
-            compare_df,
-            "Position_UI",
-            "compare_position",
-        )
-
-    compare_df = apply_filter(
-        compare_df,
-        "Position_UI",
-        compare_position,
-    )
-
-    with c4:
-        minimum_records = st.number_input(
-            "Minimum Records per Line",
-            min_value=1,
-            max_value=30,
-            value=3,
-            step=1,
-            key="compare_minimum_records",
-        )
-
-    candidates, line_level = build_line_comparison_candidates(
-        compare_df,
-        min_records_per_line=minimum_records,
-    )
-
-    if candidates.empty:
+    if line_summary.empty:
+        st.warning("⚠️ No production-line data are available.")
+    elif line_summary["線別"].nunique() < 2:
         st.warning(
-            "⚠️ No comparable paint-code condition was found. "
-            "Try selecting All filters or reducing the minimum records per line."
+            "⚠️ Only one production line remains after the global filters. "
+            "Select at least two production lines in the global filter to compare them."
         )
-    else:
-        screening_display = candidates[
-            [
-                "Vendor",
-                "Resin",
-                "Position_UI",
-                "Paint_Code",
-                "Solvent_Type",
-                "Production_Lines",
-                "Total_Records",
-                "Total_Batches",
-                "Total_Solvent_kg",
-                "Ratio_Difference",
-                "Before_Viscosity_Difference",
-                "After_Viscosity_Difference",
-                "Comparison_Score",
-            ]
-        ].copy()
 
-        screening_display.columns = [
-            "Vendor",
-            "Resin Type",
-            "Coating Position",
-            "Paint Code",
-            "Solvent Type",
-            "Production Lines",
-            "Total Records",
-            "Total Batches",
-            "Total Solvent (kg)",
-            "Max Ratio Difference (%-pt)",
-            "Max Before-Viscosity Difference (s)",
-            "Max After-Viscosity Difference (s)",
-            "Comparison Score",
-        ]
-
-        numeric_screening_cols = [
-            "Total Solvent (kg)",
-            "Max Ratio Difference (%-pt)",
-            "Max Before-Viscosity Difference (s)",
-            "Max After-Viscosity Difference (s)",
-            "Comparison Score",
-        ]
-
-        for col in numeric_screening_cols:
-            screening_display[col] = pd.to_numeric(
-                screening_display[col],
-                errors="coerce",
-            ).round(2)
-
-        st.markdown("#### Automatically Ranked Comparison Opportunities")
-
+        single_line_display = line_summary.copy()
         st.dataframe(
-            screening_display.head(30),
+            single_line_display,
             use_container_width=True,
             hide_index=True,
         )
+    else:
+        number_of_lines = line_summary["線別"].nunique()
+        total_solvent = line_summary["Total_Solvent_kg"].sum()
+        total_paint = line_summary["Total_Paint_kg"].sum()
 
-        selected_condition = st.selectbox(
-            "Select Comparison Condition",
-            options=candidates["Condition_Label"].tolist(),
-            key="auto_line_condition",
-        )
-
-        selected_row = candidates[
-            candidates["Condition_Label"]
-            == selected_condition
-        ].iloc[0]
-
-        condition_mask = (
-            (line_level["Vendor"] == selected_row["Vendor"])
-            & (line_level["Resin"] == selected_row["Resin"])
-            & (
-                line_level["Position_UI"]
-                == selected_row["Position_UI"]
-            )
-            & (
-                line_level["Paint_Code"]
-                == selected_row["Paint_Code"]
-            )
-            & (
-                line_level["Solvent_Type"]
-                == selected_row["Solvent_Type"]
-            )
-        )
-
-        selected_line_summary = line_level[
-            condition_mask
-        ].copy()
-
-        selected_line_summary = selected_line_summary.sort_values(
-            "線別"
-        ).reset_index(drop=True)
-
-        number_of_lines = selected_line_summary[
-            "線別"
-        ].nunique()
-
-        k1, k2, k3, k4 = st.columns(4)
-
-        k1.metric(
-            "Production Lines",
-            f"{number_of_lines:,}",
-        )
-
-        k2.metric(
-            "Total Records",
-            f"{int(selected_line_summary['Records'].sum()):,}",
-        )
-
-        k3.metric(
-            "Total Solvent",
-            safe_metric(
-                selected_line_summary[
-                    "Total_Solvent_kg"
-                ].sum(),
-                0,
-                " kg",
-            ),
-        )
-
-        overall_line_ratio = (
-            selected_line_summary[
-                "Total_Solvent_kg"
-            ].sum()
-            / selected_line_summary[
-                "Total_Paint_kg"
-            ].sum()
-            * 100
-            if selected_line_summary[
-                "Total_Paint_kg"
-            ].sum() > 0
+        overall_weighted_ratio = (
+            total_solvent / total_paint * 100
+            if total_paint > 0
             else np.nan
         )
 
-        k4.metric(
-            "Overall Weighted Ratio",
-            safe_metric(
-                overall_line_ratio,
-                2,
-                "%",
-            ),
-        )
+        c1, c2, c3, c4 = st.columns(4)
 
-        st.markdown("---")
+        c1.metric(
+            "Production Lines",
+            f"{number_of_lines:,}",
+        )
+        c2.metric(
+            "Total Records",
+            f"{int(line_summary['Adjustment_Records'].sum()):,}",
+        )
+        c3.metric(
+            "Total Solvent Usage",
+            safe_metric(total_solvent, 0, " kg"),
+        )
+        c4.metric(
+            "Overall Weighted Ratio",
+            safe_metric(overall_weighted_ratio, 2, "%"),
+        )
 
         chart1, chart2 = st.columns(2)
 
         with chart1:
-            st.markdown("#### Before vs After Viscosity by Line")
-
             fig5, ax5 = plt.subplots(
                 figsize=(8.5, 5.8),
                 dpi=150,
             )
 
-            x_positions = np.arange(
-                len(selected_line_summary)
-            )
+            x_values = np.arange(len(line_summary))
 
-            before_values = (
-                selected_line_summary["Median_Before"]
-                .to_numpy()
-            )
+            before_values = line_summary[
+                "Median_Before_Viscosity"
+            ].to_numpy()
 
-            after_values = (
-                selected_line_summary["Median_After"]
-                .to_numpy()
-            )
+            after_values = line_summary[
+                "Median_After_Viscosity"
+            ].to_numpy()
 
-            for index in range(
-                len(selected_line_summary)
-            ):
+            for index in range(len(line_summary)):
                 ax5.plot(
                     [index, index],
                     [
@@ -1717,18 +1256,18 @@ with tab_line:
                 )
 
             ax5.scatter(
-                x_positions,
+                x_values,
                 before_values,
-                marker="o",
                 s=80,
+                marker="o",
                 label="Before Viscosity",
             )
 
             ax5.scatter(
-                x_positions,
+                x_values,
                 after_values,
-                marker="s",
                 s=80,
+                marker="s",
                 label="After Viscosity",
             )
 
@@ -1752,11 +1291,13 @@ with tab_line:
                     fontsize=8,
                 )
 
-            ax5.set_xticks(x_positions)
-            ax5.set_xticklabels(
-                selected_line_summary["線別"],
+            ax5.set_xticks(x_values)
+            ax5.set_xticklabels(line_summary["線別"])
+            ax5.set_title(
+                "Before vs After Viscosity by Line",
+                loc="left",
+                fontweight="bold",
             )
-
             ax5.set_xlabel("Production Line")
             ax5.set_ylabel("Median Viscosity (s)")
             ax5.legend()
@@ -1776,10 +1317,8 @@ with tab_line:
             plt.close(fig5)
 
         with chart2:
-            st.markdown("#### Weighted Solvent Ratio by Line")
-
-            ratio_chart_df = selected_line_summary.sort_values(
-                "Weighted_Ratio",
+            ratio_df = line_summary.sort_values(
+                "Weighted_Ratio_Percent",
                 ascending=True,
             )
 
@@ -1789,24 +1328,29 @@ with tab_line:
             )
 
             ax6.barh(
-                ratio_chart_df["線別"],
-                ratio_chart_df["Weighted_Ratio"],
+                ratio_df["線別"],
+                ratio_df["Weighted_Ratio_Percent"],
             )
 
-            for index, row in ratio_chart_df.reset_index(
+            for index, row in ratio_df.reset_index(
                 drop=True
             ).iterrows():
                 ax6.text(
-                    row["Weighted_Ratio"],
+                    row["Weighted_Ratio_Percent"],
                     index,
                     (
-                        f" {row['Weighted_Ratio']:.2f}%"
+                        f" {row['Weighted_Ratio_Percent']:.2f}%"
                         f" | {row['Total_Solvent_kg']:,.0f} kg"
                     ),
                     va="center",
                     fontsize=8,
                 )
 
+            ax6.set_title(
+                "Weighted Solvent Ratio by Line",
+                loc="left",
+                fontweight="bold",
+            )
             ax6.set_xlabel("Weighted Solvent Ratio (%)")
             ax6.set_ylabel("Production Line")
             ax6.grid(
@@ -1824,53 +1368,39 @@ with tab_line:
             st.pyplot(fig6, use_container_width=True)
             plt.close(fig6)
 
-        st.markdown("#### Production Line Comparison Table")
-
-        comparison_display = selected_line_summary[
+        comparison_display = line_summary[
             [
                 "線別",
-                "Records",
-                "Batches",
+                "Adjustment_Records",
+                "Historical_Batches",
                 "Total_Paint_kg",
                 "Total_Solvent_kg",
                 "Median_Paint_kg",
                 "Median_Solvent_kg",
-                "Weighted_Ratio",
-                "Median_Before",
-                "Median_After",
-                "Median_Delta",
-                "Median_Efficiency",
+                "Weighted_Ratio_Percent",
+                "Median_Before_Viscosity",
+                "Median_After_Viscosity",
+                "Median_Viscosity_Drop",
+                "Median_Dilution_Efficiency",
             ]
         ].copy()
 
         comparison_display.columns = [
             "Production Line",
-            "Records",
-            "Batches",
+            "Adjustment Records",
+            "Historical Batches",
             "Total Paint (kg)",
             "Total Solvent (kg)",
             "Reference Paint Weight (kg)",
-            "Reference Solvent Addition (kg)",
-            "Weighted Ratio (%)",
+            "Median Solvent Added (kg)",
+            "Weighted Solvent Ratio (%)",
             "Median Before Viscosity (s)",
             "Median After Viscosity (s)",
             "Median Viscosity Drop (s)",
             "Median Dilution Efficiency (s/%)",
         ]
 
-        numeric_compare_cols = [
-            "Total Paint (kg)",
-            "Total Solvent (kg)",
-            "Reference Paint Weight (kg)",
-            "Reference Solvent Addition (kg)",
-            "Weighted Ratio (%)",
-            "Median Before Viscosity (s)",
-            "Median After Viscosity (s)",
-            "Median Viscosity Drop (s)",
-            "Median Dilution Efficiency (s/%)",
-        ]
-
-        for col in numeric_compare_cols:
+        for col in comparison_display.columns[3:]:
             comparison_display[col] = pd.to_numeric(
                 comparison_display[col],
                 errors="coerce",
@@ -1882,79 +1412,51 @@ with tab_line:
             hide_index=True,
         )
 
-        st.markdown("#### Automatic Interpretation")
+        st.markdown("#### Comparison Interpretation")
 
-        highest_ratio_row = selected_line_summary.loc[
-            selected_line_summary[
-                "Weighted_Ratio"
-            ].idxmax()
+        max_ratio_row = line_summary.loc[
+            line_summary["Weighted_Ratio_Percent"].idxmax()
         ]
 
-        lowest_ratio_row = selected_line_summary.loc[
-            selected_line_summary[
-                "Weighted_Ratio"
-            ].idxmin()
+        min_ratio_row = line_summary.loc[
+            line_summary["Weighted_Ratio_Percent"].idxmin()
         ]
 
         ratio_difference = (
-            highest_ratio_row["Weighted_Ratio"]
-            - lowest_ratio_row["Weighted_Ratio"]
+            max_ratio_row["Weighted_Ratio_Percent"]
+            - min_ratio_row["Weighted_Ratio_Percent"]
         )
 
         before_difference = (
-            selected_line_summary["Median_Before"].max()
-            - selected_line_summary["Median_Before"].min()
-        )
-
-        after_difference = (
-            selected_line_summary["Median_After"].max()
-            - selected_line_summary["Median_After"].min()
+            line_summary["Median_Before_Viscosity"].max()
+            - line_summary["Median_Before_Viscosity"].min()
         )
 
         st.write(
             f"The highest weighted solvent ratio is on "
-            f"**{highest_ratio_row['線別']}** "
-            f"({highest_ratio_row['Weighted_Ratio']:.2f}%), "
+            f"**{max_ratio_row['線別']}** "
+            f"({max_ratio_row['Weighted_Ratio_Percent']:.2f}%), "
             f"while the lowest is on "
-            f"**{lowest_ratio_row['線別']}** "
-            f"({lowest_ratio_row['Weighted_Ratio']:.2f}%). "
+            f"**{min_ratio_row['線別']}** "
+            f"({min_ratio_row['Weighted_Ratio_Percent']:.2f}%). "
             f"The difference is **{ratio_difference:.2f} percentage points**."
         )
 
-        st.write(
-            f"The maximum difference in median before viscosity is "
-            f"**{before_difference:.1f} s**, and the maximum difference "
-            f"in median after viscosity is **{after_difference:.1f} s**."
-        )
-
-        all_lines_high_ratio = (
-            selected_line_summary["Weighted_Ratio"].min()
-            >= 10
-        )
-
-        if ratio_difference <= 2 and all_lines_high_ratio:
-            st.success(
-                "All production lines show consistently high solvent addition "
-                "with only a small line-to-line difference. Supplier delivery "
-                "viscosity should be reviewed as the first improvement target."
-            )
-
-        elif ratio_difference <= 2:
+        if ratio_difference <= 2:
             st.info(
-                "Solvent addition is similar across production lines. "
-                "The difference between lines is limited."
+                "The production lines show similar solvent-addition ratios. "
+                "If all lines consistently require high solvent addition, "
+                "supplier delivery viscosity should be reviewed."
             )
-
         elif before_difference >= 10:
             st.info(
-                "Incoming viscosity differs clearly between production lines. "
-                "The solvent-usage difference may be related to incoming viscosity "
-                "or measurement conditions. Supplier conclusions should not be made yet."
+                "The production lines have clearly different incoming viscosity. "
+                "The solvent difference may be caused by incoming viscosity or "
+                "measurement conditions rather than line performance alone."
             )
-
         else:
             st.warning(
                 "The production lines show a noticeable solvent-ratio difference "
-                "despite similar incoming viscosity. Review line operating conditions, "
-                "measurement methods, and line-specific viscosity requirements first."
+                "despite relatively similar incoming viscosity. Review line operating "
+                "conditions and line-specific viscosity requirements."
             )
