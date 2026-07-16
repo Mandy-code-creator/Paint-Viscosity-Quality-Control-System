@@ -50,7 +50,7 @@ if df.empty:
     st.warning("⚠️ No valid dilution records remain after data cleaning. (無有效紀錄)")
     st.stop()
 
-# Date Parsing (No filtering by duration)
+# Date Parsing
 date_col = next((c for c in ["攪拌日期", "調整日期", "生產日期", "Date"] if c in df.columns), None)
 if date_col:
     df["_Analysis_Date"] = pd.to_datetime(df[date_col], errors="coerce")
@@ -112,7 +112,7 @@ else:
     st.stop()
 
 if filter_df.empty:
-    st.warning("⚠️ No records match the global analysis filters. (無符合篩選條件的資料)")
+    st.warning("⚠️ No records match the global analysis filters. (無符合篩選條件 của 資料)")
     st.stop()
 
 # ==========================================
@@ -140,22 +140,27 @@ tab_ranking, tab_detail, tab_line = st.tabs([
 
 # ----- TAB 1: RANKING -----
 with tab_ranking:
-    st.subheader("1. Paint Code Solvent Consumption")
-    summary_df = build_summary(filter_df, ["Vendor", "Resin", "Position_UI", "Paint_Code", "Solvent_Type"])
-    summary_df = summary_df.sort_values("Total_Solvent_kg", ascending=False).reset_index(drop=True)
+    st.subheader("1. Paint Code Solvent Consumption (Top 20)")
+    
+    # Tạo bảng tổng hợp gốc
+    full_summary_df = build_summary(filter_df, ["Vendor", "Resin", "Position_UI", "Paint_Code", "Solvent_Type"])
+    
+    # Sắp xếp theo lượng dung môi giảm dần và chỉ lấy TOP 20
+    summary_df = full_summary_df.sort_values("Total_Solvent_kg", ascending=False).head(20).reset_index(drop=True)
     summary_df.insert(0, "Rank", np.arange(1, len(summary_df) + 1))
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Paint Codes", f"{summary_df['Paint_Code'].nunique():,}")
-    c2.metric("Historical Batches", f"{summary_df['Historical_Batches'].sum():,.0f}")
-    c3.metric("Total Solvent Usage", f"{summary_df['Total_Solvent_kg'].sum():,.0f} kg")
+    c1.metric("Paint Codes (Top 20 Analyzed)", f"{summary_df['Paint_Code'].nunique():,}")
+    c2.metric("Historical Batches (Top 20)", f"{summary_df['Historical_Batches'].sum():,.0f}")
+    c3.metric("Total Solvent Usage (Top 20)", f"{summary_df['Total_Solvent_kg'].sum():,.0f} kg")
     
     overall_ratio = (summary_df["Total_Solvent_kg"].sum() / summary_df["Total_Paint_kg"].sum() * 100) if summary_df["Total_Paint_kg"].sum() > 0 else 0
-    c4.metric("Overall Weighted Ratio", f"{overall_ratio:.2f}%")
+    c4.metric("Overall Weighted Ratio (Top 20)", f"{overall_ratio:.2f}%")
 
     st.markdown("---")
     
-    chart_height = max(500, len(summary_df) * 35)
+    # Định cấu hình chiều cao động cho Top 20 (gọn gàng, vừa khít khung nhìn)
+    chart_height = max(450, len(summary_df) * 32)
     
     ch1, ch2 = st.columns(2)
     with ch1:
@@ -168,7 +173,7 @@ with tab_ranking:
             height=chart_height,
             color_discrete_map={"塗料 (Paint)": "#1F77B4", "稀釋劑 (Solvent)": "#FF7F0E"}
         )
-        fig1.update_yaxes(dtick=1, title="")
+        fig1.update_yaxes(dtick=1, title="", categoryorder="total ascending")
         fig1.update_xaxes(title="Weight (kg)")
         fig1.update_layout(legend_title_text="", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
         st.plotly_chart(fig1, use_container_width=True)
@@ -190,7 +195,8 @@ with tab_ranking:
 # ----- TAB 2: DETAILS -----
 with tab_detail:
     st.subheader("2. Paint Code Details")
-    selected_code = st.selectbox("Select Paint Code", filter_df["Paint_Code"].unique())
+    # Danh sách Paint Code hiển thị chi tiết lấy từ Top 20 để đồng bộ
+    selected_code = st.selectbox("Select Paint Code", summary_df["Paint_Code"].unique())
     detail_df = filter_df[filter_df["Paint_Code"] == selected_code]
     
     st.write(f"**Total Records:** {len(detail_df)} | **Batches:** {detail_df['Batch_ID'].nunique()} | **Lines:** {detail_df['線別'].nunique()}")
@@ -209,7 +215,7 @@ with tab_detail:
 # ----- TAB 3: LINE COMPARISON -----
 with tab_line:
     st.subheader("3. Production Line Comparison")
-    comp_code = st.selectbox("Select Paint Code for Line Comparison", filter_df["Paint_Code"].unique(), key="line_comp")
+    comp_code = st.selectbox("Select Paint Code for Line Comparison", summary_df["Paint_Code"].unique(), key="line_comp")
     comp_df = filter_df[filter_df["Paint_Code"] == comp_code]
     line_summary = build_summary(comp_df, ["線別"]).sort_values("線別")
 
