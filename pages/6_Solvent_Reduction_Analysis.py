@@ -84,24 +84,40 @@ def build_summary(source_df, group_cols):
     return summary
 
 # ==========================================
-# 4. GLOBAL FILTERS
+# 4. GLOBAL FILTERS (CASCADING / LIÊN ĐỘNG)
 # ==========================================
 st.markdown("---")
 st.subheader("🔍 全局篩選條件 (Global Filters)")
 
+# Khởi tạo chuỗi lọc liên động tuần tự từ df gốc
 filter_df = df.copy()
 col1, col2, col3, col4, col5 = st.columns(5)
 
-def apply_filter(col_obj, label, col_name):
-    options = ["All"] + sorted([str(x) for x in df[col_name].unique() if x != "Unknown"])
-    selected = col_obj.selectbox(label, options)
-    return filter_df[filter_df[col_name] == selected] if selected != "All" else filter_df
+# --- 1. Vendor Filter ---
+vendor_opts = ["All"] + sorted([str(x) for x in filter_df["Vendor"].unique() if x != "Unknown"])
+selected_vendor = col1.selectbox("Vendor (供應商)", vendor_opts)
+if selected_vendor != "All":
+    filter_df = filter_df[filter_df["Vendor"] == selected_vendor]
 
-filter_df = apply_filter(col1, "Vendor (供應商)", "Vendor")
-filter_df = apply_filter(col2, "Resin Type (樹脂種類)", "Resin")
-filter_df = apply_filter(col3, "Coating Position (塗裝位置)", "Position_UI")
-filter_df = apply_filter(col4, "Solvent Type (稀釋劑種類)", "Solvent_Type")
+# --- 2. Resin Filter (Ăn theo Vendor đã chọn) ---
+resin_opts = ["All"] + sorted([str(x) for x in filter_df["Resin"].unique() if x != "Unknown"])
+selected_resin = col2.selectbox("Resin Type (樹脂種類)", resin_opts)
+if selected_resin != "All":
+    filter_df = filter_df[filter_df["Resin"] == selected_resin]
 
+# --- 3. Position Filter (Ăn theo Resin và Vendor đã chọn) ---
+pos_opts = ["All"] + sorted([str(x) for x in filter_df["Position_UI"].unique() if x != "Unknown"])
+selected_position = col3.selectbox("Coating Position (塗裝位置)", pos_opts)
+if selected_position != "All":
+    filter_df = filter_df[filter_df["Position_UI"] == selected_position]
+
+# --- 4. Solvent Filter (Ăn theo các bộ lọc trước) ---
+solvent_opts = ["All"] + sorted([str(x) for x in filter_df["Solvent_Type"].unique() if x != "Unknown"])
+selected_solvent = col4.selectbox("Solvent Type (稀釋劑種類)", solvent_opts)
+if selected_solvent != "All":
+    filter_df = filter_df[filter_df["Solvent_Type"] == selected_solvent]
+
+# --- 5. Production Line Multiselect (Ăn theo toàn bộ bộ lọc trên) ---
 line_opts = sorted([str(x) for x in filter_df["線別"].unique() if x != "Unknown"])
 selected_lines = col5.multiselect("Production Line (產線)", line_opts, default=line_opts)
 
@@ -112,7 +128,7 @@ else:
     st.stop()
 
 if filter_df.empty:
-    st.warning("⚠️ No records match the global analysis filters. (無符合篩選條件 của 資料)")
+    st.warning("⚠️ No records match the global analysis filters. (無符合篩選條件的資料)")
     st.stop()
 
 # ==========================================
@@ -142,10 +158,8 @@ tab_ranking, tab_detail, tab_line = st.tabs([
 with tab_ranking:
     st.subheader("1. Paint Code Solvent Consumption (Top 20)")
     
-    # Tạo bảng tổng hợp gốc
     full_summary_df = build_summary(filter_df, ["Vendor", "Resin", "Position_UI", "Paint_Code", "Solvent_Type"])
     
-    # Sắp xếp theo lượng dung môi giảm dần và chỉ lấy TOP 20
     summary_df = full_summary_df.sort_values("Total_Solvent_kg", ascending=False).head(20).reset_index(drop=True)
     summary_df.insert(0, "Rank", np.arange(1, len(summary_df) + 1))
 
@@ -159,7 +173,6 @@ with tab_ranking:
 
     st.markdown("---")
     
-    # Định cấu hình chiều cao động cho Top 20 (gọn gàng, vừa khít khung nhìn)
     chart_height = max(450, len(summary_df) * 32)
     
     ch1, ch2 = st.columns(2)
@@ -195,7 +208,6 @@ with tab_ranking:
 # ----- TAB 2: DETAILS -----
 with tab_detail:
     st.subheader("2. Paint Code Details")
-    # Danh sách Paint Code hiển thị chi tiết lấy từ Top 20 để đồng bộ
     selected_code = st.selectbox("Select Paint Code", summary_df["Paint_Code"].unique())
     detail_df = filter_df[filter_df["Paint_Code"] == selected_code]
     
