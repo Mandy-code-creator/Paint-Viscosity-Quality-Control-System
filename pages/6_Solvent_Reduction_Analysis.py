@@ -84,7 +84,7 @@ def build_summary(source_df, group_cols):
     return summary
 
 # ==========================================
-# 4. GLOBAL FILTERS (CASCADING / LIÊN ĐỘNG)
+# 4. GLOBAL FILTERS (CASCADING)
 # ==========================================
 st.markdown("---")
 st.subheader("🔍 全局篩選條件 (Global Filters)")
@@ -151,18 +151,17 @@ filter_details = f"Vendor: {selected_vendor} | Resin: {selected_resin} | Positio
 # 5.5 HIERARCHICAL OVERVIEW (TREEMAP)
 # ==========================================
 st.subheader("🗂️ 塗料階層總覽 (Hierarchical Overview)")
-st.markdown("Biểu đồ phân cấp từ **Nhà cung ứng ➔ Loại nhựa ➔ Vị trí ➔ Loại dung môi ➔ Mã sơn**. Kích thước các khối đại diện cho lượng dung môi tiêu thụ (kg). Bạn có thể **click vào từng khối** để phóng to xem chi tiết.")
+st.markdown("Hierarchy: **Vendor ➔ Resin ➔ Position ➔ Solvent Type ➔ Paint Code**. Box size represents total solvent usage (kg). You can **click on any box** to zoom in.")
 
-# Tạo biểu đồ Treemap
 fig_tree = px.treemap(
     filter_df,
-    path=[px.Constant("Tất cả (Total)"), "Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint_Code"],
-    values="添加重量", # Kích thước khối theo Tổng lượng dung môi
-    color="Vendor",    # Phân màu theo Vendor cho dễ nhìn
+    path=[px.Constant("Total"), "Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint_Code"],
+    values="添加重量", 
+    color="Resin",  # Phân màu theo Resin để biểu đồ có nhiều màu sắc dễ nhìn hơn
     title=f"Hierarchical Breakdown of Solvent Usage (kg)<br><sup>Filters: {filter_details}</sup>",
     height=650
 )
-# Hiển thị tên (label), giá trị (value) và phần trăm (%)
+
 fig_tree.update_traces(
     textinfo="label+value+percent parent",
     root_color="lightgrey"
