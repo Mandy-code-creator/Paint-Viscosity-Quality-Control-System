@@ -203,6 +203,55 @@ with tab_ranking:
         fig2.update_xaxes(title="Ratio (%)")
         st.plotly_chart(fig2, use_container_width=True)
 
+    st.markdown("---")
+    
+    # ----- Dual Axis Chart (Paint & Solvent vs Ratio) -----
+    st.markdown("#### Dual Axis Chart: Paint & Solvent vs Solvent Ratio")
+
+    dual_df = summary_df.copy()
+    fig_dual = go.Figure()
+
+    # Cột khối lượng Paint
+    fig_dual.add_trace(go.Bar(
+        x=dual_df["Paint_Code"],
+        y=dual_df["Total_Paint_kg"],
+        name="Paint (kg)",
+        marker_color="#1F77B4",
+        yaxis="y1"
+    ))
+
+    # Cột khối lượng Solvent
+    fig_dual.add_trace(go.Bar(
+        x=dual_df["Paint_Code"],
+        y=dual_df["Total_Solvent_kg"],
+        name="Solvent (kg)",
+        marker_color="#FF7F0E",
+        yaxis="y1"
+    ))
+
+    # Đường tỷ lệ dung môi (%)
+    fig_dual.add_trace(go.Scatter(
+        x=dual_df["Paint_Code"],
+        y=dual_df["Weighted_Ratio_Percent"],
+        name="Solvent Ratio (%)",
+        mode="lines+markers",
+        line=dict(color="#2CA02C", width=3),
+        marker=dict(size=8),
+        yaxis="y2"
+    ))
+
+    # Cấu hình trục
+    fig_dual.update_layout(
+        title="Paint & Solvent Usage vs. Solvent Ratio",
+        xaxis=dict(title="Paint Code"),
+        yaxis=dict(title="Weight (kg)", side="left", showgrid=False),
+        yaxis2=dict(title="Solvent Ratio (%)", overlaying="y", side="right", showgrid=False),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        height=600
+    )
+
+    st.plotly_chart(fig_dual, use_container_width=True)
+
     st.dataframe(summary_df.style.format(precision=2), use_container_width=True)
 
 # ----- TAB 2: DETAILS -----
