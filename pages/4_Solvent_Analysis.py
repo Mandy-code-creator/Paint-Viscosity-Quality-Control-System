@@ -3,10 +3,6 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.cm as cm
 import io
 
 # ==========================================
@@ -94,15 +90,6 @@ def build_summary(source_df, group_cols):
     summary["Weighted_Ratio_Percent"] = np.where(summary["Total_Paint_kg"] > 0, summary["Total_Solvent_kg"] / summary["Total_Paint_kg"] * 100, np.nan)
     return summary
 
-
-def mpl_fig_to_stream(fig, dpi=200):
-    """Chuyển 1 figure Matplotlib thành ảnh PNG trong bộ nhớ (không cần Chrome/kaleido)."""
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight", facecolor="white")
-    buf.seek(0)
-    plt.close(fig)
-    return buf
-
 # ==========================================
 # 4. GLOBAL FILTERS
 # ==========================================
@@ -153,10 +140,8 @@ st.info(f"📅 **資料期間 (Analysis Period):** {period_label} ｜ 📊 **符
 filter_details = f"Vendor: {selected_vendor} | Resin: {selected_resin} | Position: {selected_position} | Solvent: {selected_solvent}"
 st.markdown("<br>", unsafe_allow_html=True)
 
-# Dict lưu các biểu đồ Plotly hiển thị trên web (không đổi)
+# Khởi tạo Dict lưu trữ các biểu đồ để xuất ra Word
 exported_figs = {}
-# Dict lưu các biểu đồ Matplotlib tương ứng, chỉ dùng để xuất Word (không cần Chrome/kaleido)
-export_mpl_figs = {}
 
 # ==========================================
 # 5. HIERARCHICAL OVERVIEW (TREEMAP)
@@ -164,6 +149,7 @@ export_mpl_figs = {}
 st.subheader("🗂️ 塗料階層總覽 (Hierarchical Overview)")
 st.markdown("Hierarchy: **Vendor ➔ Resin ➔ Position ➔ Solvent Type ➔ Paint Code**. Box size represents total solvent usage (kg).")
 
+# Chuẩn bị dữ liệu cho Treemap để tính toán Delta_V (Biến động độ nhớt) và Ratio (Tỷ lệ dung môi)
 tree_df = filter_df.groupby(["Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint_Code"]).agg(
     添加重量=("添加重量", "sum"),
     Delta_V=("Delta_V", "median"), 
@@ -176,47 +162,23 @@ fig_tree = px.treemap(
     path=[px.Constant("Total"), "Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint_Code"],
     values="添加重量", 
     color="Resin",  
-    color_discrete_sequence=px.colors.qualitative.Pastel,
-    custom_data=["Delta_V", "Solvent_Ratio_Percent"],
+    color_discrete_sequence=px.colors.qualitative.Pastel, # ĐỔI MÀU DỊU MẮT HƠN
+    custom_data=["Delta_V", "Solvent_Ratio_Percent"], # Truyền thêm dữ liệu độ nhớt và tỷ lệ
     title=f"Hierarchical Breakdown of Solvent Usage (kg)<br><sup>Filters: {filter_details}</sup>",
     height=700
 )
 
+# Cập nhật Label và Tooltip chi tiết
 fig_tree.update_traces(
-    texttemplate="<b>%{label}</b><br>%{value:,.0f} kg",
-    hovertemplate="<b>%{label}</b><br>Solvent Usage: %{value:,.1f} kg<br>Visc Drop (Biến động): ~%{customdata[0]:.1f} s<br>Solvent Added (Tỷ lệ thêm): ~%{customdata[1]:.1f}%",
+    texttemplate="<b>%{label}</b><br>%{value:,.0f} kg", # Hiển thị trên ô vuông
+    hovertemplate="<b>%{label}</b><br>Solvent Usage: %{value:,.1f} kg<br>Visc Drop (Biến động): ~%{customdata[0]:.1f} s<br>Solvent Added (Tỷ lệ thêm): ~%{customdata[1]:.1f}%", # Hiển thị khi rê chuột
     root_color="#f8f9fa"
 )
+# Tăng margin-top (t=90) để tránh lỗi chữ đè lên khối Total
 fig_tree.update_layout(margin=dict(t=90, l=10, r=10, b=10)) 
 
 st.plotly_chart(fig_tree, use_container_width=True)
 exported_figs["1. Hierarchical Treemap"] = fig_tree
-
-# ---- Bản Matplotlib tương ứng cho Word: Top 15 Paint Code theo lượng dung môi ----
-_tree_bar = (
-    tree_df.groupby(["Resin", "Paint_Code"])["添加重量"].sum()
-    .reset_index()
-    .sort_values("添加重量", ascending=False)
-    .head(15)
-)
-if not _tree_bar.empty:
-    _resins = sorted(_tree_bar["Resin"].unique())
-    _cmap = cm.get_cmap("Pastel1", max(len(_resins), 3))
-    _color_map = {r: _cmap(i) for i, r in enumerate(_resins)}
-
-    fig_tree_mpl, ax = plt.subplots(figsize=(9, max(4, 0.4 * len(_tree_bar))), dpi=150)
-    _plot_df = _tree_bar.sort_values("添加重量", ascending=True)
-    bar_colors = [_color_map[r] for r in _plot_df["Resin"]]
-    ax.barh(_plot_df["Paint_Code"], _plot_df["添加重量"], color=bar_colors)
-    ax.set_xlabel("Solvent Usage (kg)")
-    ax.set_title(f"Top 15 Paint Codes by Solvent Usage (kg)\nFilters: {filter_details}", fontsize=10, loc="left")
-    for i, (val, resin) in enumerate(zip(_plot_df["添加重量"], _plot_df["Resin"])):
-        ax.text(val, i, f" {val:,.0f} kg", va="center", fontsize=8)
-    handles = [plt.Rectangle((0,0),1,1, color=_color_map[r]) for r in _resins]
-    ax.legend(handles, _resins, title="Resin", loc="lower right", fontsize=8)
-    fig_tree_mpl.tight_layout()
-    export_mpl_figs["1. Hierarchical Overview (Top 15 by Solvent Usage)"] = fig_tree_mpl
-
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ==========================================
@@ -253,21 +215,6 @@ with tab_ranking:
         st.plotly_chart(fig1, use_container_width=True)
         exported_figs["2. Paint vs Solvent (kg)"] = fig1
 
-        # ---- Matplotlib tương ứng ----
-        _s1 = summary_df.sort_values("Total_Solvent_kg", ascending=True)
-        fig1_mpl, ax = plt.subplots(figsize=(8, max(4, 0.4 * len(_s1))), dpi=150)
-        y_pos = np.arange(len(_s1))
-        bar_h = 0.35
-        ax.barh(y_pos + bar_h/2, _s1["Total_Paint_kg"], height=bar_h, color="#5B8FF9", label="塗料 (Paint)")
-        ax.barh(y_pos - bar_h/2, _s1["Total_Solvent_kg"], height=bar_h, color="#F6BD16", label="稀釋劑 (Solvent)")
-        ax.set_yticks(y_pos)
-        ax.set_yticklabels(_s1["Paint_Code"], fontsize=8)
-        ax.set_xlabel("Weight (kg)")
-        ax.set_title("Paint vs Solvent Usage", fontsize=10, loc="left")
-        ax.legend(fontsize=8, loc="lower right")
-        fig1_mpl.tight_layout()
-        export_mpl_figs["2. Paint vs Solvent (kg)"] = fig1_mpl
-
     with ch2:
         sorted_df = summary_df.sort_values("Weighted_Ratio_Percent", ascending=True)
         fig2 = px.bar(
@@ -280,17 +227,6 @@ with tab_ranking:
         fig2.update_layout(title="Weighted Solvent Ratio (%)")
         st.plotly_chart(fig2, use_container_width=True)
         exported_figs["3. Weighted Solvent Ratio"] = fig2
-
-        # ---- Matplotlib tương ứng ----
-        fig2_mpl, ax = plt.subplots(figsize=(8, max(4, 0.4 * len(sorted_df))), dpi=150)
-        ax.barh(sorted_df["Paint_Code"], sorted_df["Weighted_Ratio_Percent"], color="#5B8FF9")
-        for i, val in enumerate(sorted_df["Weighted_Ratio_Percent"]):
-            ax.text(val, i, f" {val:.2f}", va="center", fontsize=8)
-        ax.set_xlabel("Ratio (%)")
-        ax.set_title("Weighted Solvent Ratio (%)", fontsize=10, loc="left")
-        ax.tick_params(axis='y', labelsize=8)
-        fig2_mpl.tight_layout()
-        export_mpl_figs["3. Weighted Solvent Ratio"] = fig2_mpl
 
     st.markdown("---")
     
@@ -319,30 +255,6 @@ with tab_ranking:
     st.plotly_chart(fig_dual, use_container_width=True)
     exported_figs["4. Dual Axis Usage vs Ratio"] = fig_dual
 
-    # ---- Matplotlib tương ứng ----
-    fig_dual_mpl, ax1 = plt.subplots(figsize=(11, 6), dpi=150)
-    x = np.arange(len(summary_df))
-    w = 0.35
-    ax1.bar(x - w/2, summary_df["Total_Paint_kg"], width=w, color="#5B8FF9", label="Paint (kg)")
-    ax1.bar(x + w/2, summary_df["Total_Solvent_kg"], width=w, color="#F6BD16", label="Solvent (kg)")
-    ax1.set_xticks(x)
-    ax1.set_xticklabels(summary_df["Paint_Code"], rotation=45, ha="right", fontsize=7)
-    ax1.set_ylabel("Weight (kg)")
-    ax1.set_title(f"Paint & Solvent Usage vs. Solvent Ratio\nFilters: {filter_details}", fontsize=10, loc="left")
-
-    ax2 = ax1.twinx()
-    ax2.plot(x, summary_df["Weighted_Ratio_Percent"], color="#5AD8A6", marker="o", linewidth=2)
-    ax2.set_ylabel("Solvent Ratio (%)")
-    ax2.set_ylim(0, summary_df["Weighted_Ratio_Percent"].max() * 1.25 if summary_df["Weighted_Ratio_Percent"].max() > 0 else 1)
-    for xi, val in zip(x, summary_df["Weighted_Ratio_Percent"]):
-        ax2.annotate(f"{val:.2f}%", (xi, val), textcoords="offset points", xytext=(0, 8), ha="center", fontsize=7)
-
-    lines_1, labels_1 = ax1.get_legend_handles_labels()
-    lines_2, labels_2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc="upper right", fontsize=8)
-    fig_dual_mpl.tight_layout()
-    export_mpl_figs["4. Dual Axis Usage vs Ratio"] = fig_dual_mpl
-
 # ----- TAB 2: DETAILS -----
 with tab_detail:
     st.subheader("2. Paint Code Details")
@@ -359,8 +271,7 @@ with tab_detail:
         fig3.add_trace(go.Scatter(x=detail_df["Record_Index"], y=detail_df["黏度(秒)"], mode="lines+markers", name="Before Viscosity", marker=dict(color="#5B8FF9", size=8), yaxis="y1"))
         fig3.add_trace(go.Scatter(x=detail_df["Record_Index"], y=detail_df["黏度(秒)_1"], mode="lines+markers", name="After Viscosity", marker=dict(color="#5AD8A6", size=8), yaxis="y1"))
         
-        has_temp = "溫度" in detail_df.columns and not detail_df["溫度"].isna().all()
-        if has_temp:
+        if "溫度" in detail_df.columns and not detail_df["溫度"].isna().all():
             fig3.add_trace(go.Scatter(x=detail_df["Record_Index"], y=detail_df["溫度"], mode="lines+markers", name="Temperature (°C)", marker=dict(color="#F6BD16", size=8, symbol="diamond"), line=dict(color="#F6BD16", width=2, dash="dot"), yaxis="y2"))
             chart_title = "Viscosity & Temperature Variation (Before vs After)"
         else:
@@ -375,25 +286,6 @@ with tab_detail:
         st.plotly_chart(fig3, use_container_width=True)
         exported_figs["5. Viscosity & Temperature Variation"] = fig3
 
-        # ---- Matplotlib tương ứng ----
-        fig3_mpl, ax1 = plt.subplots(figsize=(9, 5), dpi=150)
-        ax1.plot(detail_df["Record_Index"], detail_df["黏度(秒)"], marker="o", color="#5B8FF9", label="Before Viscosity")
-        ax1.plot(detail_df["Record_Index"], detail_df["黏度(秒)_1"], marker="o", color="#5AD8A6", label="After Viscosity")
-        ax1.set_xlabel("Record Output Sequence")
-        ax1.set_ylabel("Viscosity (s)")
-        ax1.set_title(f"{chart_title}\nFilters: {detail_title_filter}", fontsize=10, loc="left")
-        lines_1, labels_1 = ax1.get_legend_handles_labels()
-        if has_temp:
-            ax2 = ax1.twinx()
-            ax2.plot(detail_df["Record_Index"], detail_df["溫度"], marker="D", linestyle=":", color="#F6BD16", label="Temperature (°C)")
-            ax2.set_ylabel("Temperature (°C)")
-            lines_2, labels_2 = ax2.get_legend_handles_labels()
-            ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc="upper right", fontsize=8)
-        else:
-            ax1.legend(lines_1, labels_1, loc="upper right", fontsize=8)
-        fig3_mpl.tight_layout()
-        export_mpl_figs["5. Viscosity & Temperature Variation"] = fig3_mpl
-
     with ch4:
         line_usage = build_summary(detail_df, ["線別"]).sort_values("Total_Solvent_kg")
         fig4 = px.bar(line_usage, x="Total_Solvent_kg", y="線別", text="Weighted_Ratio_Percent", orientation='h', title=f"Solvent Usage by Line<br><sup>Filters: {detail_title_filter}</sup>", color_discrete_sequence=["#5B8FF9"])
@@ -402,16 +294,6 @@ with tab_detail:
         fig4.update_xaxes(title="Total Solvent (kg)")
         st.plotly_chart(fig4, use_container_width=True)
         exported_figs["6. Solvent Usage by Line"] = fig4
-
-        # ---- Matplotlib tương ứng ----
-        fig4_mpl, ax = plt.subplots(figsize=(8, max(3, 0.5 * len(line_usage))), dpi=150)
-        ax.barh(line_usage["線別"], line_usage["Total_Solvent_kg"], color="#5B8FF9")
-        for i, (val, pct) in enumerate(zip(line_usage["Total_Solvent_kg"], line_usage["Weighted_Ratio_Percent"])):
-            ax.text(val, i, f" {pct:.2f}%", va="center", fontsize=8)
-        ax.set_xlabel("Total Solvent (kg)")
-        ax.set_title(f"Solvent Usage by Line\nFilters: {detail_title_filter}", fontsize=10, loc="left")
-        fig4_mpl.tight_layout()
-        export_mpl_figs["6. Solvent Usage by Line"] = fig4_mpl
 
 # ----- TAB 3: LINE COMPARISON -----
 with tab_line:
@@ -430,45 +312,21 @@ with tab_line:
             st.plotly_chart(fig5, use_container_width=True)
             exported_figs["7. Line Comparison - Viscosity Drop"] = fig5
 
-            # ---- Matplotlib tương ứng ----
-            fig5_mpl, ax = plt.subplots(figsize=(8, max(3, 0.6 * len(line_summary))), dpi=150)
-            for i, row in line_summary.iterrows():
-                ax.plot([row["Median_After_Viscosity"], row["Median_Before_Viscosity"]], [row["線別"], row["線別"]], marker="o", markersize=10, linewidth=2)
-            ax.set_xlabel("Viscosity (s)")
-            ax.set_title("Viscosity Drop (Before vs After)", fontsize=10, loc="left")
-            fig5_mpl.tight_layout()
-            export_mpl_figs["7. Line Comparison - Viscosity Drop"] = fig5_mpl
-
         with ch6:
             fig6 = px.bar(line_summary.sort_values("Weighted_Ratio_Percent"), x="Weighted_Ratio_Percent", y="線別", orientation='h', text_auto='.2f', title="Weighted Solvent Ratio", color_discrete_sequence=["#5AD8A6"])
             fig6.update_yaxes(title="")
             st.plotly_chart(fig6, use_container_width=True)
             exported_figs["8. Line Comparison - Solvent Ratio"] = fig6
 
-            # ---- Matplotlib tương ứng ----
-            _s6 = line_summary.sort_values("Weighted_Ratio_Percent")
-            fig6_mpl, ax = plt.subplots(figsize=(8, max(3, 0.6 * len(_s6))), dpi=150)
-            ax.barh(_s6["線別"], _s6["Weighted_Ratio_Percent"], color="#5AD8A6")
-            for i, val in enumerate(_s6["Weighted_Ratio_Percent"]):
-                ax.text(val, i, f" {val:.2f}", va="center", fontsize=8)
-            ax.set_xlabel("Ratio (%)")
-            ax.set_title("Weighted Solvent Ratio", fontsize=10, loc="left")
-            fig6_mpl.tight_layout()
-            export_mpl_figs["8. Line Comparison - Solvent Ratio"] = fig6_mpl
-
 
 # ==========================================
 # 7. XUẤT FILE WORD (EXPORT BÁO CÁO TỰ ĐỘNG)
-# Đã bỏ hoàn toàn phụ thuộc vào kaleido/Chrome.
-# Toàn bộ ảnh trong file Word được vẽ bằng Matplotlib,
-# hoạt động trên mọi môi trường (kể cả Streamlit Cloud/GitHub)
-# mà không cần cài thêm Chrome.
 # ==========================================
 st.markdown("---")
 st.subheader("📄 Xuất báo cáo (Export Report)")
 
 if not HAS_DOCX:
-    st.warning("⚠️ Máy chủ chưa được cài đặt công cụ tạo file Word. Để sử dụng tính năng này, bạn hãy thêm vào file requirements.txt:\n\n`python-docx`")
+    st.warning("⚠️ Máy chủ chưa được cài đặt công cụ tạo file Word. Để sử dụng tính năng này, bạn hãy mở Terminal/Command Prompt và chạy lệnh sau:\n\n`pip install python-docx kaleido`")
 else:
     if st.button("🚀 Chụp toàn bộ Biểu đồ và Lưu thành file Word"):
         with st.spinner("Đang xử lý hình ảnh và tạo file Word... (Quá trình này mất khoảng vài giây)"):
@@ -477,31 +335,24 @@ else:
                 doc.add_heading('BÁO CÁO PHÂN TÍCH TIÊU THỤ DUNG MÔI SƠN', 0)
                 doc.add_paragraph(f"Ngày phân tích: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}")
                 doc.add_paragraph(f"Bộ lọc dữ liệu: {filter_details}")
-
-                # Hàm chèn ảnh Matplotlib (PNG) vào file Word
-                def add_chart_to_word(doc, title, mpl_fig, note=None):
+                
+                # Hàm chụp ảnh Plotly và dán vào file Word
+                def add_chart_to_word(doc, title, fig):
                     doc.add_heading(title, level=2)
-                    image_stream = mpl_fig_to_stream(mpl_fig)
+                    img_bytes = fig.to_image(format="png", engine="kaleido", scale=2)
+                    image_stream = io.BytesIO(img_bytes)
                     doc.add_picture(image_stream, width=Inches(6.0))
-                    if note:
-                        note_p = doc.add_paragraph(note)
-                        note_p.italic = True
-                    doc.add_paragraph("")
-
-                # Duyệt qua các biểu đồ Matplotlib đã được lưu trong dict
-                for chart_title, mpl_fig in export_mpl_figs.items():
-                    note = None
-                    if "Hierarchical" in chart_title:
-                        note = ("Ghi chú: Do giới hạn kỹ thuật khi xuất file Word, biểu đồ Treemap đa cấp trên "
-                                "giao diện web được trình bày dưới dạng cột ngang Top 15 mã sơn theo lượng dung môi "
-                                "sử dụng (cùng số liệu, khác cách hiển thị).")
-                    add_chart_to_word(doc, chart_title, mpl_fig, note)
-
+                    doc.add_paragraph("") # Dòng trống
+                
+                # Duyệt qua các biểu đồ đã được lưu trong dict
+                for chart_title, figure in exported_figs.items():
+                    add_chart_to_word(doc, chart_title, figure)
+                
                 # Lưu file vào bộ nhớ đệm Streamlit
                 doc_io = io.BytesIO()
                 doc.save(doc_io)
                 doc_io.seek(0)
-
+                
                 st.success("✅ Đã tạo file Word thành công! Nhấn nút bên dưới để tải về máy.")
                 st.download_button(
                     label="⬇️ TẢI FILE BÁO CÁO (Word .docx)",
@@ -510,4 +361,4 @@ else:
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
             except Exception as e:
-                st.error(f"❌ Lỗi khi tạo file Word. Chi tiết lỗi: {e}")
+                st.error(f"❌ Lỗi khi chụp ảnh biểu đồ. Nguyên nhân thường do thiếu thư viện `kaleido` hoặc phiên bản không tương thích. Chi tiết lỗi: {e}")
