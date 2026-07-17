@@ -145,6 +145,9 @@ else:
 st.info(f"📅 **資料期間 (Analysis Period):** {period_label} ｜ 📊 **符合條件紀錄數 (Valid Records):** {len(filter_df):,} 筆")
 st.markdown("<br>", unsafe_allow_html=True)
 
+# Lấy chuỗi filter hiện tại để dùng cho các biểu đồ
+filter_details = f"Vendor: {selected_vendor} | Resin: {selected_resin} | Position: {selected_position} | Solvent: {selected_solvent}"
+
 # ==========================================
 # 6. TABS & VISUALIZATION
 # ==========================================
@@ -240,25 +243,22 @@ with tab_ranking:
         yaxis="y2"
     ))
 
-    # Thêm Label số liệu với NỀN TRẮNG (giúp số không bao giờ bị đè)
+    # Thêm Label số liệu với NỀN TRẮNG
     for i, row in dual_df.iterrows():
         fig_dual.add_annotation(
             x=row["Paint_Code"],
             y=row["Weighted_Ratio_Percent"],
-            text=f"<b>{row['Weighted_Ratio_Percent']:.2f}%</b>",  # In đậm
+            text=f"<b>{row['Weighted_Ratio_Percent']:.2f}%</b>", 
             xref="x", yref="y2",
             showarrow=False,
-            yshift=18,  # Đẩy lên 18 pixel
+            yshift=18, 
             font=dict(color="black", size=12),
-            bgcolor="rgba(255, 255, 255, 0.85)", # Nền trắng trong suốt 85%
+            bgcolor="rgba(255, 255, 255, 0.85)", 
             borderpad=2
         )
 
-    # Xây dựng chuỗi hiển thị điều kiện lọc hiện tại
-    filter_details = f"Vendor: {selected_vendor} | Resin: {selected_resin} | Position: {selected_position} | Solvent: {selected_solvent}"
     dynamic_title = f"Paint & Solvent Usage vs. Solvent Ratio<br><sup>Filters Applied: {filter_details}</sup>"
 
-    # Cấu hình trục và thêm tiêu đề động
     fig_dual.update_layout(
         title=dynamic_title,
         xaxis=dict(title="Paint Code"),
@@ -268,33 +268,68 @@ with tab_ranking:
             overlaying="y", 
             side="right", 
             showgrid=False, 
-            range=[0, dual_df["Weighted_Ratio_Percent"].max() * 1.25] # Nâng không gian phía trên để text không bị cắt
+            range=[0, dual_df["Weighted_Ratio_Percent"].max() * 1.25] 
         ),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         height=600
     )
 
     st.plotly_chart(fig_dual, use_container_width=True)
-
     st.dataframe(summary_df.style.format(precision=2), use_container_width=True)
 
 # ----- TAB 2: DETAILS -----
 with tab_detail:
     st.subheader("2. Paint Code Details")
     selected_code = st.selectbox("Select Paint Code", summary_df["Paint_Code"].unique())
-    detail_df = filter_df[filter_df["Paint_Code"] == selected_code]
+    detail_df = filter_df[filter_df["Paint_Code"] == selected_code].copy()
     
     st.write(f"**Total Records:** {len(detail_df)} | **Batches:** {detail_df['Batch_ID'].nunique()} | **Lines:** {detail_df['線別'].nunique()}")
     
+    # Chuỗi tiêu đề đầy đủ cho Tab 2
+    detail_title_filter = f"{filter_details} | Paint Code: {selected_code}"
+
     ch3, ch4 = st.columns(2)
     with ch3:
-        fig3 = px.scatter(detail_df, x="黏度(秒)", y="Solvent_Ratio_Percent", color="線別", title="Before Viscosity vs Solvent Ratio")
+        # BIỂU ĐỒ BIẾN ĐỘNG ĐỘ NHỚT (BEFORE vs AFTER)
+        # Tạo index giả lập để làm trục X theo các lần pha (Record)
+        detail_df = detail_df.reset_index(drop=True)
+        detail_df["Record_Index"] = detail_df.index + 1
+        
+        fig3 = go.Figure()
+        # Độ nhớt ban đầu (Before)
+        fig3.add_trace(go.Scatter(
+            x=detail_df["Record_Index"], y=detail_df["黏度(秒)"],
+            mode="lines+markers", name="Before Viscosity (黏度)",
+            marker=dict(color="#1F77B4", size=8),
+            text=detail_df["Batch_ID"], hoverinfo="text+y+name"
+        ))
+        # Độ nhớt sau pha (After)
+        fig3.add_trace(go.Scatter(
+            x=detail_df["Record_Index"], y=detail_df["黏度(秒)_1"],
+            mode="lines+markers", name="After Viscosity (黏度_1)",
+            marker=dict(color="#2CA02C", size=8),
+            text=detail_df["Batch_ID"], hoverinfo="text+y+name"
+        ))
+        
+        fig3.update_layout(
+            title=f"Viscosity Variation (Before vs After)<br><sup>Filters Applied: {detail_title_filter}</sup>",
+            xaxis_title="Record Output Sequence",
+            yaxis_title="Viscosity (s)",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
         st.plotly_chart(fig3, use_container_width=True)
+
     with ch4:
+        # BIỂU ĐỒ LƯỢNG DUNG MÔI TIÊU THỤ THEO CHUYỀN
         line_usage = build_summary(detail_df, ["線別"]).sort_values("Total_Solvent_kg")
-        fig4 = px.bar(line_usage, x="Total_Solvent_kg", y="線別", text="Weighted_Ratio_Percent", orientation='h', title="Solvent Usage by Line")
+        fig4 = px.bar(
+            line_usage, x="Total_Solvent_kg", y="線別", text="Weighted_Ratio_Percent", 
+            orientation='h', 
+            title=f"Solvent Usage by Line<br><sup>Filters Applied: {detail_title_filter}</sup>"
+        )
         fig4.update_traces(texttemplate='%{text:.2f}%', textposition='outside')
         fig4.update_yaxes(title="")
+        fig4.update_xaxes(title="Total Solvent (kg)")
         st.plotly_chart(fig4, use_container_width=True)
 
 # ----- TAB 3: LINE COMPARISON -----
