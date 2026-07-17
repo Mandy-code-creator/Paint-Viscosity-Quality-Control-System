@@ -1,1146 +1,513 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import graphviz
-import io
+import plotly.express as px
+import plotly.graph_objects as go
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-
-from docx import Document
-from docx.shared import Inches
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-
-
-# =========================================================
-# PAGE CONFIGURATION
-# =========================================================
-st.set_page_config(
-    page_title="Solvent Hierarchy",
-    page_icon="🌳",
-    layout="wide"
-)
-
-st.title("🌳 Solvent Consumption Hierarchy")
-st.markdown(
-    "Coil-level analysis of solvent utilization mapping from Vendor "
-    "to specific Resin, Coating Position, and Solvent types."
-)
-
-
-# =========================================================
-# 1. DATA LOADING
-# =========================================================
-if not st.session_state.get("raw_data_loaded", False):
-    st.warning("⚠️ No data loaded. Please upload your dataset on the Main App page.")
-    st.stop()
-
-group_a = st.session_state.get("group_a_data", pd.DataFrame()).copy()
-
-if group_a.empty:
-    st.error("❌ The dataset is empty. Please check the uploaded file.")
-    st.stop()
-
-
-# =========================================================
-# 2. SIDEBAR FILTERS & DATA MAPPING
-# =========================================================
-st.sidebar.header("🔍 Hierarchy Filters")
-
-if "塗裝位置" not in group_a.columns:
-    group_a["塗裝位置"] = "Unknown"
-
-pos_mapping = {
-    "TP": "Primer",
-    "正底漆": "Primer",
-    "BP": "Primer",
-    "背底漆": "Primer",
-    "TF": "Top Finish",
-    "正面漆": "Top Finish",
-    "BF": "Back Finish",
-    "背面漆": "Back Finish"
-}
-
-group_a["Position_UI"] = group_a["塗裝位置"].map(pos_mapping).fillna(
-    group_a["塗裝位置"]
-)
-
-for col in ["Vendor", "Resin", "Solvent_Type"]:
-    if col not in group_a.columns:
-        group_a[col] = "Unknown"
-
-
-# -------------------------
-# Vendor Filter
-# -------------------------
-vendor_list = sorted(group_a["Vendor"].dropna().unique().tolist())
-
-if not vendor_list:
-    st.warning("⚠️ No Vendor data available.")
-    st.stop()
-
-selected_vendor = st.sidebar.selectbox(
-    "Select Vendor:",
-    vendor_list
-)
-
-vendor_df = group_a[
-    group_a["Vendor"] == selected_vendor
-].copy()
-
-
-# -------------------------
-# Resin Filter
-# -------------------------
-resin_filter_list = ["All Resins"] + sorted(
-    vendor_df["Resin"].dropna().unique().tolist()
-)
-
-selected_resin_filter = st.sidebar.selectbox(
-    "Select Resin Group:",
-    resin_filter_list
-)
-
-if selected_resin_filter != "All Resins":
-    vendor_df = vendor_df[
-        vendor_df["Resin"] == selected_resin_filter
-    ].copy()
-
-
-# -------------------------
-# Coating Position Filter
-# -------------------------
-position_list = ["All Positions"] + sorted(
-    vendor_df["Position_UI"].dropna().unique().tolist()
-)
-
-selected_position = st.sidebar.selectbox(
-    "Select Coating Position:",
-    position_list
-)
-
-filtered_df = vendor_df.copy()
-
-if selected_position != "All Positions":
-    filtered_df = filtered_df[
-        filtered_df["Position_UI"] == selected_position
-    ].copy()
-
-
-# Grade A-B filter
-if "Grade" in filtered_df.columns:
-    filtered_df = filtered_df[
-        filtered_df["Grade"].isin(["A", "B", "A-B"])
-    ].copy()
-
-if filtered_df.empty:
-    st.warning(
-        f"⚠️ No valid data available for Vendor: {selected_vendor}, "
-        f"Resin: {selected_resin_filter}, "
-        f"Position: {selected_position}."
-    )
-    st.stop()
-
-
-# =========================================================
-# 3. DATA CLEANING & CALCULATIONS
-# =========================================================
-required_cols = ["塗料重量", "添加重量", "黏度(秒)", "黏度(秒)_1"]
-
-if not all(col in filtered_df.columns for col in required_cols):
-    st.error(
-        f"❌ Missing required columns: {', '.join(required_cols)}"
-    )
-    st.stop()
-
-for col in required_cols:
-    filtered_df[col] = pd.to_numeric(
-        filtered_df[col],
-        errors="coerce"
-    )
-
-# Keep valid dilution records only
-filtered_df = filtered_df[
-    (filtered_df["塗料重量"] > 0)
-    & (filtered_df["添加重量"] > 0)
-    & (filtered_df["黏度(秒)"] > filtered_df["黏度(秒)_1"])
-].copy()
-
-if filtered_df.empty:
-    st.warning("⚠️ No valid dilution records after data cleaning.")
-    st.stop()
-
-
-# Viscosity reduction
-filtered_df["Delta_V"] = (
-    filtered_df["黏度(秒)"]
-    - filtered_df["黏度(秒)_1"]
-)
-
-# ---------------------------------------------------------
-# NEW LOGIC:
-# Dilution base = actual paint weight only
-# No 120 kg operating paint is included
-# ---------------------------------------------------------
-filtered_df["Dilution_Base_kg"] = filtered_df["塗料重量"]
-
-# Solvent ratio (%)
-filtered_df["Solvent_Ratio_Percent"] = (
-    filtered_df["添加重量"]
-    / filtered_df["塗料重量"]
-) * 100
-
-# kg solvent required for each 1-second viscosity reduction
-filtered_df["Kg_per_1s"] = (
-    filtered_df["添加重量"]
-    / filtered_df["Delta_V"]
-)
-
-# Dilution efficiency
-filtered_df["Dilution_Efficiency"] = (
-    filtered_df["Delta_V"]
-    / filtered_df["Solvent_Ratio_Percent"]
-)
-
-filtered_df = filtered_df.replace(
-    [np.inf, -np.inf],
-    np.nan
-).dropna(
-    subset=[
-        "Solvent_Ratio_Percent",
-        "Delta_V",
-        "Kg_per_1s",
-        "Dilution_Efficiency"
-    ]
-)
-
-if filtered_df.empty:
-    st.warning("⚠️ No valid records remain after calculations.")
-    st.stop()
-
-
-# =========================================================
-# 4. HIERARCHY SUMMARY
-# =========================================================
-def calculate_advanced_metrics(group):
-
-    if len(group) < 5:
-        return pd.Series({
-            "Opt_Eff": group["Dilution_Efficiency"].median(),
-            "Sat_Limit": np.nan
-        })
-
-    # Expanded Bins for finer granularity
-    bins = [0, 3, 5] + list(range(7, 26)) + [np.inf]
-    labels = ["0-3", "3-5", "5-7"] + [f"{i}-{i+1}" for i in range(7, 25)] + [">25"]
-    midpoints = [1.5, 4, 6] + [i + 0.5 for i in range(7, 25)] + [26]
-
-    df_calc = group.copy()
-
-    df_calc["Ratio_Bin"] = pd.cut(
-        df_calc["Solvent_Ratio_Percent"],
-        bins=bins,
-        labels=labels,
-        include_lowest=True
-    )
-
-    summary = df_calc.groupby(
-        "Ratio_Bin",
-        observed=False
-    ).agg(
-        Records=("Dilution_Efficiency", "size"),
-        Median_Efficiency=("Dilution_Efficiency", "median")
-    ).reset_index()
-
-    summary["Ratio_Midpoint"] = midpoints
-
-    summary = summary[
-        summary["Records"] >= 3
-    ].copy()
-
-    if summary.empty:
-        return pd.Series({
-            "Opt_Eff": group["Dilution_Efficiency"].median(),
-            "Sat_Limit": group["Solvent_Ratio_Percent"].quantile(0.95)
-        })
-
-    baseline_eff = summary["Median_Efficiency"].iloc[0]
-
-    summary["Efficiency_Retention_Percent"] = (
-        summary["Median_Efficiency"]
-        / baseline_eff
-    ) * 100
-
-    stop_rows = summary[
-        summary["Efficiency_Retention_Percent"] <= 50
-    ]
-
-    stop_ratio = (
-        stop_rows["Ratio_Midpoint"].iloc[0]
-        if not stop_rows.empty
-        else group["Solvent_Ratio_Percent"].quantile(0.95)
-    )
-
-    return pd.Series({
-        "Opt_Eff": baseline_eff,
-        "Sat_Limit": stop_ratio
-    })
-
-
-tree_base = filtered_df.groupby(
-    ["Resin", "Position_UI", "Solvent_Type"],
-    observed=False
-).agg(
-    Total_Paint=("塗料重量", "sum"),
-    Total_Solvent=("添加重量", "sum"),
-    Avg_Visc_Before=("黏度(秒)", "mean"),
-    Avg_Visc_After=("黏度(秒)_1", "mean")
-).reset_index()
-
-
-advanced_metrics = filtered_df.groupby(
-    ["Resin", "Position_UI", "Solvent_Type"],
-    observed=False
-).apply(
-    calculate_advanced_metrics
-).reset_index()
-
-
-tree_summary = pd.merge(
-    tree_base,
-    advanced_metrics,
-    on=["Resin", "Position_UI", "Solvent_Type"]
-)
-
-tree_summary = tree_summary[
-    tree_summary["Total_Paint"] > 0
-].sort_values(
-    by=["Resin", "Total_Paint"],
-    ascending=[True, False]
-)
-
-if tree_summary.empty:
-    st.warning("⚠️ No valid paint consumption data available.")
-    st.stop()
-
-
-# =========================================================
-# =========================================================
-# 5. GRAPHVIZ HIERARCHY (4-LEVEL STABLE LAYOUT)
-# =========================================================
-graph = graphviz.Digraph(engine="dot")
-
-graph.attr(
-    rankdir="LR",
-    splines="curved",
-    nodesep="0.2",   
-    ranksep="0.6",    
-    bgcolor="transparent"
-)
-
-graph.attr("node", shape="none", margin="0", fontname="Arial")
-graph.attr("edge", color="#B0B0B0", penwidth="1.2", arrowsize="0.7")
-
-total_vendor_paint = tree_summary["Total_Paint"].sum()
-total_vendor_solv = tree_summary["Total_Solvent"].sum()
-avg_delta_v = filtered_df["Delta_V"].mean()
-
-avg_solvent_ratio = (
-    total_vendor_solv / total_vendor_paint * 100
-    if total_vendor_paint > 0 else 0
-)
-
-date_range_str = "All Available Data"
-date_cols = [
-    col for col in filtered_df.columns
-    if "date" in col.lower() or "日期" in col.lower() or "time" in col.lower()
-]
-
-if date_cols:
-    try:
-        date_col = date_cols[0]
-        min_date = pd.to_datetime(filtered_df[date_col], errors="coerce").min()
-        max_date = pd.to_datetime(filtered_df[date_col], errors="coerce").max()
-
-        if pd.notna(min_date) and pd.notna(max_date):
-            min_date_str = min_date.strftime("%b %Y")
-            max_date_str = max_date.strftime("%b %Y")
-
-            if min_date_str == max_date_str:
-                date_range_str = min_date_str
-            else:
-                date_range_str = f"{min_date_str} - {max_date_str}"
-
-    except Exception:
-        date_range_str = "All Available Data"
-
-
-# --- LEVEL 0: ROOT NODE (VENDOR) ---
-center_html = f"""<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="6">
-  <TR>
-    <TD BGCOLOR="#00BFFF" STYLE="ROUNDED" ALIGN="CENTER">
-      <FONT COLOR="white" POINT-SIZE="12"><B>VENDOR: {selected_vendor}</B></FONT>
-    </TD>
-  </TR>
-  <TR>
-    <TD BGCOLOR="#F8F9FA" STYLE="ROUNDED" ALIGN="CENTER">
-      <FONT POINT-SIZE="10" COLOR="#333333">Period: <B>{date_range_str}</B><BR/>
-      <B>{total_vendor_paint:,.0f} kg</B> Paint Used<BR/>
-      Visc Reduction: <B>{avg_delta_v:.1f} s</B><BR/>
-      <B>{total_vendor_solv:,.0f} kg</B> Solvent Added<BR/>
-      </FONT><FONT COLOR="#D9534F" POINT-SIZE="11"><B>Avg. Solvent Ratio: {avg_solvent_ratio:.2f}%</B></FONT>
-    </TD>
-  </TR>
-</TABLE>"""
-
-graph.node("Root", f"<{center_html}>")
-
-
-# --- LEVEL 1, 2 & 3: RESIN -> POSITION -> SOLVENT ---
-for resin in tree_summary["Resin"].unique():
-    resin_id = f"resin_{resin}"
-    resin_data = tree_summary[tree_summary["Resin"] == resin].copy()
-
-    resin_paint_sum = resin_data["Total_Paint"].sum()
-    resin_solvent_sum = resin_data["Total_Solvent"].sum()
-
-    resin_html = f"""<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5">
-      <TR>
-        <TD BGCOLOR="#E6F2FF" STYLE="ROUNDED" BORDER="1" COLOR="#00BFFF" ALIGN="CENTER">
-          <FONT COLOR="#005A9E" POINT-SIZE="11"><B>RESIN: {resin}</B></FONT><BR/>
-          <FONT COLOR="#555555" POINT-SIZE="10">{resin_paint_sum:,.0f} kg Paint</FONT><BR/>
-          <FONT COLOR="#D9534F" POINT-SIZE="10">{resin_solvent_sum:,.0f} kg Solvent</FONT>
-        </TD>
-      </TR>
-    </TABLE>"""
-
-    graph.node(resin_id, f"<{resin_html}>")
-    graph.edge("Root", resin_id)
-
-    for pos in resin_data["Position_UI"].unique():
-        pos_id = f"pos_{resin}_{pos}"
-        pos_data = resin_data[resin_data["Position_UI"] == pos].copy()
-
-        pos_paint_sum = pos_data["Total_Paint"].sum()
-
-        pos_html = f"""<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4">
-          <TR>
-            <TD BGCOLOR="#FFF7ED" STYLE="ROUNDED" BORDER="1" COLOR="#F97316" ALIGN="CENTER">
-              <FONT COLOR="#C2410C" POINT-SIZE="10"><B>POS: {pos}</B></FONT><BR/>
-              <FONT COLOR="#555555" POINT-SIZE="9">{pos_paint_sum:,.0f} kg</FONT>
-            </TD>
-          </TR>
-        </TABLE>"""
-
-        graph.node(pos_id, f"<{pos_html}>")
-        graph.edge(resin_id, pos_id)
-
-        for idx, row in pos_data.iterrows():
-            solvent = row["Solvent_Type"]
-            leaf_id = f"leaf_{resin}_{pos}_{solvent}_{idx}"
-
-            sat_limit_display = (
-                f"{row['Sat_Limit']:.1f}%"
-                if pd.notna(row["Sat_Limit"])
-                else "N/A"
-            )
-
-            leaf_html = f"""<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5">
-              <TR>
-                <TD ALIGN="CENTER" BGCOLOR="white" STYLE="ROUNDED" BORDER="1" COLOR="#CCCCCC">
-                  <FONT COLOR="#333333" POINT-SIZE="10"><B>SOLVENT: {solvent}</B></FONT><BR/>
-                  <FONT COLOR="#555555" POINT-SIZE="9">Visc: {row["Avg_Visc_Before"]:.1f}s &rarr; {row["Avg_Visc_After"]:.1f}s</FONT><BR/>
-                  <FONT COLOR="#00BFFF" POINT-SIZE="9"><B>Opt. Eff: {row["Opt_Eff"]:.2f} s/%</B></FONT><BR/>
-                  <FONT COLOR="#D9534F" POINT-SIZE="9"><B>Sat. Limit: {sat_limit_display}</B></FONT>
-                </TD>
-              </TR>
-            </TABLE>"""
-
-            graph.node(leaf_id, f"<{leaf_html}>")
-            graph.edge(pos_id, leaf_id)
-
-st.graphviz_chart(graph, use_container_width=True)
-# =========================================================
-# 6. SATURATION ANALYSIS
-# =========================================================
-st.markdown("---")
-st.subheader("📉 Dilution Efficiency & Saturation Analysis")
-
-st.caption(
-    "Dilution Efficiency = Viscosity Drop ÷ Solvent Blending Ratio. "
-    "Lower values indicate that additional solvent produces less "
-    "viscosity reduction."
-)
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    resin_options = sorted(
-        filtered_df["Resin"].dropna().unique().tolist()
-    )
-
-    selected_resin = st.selectbox(
-        "Select Resin for Saturation Analysis:",
-        resin_options,
-        key="sat_resin"
-    )
-
-analysis_resin_df = filtered_df[
-    filtered_df["Resin"] == selected_resin
-].copy()
-
-with col2:
-    pos_options = sorted(
-        analysis_resin_df["Position_UI"].dropna().unique().tolist()
-    )
-
-    selected_pos = st.selectbox(
-        "Select Position:",
-        pos_options,
-        key="sat_pos"
-    )
-
-analysis_pos_df = analysis_resin_df[
-    analysis_resin_df["Position_UI"] == selected_pos
-].copy()
-
-with col3:
-    solvent_options = sorted(
-        analysis_pos_df["Solvent_Type"].dropna().unique().tolist()
-    )
-
-    selected_solvent = st.selectbox(
-        "Select Solvent:",
-        solvent_options,
-        key="sat_solvent"
-    )
-
-saturation_df = analysis_pos_df[
-    analysis_pos_df["Solvent_Type"] == selected_solvent
-].copy()
-
-fig_efficiency = None
-baseline_efficiency = None
-warning_ratio = None
-stop_ratio = None
-baseline_range_label = "N/A"
-baseline_records = 0
-
-
-if len(saturation_df) < 5:
-
-    st.warning(
-        "⚠️ Historical records are insufficient for saturation analysis "
-        "(minimum 5 records required)."
-    )
-
-else:
-
-    # Expanded Bins for finer UI granularity
-    bins = [0, 3, 5] + list(range(7, 26)) + [np.inf]
-    labels = ["0–3%", "3–5%", "5–7%"] + [f"{i}–{i+1}%" for i in range(7, 25)] + [">25%"]
-    midpoints = [1.5, 4, 6] + [i + 0.5 for i in range(7, 25)] + [26]
-
-    saturation_df["Ratio_Bin"] = pd.cut(
-        saturation_df["Solvent_Ratio_Percent"],
-        bins=bins,
-        labels=labels,
-        include_lowest=True
-    )
-
-    efficiency_summary = saturation_df.groupby(
-        "Ratio_Bin",
-        observed=False
-    ).agg(
-        Records=("Dilution_Efficiency", "size"),
-        Median_Efficiency=("Dilution_Efficiency", "median")
-    ).reset_index()
-
-    efficiency_summary["Ratio_Midpoint"] = midpoints
-
-    efficiency_summary = efficiency_summary[
-        efficiency_summary["Records"] >= 3
-    ].copy()
-
-    if efficiency_summary.empty:
-
-        st.warning(
-            "⚠️ Not enough records in each solvent-ratio interval."
-        )
-
-    else:
-
-        baseline_efficiency = efficiency_summary[
-            "Median_Efficiency"
-        ].iloc[0]
-
-        baseline_records = efficiency_summary[
-            "Records"
-        ].iloc[0]
-
-        baseline_range_label = efficiency_summary[
-            "Ratio_Bin"
-        ].iloc[0]
-
-        efficiency_summary["Efficiency_Retention_Percent"] = (
-            efficiency_summary["Median_Efficiency"]
-            / baseline_efficiency
-        ) * 100
-
-        warning_rows = efficiency_summary[
-            efficiency_summary["Efficiency_Retention_Percent"] <= 70
-        ]
-
-        stop_rows = efficiency_summary[
-            efficiency_summary["Efficiency_Retention_Percent"] <= 50
-        ]
-
-        ratio_p90 = saturation_df[
-            "Solvent_Ratio_Percent"
-        ].quantile(0.90)
-
-        ratio_p95 = saturation_df[
-            "Solvent_Ratio_Percent"
-        ].quantile(0.95)
-
-        warning_ratio = (
-            warning_rows["Ratio_Midpoint"].iloc[0]
-            if not warning_rows.empty
-            else ratio_p90
-        )
-
-        stop_ratio = (
-            stop_rows["Ratio_Midpoint"].iloc[0]
-            if not stop_rows.empty
-            else ratio_p95
-        )
-
-        stop_ratio = max(stop_ratio, warning_ratio)
-
-        fig_efficiency, ax = plt.subplots(
-            figsize=(11.5, 5.8),
-            dpi=180
-        )
-
-        x_values = efficiency_summary["Ratio_Midpoint"]
-        y_values = efficiency_summary["Median_Efficiency"]
-        record_values = efficiency_summary["Records"]
-
-        ax.plot(
-            x_values,
-            y_values,
-            marker="o",
-            linewidth=2,
-            markersize=6,
-            color="#4F6DFF"
-        )
-
-        for x, y, record in zip(
-            x_values,
-            y_values,
-            record_values
-        ):
-            ax.annotate(
-                str(record),
-                xy=(x, y),
-                xytext=(0, 10),
-                textcoords="offset points",
-                ha="center",
-                fontsize=8,
-                color="#4A4A4A",
-                bbox=dict(
-                    facecolor="white",
-                    edgecolor="none",
-                    pad=1.5,
-                    alpha=0.85
-                )
-            )
-
-        x_min = min(0, x_values.min() - 1)
-        x_max = max(x_values.max() + 1, stop_ratio + 1)
-
-        y_min_orig, y_max_orig = ax.get_ylim()
-        y_range = y_max_orig - y_min_orig
-
-        y_max = y_max_orig + y_range * 0.15
-        y_min = y_min_orig - y_range * 0.15
-
-        ax.set_ylim(y_min, y_max)
-
-        alert_color = "red"
-
-        if abs(stop_ratio - warning_ratio) < 0.2:
-
-            ax.axvline(
-                stop_ratio,
-                color=alert_color,
-                linestyle="--",
-                linewidth=2.2
-            )
-
-            ax.axvspan(
-                stop_ratio,
-                x_max,
-                color=alert_color,
-                alpha=0.10
-            )
-
-            ax.annotate(
-                f"Saturation Limit: {stop_ratio:.1f}%",
-                xy=(
-                    stop_ratio,
-                    y_max_orig + y_range * 0.08
-                ),
-                xytext=(8, 0),
-                textcoords="offset points",
-                color=alert_color,
-                fontsize=10,
-                fontweight="bold",
-                va="center",
-                ha="left",
-                bbox=dict(
-                    facecolor="white",
-                    edgecolor=alert_color,
-                    boxstyle="round,pad=0.3",
-                    alpha=0.9
-                )
-            )
-
-        else:
-
-            ax.axvline(
-                warning_ratio,
-                color=alert_color,
-                linestyle=":",
-                linewidth=2
-            )
-
-            ax.axvline(
-                stop_ratio,
-                color=alert_color,
-                linestyle="--",
-                linewidth=2.2
-            )
-
-            ax.axvspan(
-                warning_ratio,
-                stop_ratio,
-                color=alert_color,
-                alpha=0.05
-            )
-
-            ax.axvspan(
-                stop_ratio,
-                x_max,
-                color=alert_color,
-                alpha=0.10
-            )
-
-            ax.annotate(
-                f"Warning: {warning_ratio:.1f}%",
-                xy=(
-                    warning_ratio,
-                    y_max_orig + y_range * 0.08
-                ),
-                xytext=(-8, 0),
-                textcoords="offset points",
-                color=alert_color,
-                fontsize=10,
-                fontweight="bold",
-                va="center",
-                ha="right",
-                bbox=dict(
-                    facecolor="white",
-                    edgecolor="none",
-                    alpha=0.8
-                )
-            )
-
-            ax.annotate(
-                f"Stop: {stop_ratio:.1f}%",
-                xy=(
-                    stop_ratio,
-                    y_max_orig + y_range * 0.08
-                ),
-                xytext=(8, 0),
-                textcoords="offset points",
-                color=alert_color,
-                fontsize=10,
-                fontweight="bold",
-                va="center",
-                ha="left",
-                bbox=dict(
-                    facecolor="white",
-                    edgecolor=alert_color,
-                    boxstyle="round,pad=0.3",
-                    alpha=0.9
-                )
-            )
-
-        ax.text(
-            0.02,
-            0.04,
-            "ℹ️ Note: Numbers above data points indicate the total record count.",
-            transform=ax.transAxes,
-            fontsize=9,
-            color="#333333",
-            bbox=dict(
-                facecolor="white",
-                edgecolor="#CCCCCC",
-                pad=5,
-                alpha=0.9
-            ),
-            va="bottom",
-            ha="left"
-        )
-
-        ax.set_title(
-            "Dilution Efficiency vs Solvent Ratio\n"
-            f"Resin: {selected_resin} | "
-            f"Position: {selected_pos} | "
-            f"Solvent: {selected_solvent}",
-            fontsize=13,
-            fontweight="bold",
-            loc="left",
-            pad=14
-        )
-
-        ax.set_xlabel(
-            "Solvent Blending Ratio (%)",
-            fontsize=10
-        )
-
-        ax.set_ylabel(
-            "Median Dilution Efficiency (s/%)",
-            fontsize=10
-        )
-
-        ax.set_xlim(x_min, x_max)
-
-        ax.grid(
-            True,
-            linestyle="--",
-            linewidth=0.6,
-            alpha=0.45
-        )
-
-        for spine in ax.spines.values():
-            spine.set_visible(True)
-            spine.set_linewidth(1.2)
-            spine.set_color("black")
-
-        ax.tick_params(
-            axis="both",
-            labelsize=9
-        )
-
-        fig_efficiency.tight_layout()
-
-        st.pyplot(
-            fig_efficiency,
-            use_container_width=True
-        )
-
-        kpi1, kpi2, kpi3 = st.columns(3)
-
-        kpi1.metric(
-            "Baseline Efficiency",
-            f"{baseline_efficiency:.2f} s/%"
-        )
-
-        kpi2.metric(
-            "Saturation Warning Ratio",
-            f"{warning_ratio:.2f}%"
-        )
-
-        kpi3.metric(
-            "Saturation Stop Ratio",
-            f"{stop_ratio:.2f}%"
-        )
-
-        with st.expander(
-            f"🧮 Sample Calculation: How is Baseline "
-            f"{baseline_efficiency:.2f} determined?"
-        ):
-
-            st.markdown(f"""
-            **Step 1: Coil-level Calculation**
-
-            * **Solvent Ratio (%)** = `[Solvent Added / Paint Weight] × 100`
-            * **Viscosity Drop (ΔV)** = `Viscosity Before - Viscosity After`
-            * **Dilution Efficiency** = `ΔV / Solvent Ratio`
-
-            **Step 2: Group Aggregation (Median)**
-
-            * The system identifies the optimal starting range: **{baseline_range_label}**.
-            * There are **{baseline_records}** historical records.
-            * The system calculates the Median efficiency.
-            * **Calculated Baseline** = **{baseline_efficiency:.2f} seconds per 1% solvent added**.
-            """)
-
-        st.caption(
-            "The shaded area represents the saturation / stop zone. "
-            "After this point, further solvent addition is not recommended."
-        )
-
-        with st.expander("View Saturation Analysis Data"):
-
-            display_efficiency = efficiency_summary[
-                [
-                    "Ratio_Bin",
-                    "Records",
-                    "Median_Efficiency",
-                    "Efficiency_Retention_Percent"
-                ]
-            ].copy()
-
-            display_efficiency.columns = [
-                "Solvent Ratio Range",
-                "Records",
-                "Median Efficiency (s/%)",
-                "Efficiency Retention (%)"
-            ]
-
-            st.dataframe(
-                display_efficiency,
-                use_container_width=True,
-                hide_index=True
-            )
-
-
-# =========================================================
-# 7. WORD EXPORT - A4 FORMAT
-# =========================================================
-st.markdown("---")
-
+import matplotlib.cm as cm
+import io
+
+# ==========================================
+# THƯ VIỆN XUẤT WORD (Kiểm tra xem máy đã cài chưa)
+# ==========================================
 try:
+    from docx import Document
+    from docx.shared import Inches
+    HAS_DOCX = True
+except ImportError:
+    HAS_DOCX = False
 
-    graph.attr(dpi="300")
+# ==========================================
+# 1. PAGE CONFIGURATION & DATA LOAD
+# ==========================================
+st.set_page_config(page_title="Solvent Reduction Analysis", page_icon="🎨", layout="wide")
+st.title("🎨 稀釋劑減量機會分析 (Solvent Reduction Opportunity)")
 
-    graph_png = graph.pipe(format="png")
+if not st.session_state.get("raw_data_loaded", False) or st.session_state.get("group_a_data") is None:
+    st.warning("⚠️ Please return to the Main App page and upload the raw data first. (尚未載入資料，請先返回首頁載入)")
+    st.stop()
 
-    if not graph_png:
-        st.error("❌ Unable to create hierarchy image.")
-        st.stop()
+df = st.session_state["group_a_data"].copy()
 
-    graph_stream = io.BytesIO(graph_png)
+# ==========================================
+# 2. DATA CLEANING & PREPARATION
+# ==========================================
+text_cols = ["Vendor", "Resin", "Solvent_Type", "塗料批號", "線別", "塗裝位置"]
+for col in text_cols:
+    df[col] = df.get(col, "Unknown").fillna("Unknown").astype(str).str.strip()
 
-    doc = Document()
+df["Paint_Code"] = df.get("塗料編號", pd.Series("Unknown", index=df.index)).fillna("Unknown").astype(str).str.strip().str.upper()
+df["Solvent_Type"] = df["Solvent_Type"].str.upper()
 
-    section = doc.sections[0]
+invalid_vals = {"", "NAN", "NONE", "NULL", "N/A", "NA", "-", "--"}
+df.replace(list(invalid_vals), "Unknown", inplace=True)
 
-    section.page_width = Inches(8.27)
-    section.page_height = Inches(11.69)
+df["Batch_ID"] = df["塗料批號"]
+pos_map = {"TP": "Primer", "正底漆": "Primer", "BP": "Primer", "背底漆": "Primer", "TF": "Top Finish", "正面漆": "Top Finish", "BF": "Back Finish", "背面漆": "Back Finish"}
+df["Position_UI"] = df["塗裝位置"].map(pos_map).fillna(df["塗裝位置"])
 
-    section.top_margin = Inches(0.55)
-    section.bottom_margin = Inches(0.55)
-    section.left_margin = Inches(0.60)
-    section.right_margin = Inches(0.60)
+num_cols = ["塗料重量", "添加重量", "黏度(秒)", "黏度(秒)_1", "溫度"]
+for col in num_cols:
+    df[col] = pd.to_numeric(df.get(col, np.nan), errors="coerce")
 
-    title = doc.add_heading(
-        "Solvent Consumption & Viscosity Control Report",
-        level=0
-    )
+df["Delta_V"] = df["黏度(秒)"] - df["黏度(秒)_1"]
+df["Solvent_Ratio_Percent"] = np.where(df["塗料重量"] > 0, df["添加重量"] / df["塗料重量"] * 100, np.nan)
+df["Viscosity_Sensitivity"] = np.where(df["Solvent_Ratio_Percent"] > 0, df["Delta_V"] / df["Solvent_Ratio_Percent"], np.nan)
 
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+df = df[(df["塗料重量"]>0) & (df["添加重量"]>0) & (df["黏度(秒)"]>0) & (df["黏度(秒)_1"]>0) & (df["Delta_V"]>0)].copy()
 
-    report_vendor = doc.add_paragraph()
-    report_vendor.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    report_vendor.add_run(
-        f"Vendor: {selected_vendor}"
-    ).bold = True
+if df.empty:
+    st.warning("⚠️ No valid dilution records remain after data cleaning.")
+    st.stop()
 
-    report_period = doc.add_paragraph()
-    report_period.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    report_period.add_run(
-        f"Analysis Period: {date_range_str}"
-    )
+date_col = next((c for c in ["攪拌日期", "調整日期", "生產日期", "Date"] if c in df.columns), None)
+if date_col:
+    df["_Analysis_Date"] = pd.to_datetime(df[date_col], errors="coerce")
+else:
+    df["_Analysis_Date"] = pd.NaT
 
-    doc.add_heading(
-        "1. Solvent Consumption Hierarchy",
-        level=1
-    )
+# ==========================================
+# 3. CORE LOGIC HELPER
+# ==========================================
+def build_summary(source_df, group_cols):
+    if source_df.empty: return pd.DataFrame()
+    
+    agg_dict = {
+        "Adjustment_Records": ("Paint_Code", "size"),
+        "Historical_Batches": ("Batch_ID", "nunique"),
+        "Total_Paint_kg": ("塗料重量", "sum"),
+        "Total_Solvent_kg": ("添加重量", "sum"),
+        "Median_Paint_kg": ("塗料重量", "median"),
+        "Median_Solvent_kg": ("添加重量", "median"),
+        "Median_Ratio_Percent": ("Solvent_Ratio_Percent", "median"),
+        "Median_Before_Viscosity": ("黏度(秒)", "median"),
+        "Median_After_Viscosity": ("黏度(秒)_1", "median"),
+        "Median_Viscosity_Drop": ("Delta_V", "median"),
+        "Median_Dilution_Efficiency": ("Viscosity_Sensitivity", "median"),
+    }
+    if "線別" not in group_cols:
+        agg_dict["Production_Lines"] = ("線別", lambda x: x[x != "Unknown"].nunique())
 
-    hierarchy_p = doc.add_paragraph()
-    hierarchy_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    summary = source_df.groupby(group_cols, dropna=False).agg(**agg_dict).reset_index()
+    summary["Weighted_Ratio_Percent"] = np.where(summary["Total_Paint_kg"] > 0, summary["Total_Solvent_kg"] / summary["Total_Paint_kg"] * 100, np.nan)
+    return summary
 
-    hierarchy_p.add_run().add_picture(
-        graph_stream,
-        width=Inches(7.0)
-    )
 
-    hierarchy_caption = doc.add_paragraph(
-        "Figure 1. Solvent consumption hierarchy by resin, "
-        "position, and solvent type."
-    )
+def mpl_fig_to_stream(fig, dpi=200):
+    """Chuyển 1 figure Matplotlib thành ảnh PNG trong bộ nhớ (không cần Chrome/kaleido)."""
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight", facecolor="white")
+    buf.seek(0)
+    plt.close(fig)
+    return buf
 
-    hierarchy_caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
+# ==========================================
+# 4. GLOBAL FILTERS
+# ==========================================
+st.markdown("---")
+st.subheader("🔍 全局篩選條件 (Global Filters)")
 
-    if fig_efficiency is not None:
+filter_df = df.copy()
+col1, col2, col3, col4, col5 = st.columns(5)
 
-        chart_stream = io.BytesIO()
+vendor_opts = ["All"] + sorted([str(x) for x in filter_df["Vendor"].unique() if x != "Unknown"])
+selected_vendor = col1.selectbox("Vendor (供應商)", vendor_opts)
+if selected_vendor != "All": filter_df = filter_df[filter_df["Vendor"] == selected_vendor]
 
-        fig_efficiency.savefig(
-            chart_stream,
-            format="png",
-            dpi=300,
-            bbox_inches="tight",
-            facecolor="white"
-        )
+resin_opts = ["All"] + sorted([str(x) for x in filter_df["Resin"].unique() if x != "Unknown"])
+selected_resin = col2.selectbox("Resin Type (樹脂種類)", resin_opts)
+if selected_resin != "All": filter_df = filter_df[filter_df["Resin"] == selected_resin]
 
-        chart_stream.seek(0)
+pos_opts = ["All"] + sorted([str(x) for x in filter_df["Position_UI"].unique() if x != "Unknown"])
+selected_position = col3.selectbox("Coating Position (塗裝位置)", pos_opts)
+if selected_position != "All": filter_df = filter_df[filter_df["Position_UI"] == selected_position]
 
-        doc.add_heading(
-            "2. Dilution Efficiency & Saturation Analysis",
-            level=1
-        )
+solvent_opts = ["All"] + sorted([str(x) for x in filter_df["Solvent_Type"].unique() if x != "Unknown"])
+selected_solvent = col4.selectbox("Solvent Type (稀釋劑種類)", solvent_opts)
+if selected_solvent != "All": filter_df = filter_df[filter_df["Solvent_Type"] == selected_solvent]
 
-        chart_p = doc.add_paragraph()
-        chart_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+line_opts = sorted([str(x) for x in filter_df["線別"].unique() if x != "Unknown"])
+selected_lines = col5.multiselect("Production Line (產線)", line_opts, default=line_opts)
 
-        chart_p.add_run().add_picture(
-            chart_stream,
-            width=Inches(7.0)
-        )
+if selected_lines:
+    filter_df = filter_df[filter_df["線別"].isin(selected_lines)]
+else:
+    st.warning("⚠️ Please select at least one production line. (請至少選擇一條產線)")
+    st.stop()
 
-        chart_caption = doc.add_paragraph(
-            "Figure 2. Dilution efficiency versus solvent blending ratio "
-            f"(Resin: {selected_resin}; "
-            f"Position: {selected_pos}; "
-            f"Solvent: {selected_solvent})."
-        )
+if filter_df.empty:
+    st.warning("⚠️ No records match the global analysis filters. (無符合篩選條件的資料)")
+    st.stop()
 
-        chart_caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
+st.markdown("---")
+if "_Analysis_Date" in filter_df.columns and not filter_df["_Analysis_Date"].isna().all():
+    min_date = filter_df["_Analysis_Date"].min().strftime("%Y-%m-%d")
+    max_date = filter_df["_Analysis_Date"].max().strftime("%Y-%m-%d")
+    period_label = f"{min_date} ➔ {max_date}"
+else:
+    period_label = "All available data (全部歷史資料)"
 
-        # =========================================================
-        # 3. KEY RESULTS (KEEP ORIGINAL)
-        # =========================================================
-        doc.add_heading(
-            "3. Key Results",
-            level=1
-        )
+st.info(f"📅 **資料期間 (Analysis Period):** {period_label} ｜ 📊 **符合條件紀錄數 (Valid Records):** {len(filter_df):,} 筆")
+filter_details = f"Vendor: {selected_vendor} | Resin: {selected_resin} | Position: {selected_position} | Solvent: {selected_solvent}"
+st.markdown("<br>", unsafe_allow_html=True)
 
-        result_table = doc.add_table(
-            rows=1,
-            cols=3
-        )
-        result_table.style = "Table Grid"
+# Dict lưu các biểu đồ Plotly hiển thị trên web (không đổi)
+exported_figs = {}
+# Dict lưu các biểu đồ Matplotlib tương ứng, chỉ dùng để xuất Word (không cần Chrome/kaleido)
+export_mpl_figs = {}
 
-        header_cells = result_table.rows[0].cells
-        header_cells[0].text = "Baseline Efficiency"
-        header_cells[1].text = "Warning Ratio"
-        header_cells[2].text = "Stop Ratio"
+# ==========================================
+# 5. HIERARCHICAL OVERVIEW (TREEMAP)
+# ==========================================
+st.subheader("🗂️ 塗料階層總覽 (Hierarchical Overview)")
+st.markdown("Hierarchy: **Vendor ➔ Resin ➔ Position ➔ Solvent Type ➔ Paint Code**. Box size represents total solvent usage (kg).")
 
-        value_cells = result_table.add_row().cells
-        value_cells[0].text = f"{baseline_efficiency:.2f} s/%"
-        value_cells[1].text = f"{warning_ratio:.2f}%"
-        value_cells[2].text = f"{stop_ratio:.2f}%"
+tree_df = filter_df.groupby(["Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint_Code"]).agg(
+    添加重量=("添加重量", "sum"),
+    Delta_V=("Delta_V", "median"), 
+    Solvent_Ratio_Percent=("Solvent_Ratio_Percent", "median")
+).reset_index()
+tree_df = tree_df[tree_df["添加重量"] > 0]
 
-        doc.add_paragraph(
-            "Interpretation: When dilution efficiency decreases, "
-            "additional solvent produces less viscosity reduction. "
-            "The red shaded saturation zone is used as a reference "
-            "to avoid excessive solvent addition."
-        )
+fig_tree = px.treemap(
+    tree_df,
+    path=[px.Constant("Total"), "Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint_Code"],
+    values="添加重量", 
+    color="Resin",  
+    color_discrete_sequence=px.colors.qualitative.Pastel,
+    custom_data=["Delta_V", "Solvent_Ratio_Percent"],
+    title=f"Hierarchical Breakdown of Solvent Usage (kg)<br><sup>Filters: {filter_details}</sup>",
+    height=700
+)
 
-        # =========================================================
-        # 4. SATURATION ANALYSIS DATA (ADDED AS REQUESTED)
-        # =========================================================
-        doc.add_heading(
-            "4. Saturation Analysis Data",
-            level=1
-        )
+fig_tree.update_traces(
+    texttemplate="<b>%{label}</b><br>%{value:,.0f} kg",
+    hovertemplate="<b>%{label}</b><br>Solvent Usage: %{value:,.1f} kg<br>Visc Drop (Biến động): ~%{customdata[0]:.1f} s<br>Solvent Added (Tỷ lệ thêm): ~%{customdata[1]:.1f}%",
+    root_color="#f8f9fa"
+)
+fig_tree.update_layout(margin=dict(t=90, l=10, r=10, b=10)) 
+
+st.plotly_chart(fig_tree, use_container_width=True)
+exported_figs["1. Hierarchical Treemap"] = fig_tree
+
+# ---- Bản Matplotlib tương ứng cho Word: Top 15 Paint Code theo lượng dung môi ----
+_tree_bar = (
+    tree_df.groupby(["Resin", "Paint_Code"])["添加重量"].sum()
+    .reset_index()
+    .sort_values("添加重量", ascending=False)
+    .head(15)
+)
+if not _tree_bar.empty:
+    _resins = sorted(_tree_bar["Resin"].unique())
+    _cmap = cm.get_cmap("Pastel1", max(len(_resins), 3))
+    _color_map = {r: _cmap(i) for i, r in enumerate(_resins)}
+
+    fig_tree_mpl, ax = plt.subplots(figsize=(9, max(4, 0.4 * len(_tree_bar))), dpi=150)
+    _plot_df = _tree_bar.sort_values("添加重量", ascending=True)
+    bar_colors = [_color_map[r] for r in _plot_df["Resin"]]
+    ax.barh(_plot_df["Paint_Code"], _plot_df["添加重量"], color=bar_colors)
+    ax.set_xlabel("Solvent Usage (kg)")
+    ax.set_title(f"Top 15 Paint Codes by Solvent Usage (kg)\nFilters: {filter_details}", fontsize=10, loc="left")
+    for i, (val, resin) in enumerate(zip(_plot_df["添加重量"], _plot_df["Resin"])):
+        ax.text(val, i, f" {val:,.0f} kg", va="center", fontsize=8)
+    handles = [plt.Rectangle((0,0),1,1, color=_color_map[r]) for r in _resins]
+    ax.legend(handles, _resins, title="Resin", loc="lower right", fontsize=8)
+    fig_tree_mpl.tight_layout()
+    export_mpl_figs["1. Hierarchical Overview (Top 15 by Solvent Usage)"] = fig_tree_mpl
+
+st.markdown("<br>", unsafe_allow_html=True)
+
+# ==========================================
+# 6. TABS & VISUALIZATION
+# ==========================================
+tab_ranking, tab_detail, tab_line = st.tabs([
+    "1️⃣ 塗料消耗排名 (Paint Code Ranking)", 
+    "2️⃣ 塗料詳細分析 (Paint Code Details)", 
+    "3️⃣ 產線黏度比較 (Line Comparison)"
+])
+
+# ----- TAB 1: RANKING -----
+with tab_ranking:
+    st.subheader("1. Paint Code Solvent Consumption (Top 20)")
+    
+    full_summary_df = build_summary(filter_df, ["Vendor", "Resin", "Position_UI", "Paint_Code", "Solvent_Type"])
+    summary_df = full_summary_df.sort_values("Total_Solvent_kg", ascending=False).head(20).reset_index(drop=True)
+    summary_df.insert(0, "Rank", np.arange(1, len(summary_df) + 1))
+
+    chart_height = max(450, len(summary_df) * 32)
+    
+    ch1, ch2 = st.columns(2)
+    with ch1:
+        df_melt = summary_df.melt(id_vars="Paint_Code", value_vars=["Total_Paint_kg", "Total_Solvent_kg"])
+        df_melt["variable"] = df_melt["variable"].map({"Total_Paint_kg": "塗料 (Paint)", "Total_Solvent_kg": "稀釋劑 (Solvent)"})
         
-        # Initialize table with 4 columns
-        detail_table = doc.add_table(rows=1, cols=4)
-        detail_table.style = "Table Grid"
+        fig1 = px.bar(
+            df_melt, x="value", y="Paint_Code", color="variable", barmode="group", orientation='h', 
+            height=chart_height, color_discrete_map={"塗料 (Paint)": "#5B8FF9", "稀釋劑 (Solvent)": "#F6BD16"}
+        )
+        fig1.update_yaxes(dtick=1, title="", categoryorder="total ascending")
+        fig1.update_xaxes(title="Weight (kg)")
+        fig1.update_layout(title="Paint vs Solvent Usage", legend_title_text="", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+        st.plotly_chart(fig1, use_container_width=True)
+        exported_figs["2. Paint vs Solvent (kg)"] = fig1
 
-        # Set column headers
-        detail_hdr = detail_table.rows[0].cells
-        detail_hdr[0].text = "Solvent Ratio Range"
-        detail_hdr[1].text = "Records"
-        detail_hdr[2].text = "Median Efficiency (s/%)"
-        detail_hdr[3].text = "Efficiency Retention (%)"
+        # ---- Matplotlib tương ứng ----
+        _s1 = summary_df.sort_values("Total_Solvent_kg", ascending=True)
+        fig1_mpl, ax = plt.subplots(figsize=(8, max(4, 0.4 * len(_s1))), dpi=150)
+        y_pos = np.arange(len(_s1))
+        bar_h = 0.35
+        ax.barh(y_pos + bar_h/2, _s1["Total_Paint_kg"], height=bar_h, color="#5B8FF9", label="塗料 (Paint)")
+        ax.barh(y_pos - bar_h/2, _s1["Total_Solvent_kg"], height=bar_h, color="#F6BD16", label="稀釋劑 (Solvent)")
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(_s1["Paint_Code"], fontsize=8)
+        ax.set_xlabel("Weight (kg)")
+        ax.set_title("Paint vs Solvent Usage", fontsize=10, loc="left")
+        ax.legend(fontsize=8, loc="lower right")
+        fig1_mpl.tight_layout()
+        export_mpl_figs["2. Paint vs Solvent (kg)"] = fig1_mpl
 
-        # Bold table headers
-        for cell in detail_hdr:
-            for paragraph in cell.paragraphs:
-                for run in paragraph.runs:
-                    run.bold = True
+    with ch2:
+        sorted_df = summary_df.sort_values("Weighted_Ratio_Percent", ascending=True)
+        fig2 = px.bar(
+            sorted_df, x="Weighted_Ratio_Percent", y="Paint_Code", orientation='h', text_auto='.2f', 
+            height=chart_height, color_discrete_sequence=["#5B8FF9"]
+        )
+        fig2.update_traces(textposition="outside", cliponaxis=False)
+        fig2.update_yaxes(dtick=1, title="")
+        fig2.update_xaxes(title="Ratio (%)")
+        fig2.update_layout(title="Weighted Solvent Ratio (%)")
+        st.plotly_chart(fig2, use_container_width=True)
+        exported_figs["3. Weighted Solvent Ratio"] = fig2
 
-        # Populate data from efficiency_summary dataframe
-        for _, row in efficiency_summary.iterrows():
-            row_cells = detail_table.add_row().cells
-            row_cells[0].text = str(row["Ratio_Bin"])
-            row_cells[1].text = str(int(row["Records"]))
-            row_cells[2].text = f"{row['Median_Efficiency']:.2f}"
-            
-            # Format percentage to remove trailing zeros matching the app
-            retention_str = f"{row['Efficiency_Retention_Percent']:.4f}".rstrip('0').rstrip('.')
-            row_cells[3].text = retention_str
+        # ---- Matplotlib tương ứng ----
+        fig2_mpl, ax = plt.subplots(figsize=(8, max(4, 0.4 * len(sorted_df))), dpi=150)
+        ax.barh(sorted_df["Paint_Code"], sorted_df["Weighted_Ratio_Percent"], color="#5B8FF9")
+        for i, val in enumerate(sorted_df["Weighted_Ratio_Percent"]):
+            ax.text(val, i, f" {val:.2f}", va="center", fontsize=8)
+        ax.set_xlabel("Ratio (%)")
+        ax.set_title("Weighted Solvent Ratio (%)", fontsize=10, loc="left")
+        ax.tick_params(axis='y', labelsize=8)
+        fig2_mpl.tight_layout()
+        export_mpl_figs["3. Weighted Solvent Ratio"] = fig2_mpl
 
-        # =========================================================
-        # 5. BASELINE SAMPLE CALCULATION (CHANGE NUMBER FROM 4 TO 5)
-        # =========================================================
-        doc.add_heading(
-            "5. 基準數據判定與計算範例 "
-            "(Baseline Sample Calculation)",
-            level=1
+    st.markdown("---")
+    
+    # Dual Axis Chart
+    fig_dual = go.Figure()
+    fig_dual.add_trace(go.Bar(x=summary_df["Paint_Code"], y=summary_df["Total_Paint_kg"], name="Paint (kg)", marker_color="#5B8FF9", yaxis="y1"))
+    fig_dual.add_trace(go.Bar(x=summary_df["Paint_Code"], y=summary_df["Total_Solvent_kg"], name="Solvent (kg)", marker_color="#F6BD16", yaxis="y1"))
+    fig_dual.add_trace(go.Scatter(x=summary_df["Paint_Code"], y=summary_df["Weighted_Ratio_Percent"], name="Solvent Ratio (%)", mode="lines+markers", line=dict(color="#5AD8A6", width=3), marker=dict(size=8), yaxis="y2"))
+    
+    for i, row in summary_df.iterrows():
+        fig_dual.add_annotation(
+            x=row["Paint_Code"], y=row["Weighted_Ratio_Percent"],
+            text=f"<b>{row['Weighted_Ratio_Percent']:.2f}%</b>", 
+            xref="x", yref="y2", showarrow=False, yshift=18, 
+            font=dict(color="black", size=12), bgcolor="rgba(255, 255, 255, 0.85)", borderpad=2
         )
 
-        doc.add_paragraph(
-            f"為確保客觀性，系統自動捕捉第一個具備完整統計意義的區間作為基準"
-            f"（即 {baseline_range_label}，包含 {baseline_records} 卷歷史有效紀錄）。"
-            f"為排除極端值干擾，系統提取該區間內稀釋效率之"
-            f"「中位數 (Median)」做為 100% 黃金基準線。"
-        )
-
-        doc.add_paragraph(
-            f"• 基準效率 (Baseline Efficiency) = "
-            f"{baseline_efficiency:.2f} (秒/%)"
-        )
-
-        calc_formula = doc.add_paragraph()
-
-        calc_formula.add_run(
-            "單卷 (Coil-level) 效率計算底層公式：\n"
-        ).bold = True
-
-        calc_formula.add_run(
-            "1. 溶劑比例 (%) = [ 添加重量 / 塗料重量 ] × 100\n"
-            "2. 降黏幅度 (ΔV) = 稀釋前黏度 - 稀釋後黏度\n"
-            "3. 稀釋效率 (s/%) = ΔV / 溶劑比例"
-        )
-
-    else:
-
-        doc.add_paragraph(
-            "Note: Saturation chart was not generated because "
-            "the selected material condition does not have "
-            "sufficient historical data."
-        )
-
-    doc_io = io.BytesIO()
-
-    doc.save(doc_io)
-
-    doc_io.seek(0)
-
-    st.download_button(
-        label="📄 Download A4 Word Report",
-        data=doc_io,
-        file_name=(
-            f"Solvent_Viscosity_Report_"
-            f"{selected_vendor}_"
-            f"{selected_resin}_"
-            f"{selected_pos}_"
-            f"{selected_solvent}.docx"
-        ),
-        mime=(
-            "application/vnd.openxmlformats-officedocument."
-            "wordprocessingml.document"
-        )
+    fig_dual.update_layout(
+        title=f"Paint & Solvent Usage vs. Solvent Ratio<br><sup>Filters Applied: {filter_details}</sup>",
+        xaxis=dict(title="Paint Code"),
+        yaxis=dict(title="Weight (kg)", side="left", showgrid=False),
+        yaxis2=dict(title="Solvent Ratio (%)", overlaying="y", side="right", showgrid=False, range=[0, summary_df["Weighted_Ratio_Percent"].max() * 1.25]),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        height=600
     )
+    st.plotly_chart(fig_dual, use_container_width=True)
+    exported_figs["4. Dual Axis Usage vs Ratio"] = fig_dual
 
-except Exception as e:
+    # ---- Matplotlib tương ứng ----
+    fig_dual_mpl, ax1 = plt.subplots(figsize=(11, 6), dpi=150)
+    x = np.arange(len(summary_df))
+    w = 0.35
+    ax1.bar(x - w/2, summary_df["Total_Paint_kg"], width=w, color="#5B8FF9", label="Paint (kg)")
+    ax1.bar(x + w/2, summary_df["Total_Solvent_kg"], width=w, color="#F6BD16", label="Solvent (kg)")
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(summary_df["Paint_Code"], rotation=45, ha="right", fontsize=7)
+    ax1.set_ylabel("Weight (kg)")
+    ax1.set_title(f"Paint & Solvent Usage vs. Solvent Ratio\nFilters: {filter_details}", fontsize=10, loc="left")
 
-    st.error(f"❌ Word report export failed: {e}")
-    st.exception(e)
+    ax2 = ax1.twinx()
+    ax2.plot(x, summary_df["Weighted_Ratio_Percent"], color="#5AD8A6", marker="o", linewidth=2)
+    ax2.set_ylabel("Solvent Ratio (%)")
+    ax2.set_ylim(0, summary_df["Weighted_Ratio_Percent"].max() * 1.25 if summary_df["Weighted_Ratio_Percent"].max() > 0 else 1)
+    for xi, val in zip(x, summary_df["Weighted_Ratio_Percent"]):
+        ax2.annotate(f"{val:.2f}%", (xi, val), textcoords="offset points", xytext=(0, 8), ha="center", fontsize=7)
+
+    lines_1, labels_1 = ax1.get_legend_handles_labels()
+    lines_2, labels_2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc="upper right", fontsize=8)
+    fig_dual_mpl.tight_layout()
+    export_mpl_figs["4. Dual Axis Usage vs Ratio"] = fig_dual_mpl
+
+# ----- TAB 2: DETAILS -----
+with tab_detail:
+    st.subheader("2. Paint Code Details")
+    selected_code = st.selectbox("Select Paint Code", summary_df["Paint_Code"].unique())
+    detail_df = filter_df[filter_df["Paint_Code"] == selected_code].copy()
+    detail_title_filter = f"{filter_details} | Paint Code: {selected_code}"
+
+    ch3, ch4 = st.columns(2)
+    with ch3:
+        detail_df = detail_df.reset_index(drop=True)
+        detail_df["Record_Index"] = detail_df.index + 1
+        
+        fig3 = go.Figure()
+        fig3.add_trace(go.Scatter(x=detail_df["Record_Index"], y=detail_df["黏度(秒)"], mode="lines+markers", name="Before Viscosity", marker=dict(color="#5B8FF9", size=8), yaxis="y1"))
+        fig3.add_trace(go.Scatter(x=detail_df["Record_Index"], y=detail_df["黏度(秒)_1"], mode="lines+markers", name="After Viscosity", marker=dict(color="#5AD8A6", size=8), yaxis="y1"))
+        
+        has_temp = "溫度" in detail_df.columns and not detail_df["溫度"].isna().all()
+        if has_temp:
+            fig3.add_trace(go.Scatter(x=detail_df["Record_Index"], y=detail_df["溫度"], mode="lines+markers", name="Temperature (°C)", marker=dict(color="#F6BD16", size=8, symbol="diamond"), line=dict(color="#F6BD16", width=2, dash="dot"), yaxis="y2"))
+            chart_title = "Viscosity & Temperature Variation (Before vs After)"
+        else:
+            chart_title = "Viscosity Variation (Before vs After)"
+        
+        fig3.update_layout(
+            title=f"{chart_title}<br><sup>Filters: {detail_title_filter}</sup>",
+            xaxis_title="Record Output Sequence", yaxis=dict(title="Viscosity (s)", side="left"),
+            yaxis2=dict(title="Temperature (°C)", overlaying="y", side="right", showgrid=False),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
+        st.plotly_chart(fig3, use_container_width=True)
+        exported_figs["5. Viscosity & Temperature Variation"] = fig3
+
+        # ---- Matplotlib tương ứng ----
+        fig3_mpl, ax1 = plt.subplots(figsize=(9, 5), dpi=150)
+        ax1.plot(detail_df["Record_Index"], detail_df["黏度(秒)"], marker="o", color="#5B8FF9", label="Before Viscosity")
+        ax1.plot(detail_df["Record_Index"], detail_df["黏度(秒)_1"], marker="o", color="#5AD8A6", label="After Viscosity")
+        ax1.set_xlabel("Record Output Sequence")
+        ax1.set_ylabel("Viscosity (s)")
+        ax1.set_title(f"{chart_title}\nFilters: {detail_title_filter}", fontsize=10, loc="left")
+        lines_1, labels_1 = ax1.get_legend_handles_labels()
+        if has_temp:
+            ax2 = ax1.twinx()
+            ax2.plot(detail_df["Record_Index"], detail_df["溫度"], marker="D", linestyle=":", color="#F6BD16", label="Temperature (°C)")
+            ax2.set_ylabel("Temperature (°C)")
+            lines_2, labels_2 = ax2.get_legend_handles_labels()
+            ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc="upper right", fontsize=8)
+        else:
+            ax1.legend(lines_1, labels_1, loc="upper right", fontsize=8)
+        fig3_mpl.tight_layout()
+        export_mpl_figs["5. Viscosity & Temperature Variation"] = fig3_mpl
+
+    with ch4:
+        line_usage = build_summary(detail_df, ["線別"]).sort_values("Total_Solvent_kg")
+        fig4 = px.bar(line_usage, x="Total_Solvent_kg", y="線別", text="Weighted_Ratio_Percent", orientation='h', title=f"Solvent Usage by Line<br><sup>Filters: {detail_title_filter}</sup>", color_discrete_sequence=["#5B8FF9"])
+        fig4.update_traces(texttemplate='%{text:.2f}%', textposition='outside')
+        fig4.update_yaxes(title="")
+        fig4.update_xaxes(title="Total Solvent (kg)")
+        st.plotly_chart(fig4, use_container_width=True)
+        exported_figs["6. Solvent Usage by Line"] = fig4
+
+        # ---- Matplotlib tương ứng ----
+        fig4_mpl, ax = plt.subplots(figsize=(8, max(3, 0.5 * len(line_usage))), dpi=150)
+        ax.barh(line_usage["線別"], line_usage["Total_Solvent_kg"], color="#5B8FF9")
+        for i, (val, pct) in enumerate(zip(line_usage["Total_Solvent_kg"], line_usage["Weighted_Ratio_Percent"])):
+            ax.text(val, i, f" {pct:.2f}%", va="center", fontsize=8)
+        ax.set_xlabel("Total Solvent (kg)")
+        ax.set_title(f"Solvent Usage by Line\nFilters: {detail_title_filter}", fontsize=10, loc="left")
+        fig4_mpl.tight_layout()
+        export_mpl_figs["6. Solvent Usage by Line"] = fig4_mpl
+
+# ----- TAB 3: LINE COMPARISON -----
+with tab_line:
+    st.subheader("3. Production Line Comparison")
+    comp_code = st.selectbox("Select Paint Code for Line Comparison", summary_df["Paint_Code"].unique(), key="line_comp")
+    comp_df = filter_df[filter_df["Paint_Code"] == comp_code]
+    line_summary = build_summary(comp_df, ["線別"]).sort_values("線別")
+
+    if len(line_summary) >= 2:
+        ch5, ch6 = st.columns(2)
+        with ch5:
+            fig5 = go.Figure()
+            for i, row in line_summary.iterrows():
+                fig5.add_trace(go.Scatter(x=[row["Median_After_Viscosity"], row["Median_Before_Viscosity"]], y=[row["線別"], row["線別"]], mode="lines+markers", marker=dict(size=12), name=row["線別"]))
+            fig5.update_layout(title="Viscosity Drop (Before vs After)", xaxis_title="Viscosity (s)", yaxis_title="")
+            st.plotly_chart(fig5, use_container_width=True)
+            exported_figs["7. Line Comparison - Viscosity Drop"] = fig5
+
+            # ---- Matplotlib tương ứng ----
+            fig5_mpl, ax = plt.subplots(figsize=(8, max(3, 0.6 * len(line_summary))), dpi=150)
+            for i, row in line_summary.iterrows():
+                ax.plot([row["Median_After_Viscosity"], row["Median_Before_Viscosity"]], [row["線別"], row["線別"]], marker="o", markersize=10, linewidth=2)
+            ax.set_xlabel("Viscosity (s)")
+            ax.set_title("Viscosity Drop (Before vs After)", fontsize=10, loc="left")
+            fig5_mpl.tight_layout()
+            export_mpl_figs["7. Line Comparison - Viscosity Drop"] = fig5_mpl
+
+        with ch6:
+            fig6 = px.bar(line_summary.sort_values("Weighted_Ratio_Percent"), x="Weighted_Ratio_Percent", y="線別", orientation='h', text_auto='.2f', title="Weighted Solvent Ratio", color_discrete_sequence=["#5AD8A6"])
+            fig6.update_yaxes(title="")
+            st.plotly_chart(fig6, use_container_width=True)
+            exported_figs["8. Line Comparison - Solvent Ratio"] = fig6
+
+            # ---- Matplotlib tương ứng ----
+            _s6 = line_summary.sort_values("Weighted_Ratio_Percent")
+            fig6_mpl, ax = plt.subplots(figsize=(8, max(3, 0.6 * len(_s6))), dpi=150)
+            ax.barh(_s6["線別"], _s6["Weighted_Ratio_Percent"], color="#5AD8A6")
+            for i, val in enumerate(_s6["Weighted_Ratio_Percent"]):
+                ax.text(val, i, f" {val:.2f}", va="center", fontsize=8)
+            ax.set_xlabel("Ratio (%)")
+            ax.set_title("Weighted Solvent Ratio", fontsize=10, loc="left")
+            fig6_mpl.tight_layout()
+            export_mpl_figs["8. Line Comparison - Solvent Ratio"] = fig6_mpl
+
+
+# ==========================================
+# 7. XUẤT FILE WORD (EXPORT BÁO CÁO TỰ ĐỘNG)
+# Đã bỏ hoàn toàn phụ thuộc vào kaleido/Chrome.
+# Toàn bộ ảnh trong file Word được vẽ bằng Matplotlib,
+# hoạt động trên mọi môi trường (kể cả Streamlit Cloud/GitHub)
+# mà không cần cài thêm Chrome.
+# ==========================================
+st.markdown("---")
+st.subheader("📄 Xuất báo cáo (Export Report)")
+
+if not HAS_DOCX:
+    st.warning("⚠️ Máy chủ chưa được cài đặt công cụ tạo file Word. Để sử dụng tính năng này, bạn hãy thêm vào file requirements.txt:\n\n`python-docx`")
+else:
+    if st.button("🚀 Chụp toàn bộ Biểu đồ và Lưu thành file Word"):
+        with st.spinner("Đang xử lý hình ảnh và tạo file Word... (Quá trình này mất khoảng vài giây)"):
+            try:
+                doc = Document()
+                doc.add_heading('BÁO CÁO PHÂN TÍCH TIÊU THỤ DUNG MÔI SƠN', 0)
+                doc.add_paragraph(f"Ngày phân tích: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                doc.add_paragraph(f"Bộ lọc dữ liệu: {filter_details}")
+
+                # Hàm chèn ảnh Matplotlib (PNG) vào file Word
+                def add_chart_to_word(doc, title, mpl_fig, note=None):
+                    doc.add_heading(title, level=2)
+                    image_stream = mpl_fig_to_stream(mpl_fig)
+                    doc.add_picture(image_stream, width=Inches(6.0))
+                    if note:
+                        note_p = doc.add_paragraph(note)
+                        note_p.italic = True
+                    doc.add_paragraph("")
+
+                # Duyệt qua các biểu đồ Matplotlib đã được lưu trong dict
+                for chart_title, mpl_fig in export_mpl_figs.items():
+                    note = None
+                    if "Hierarchical" in chart_title:
+                        note = ("Ghi chú: Do giới hạn kỹ thuật khi xuất file Word, biểu đồ Treemap đa cấp trên "
+                                "giao diện web được trình bày dưới dạng cột ngang Top 15 mã sơn theo lượng dung môi "
+                                "sử dụng (cùng số liệu, khác cách hiển thị).")
+                    add_chart_to_word(doc, chart_title, mpl_fig, note)
+
+                # Lưu file vào bộ nhớ đệm Streamlit
+                doc_io = io.BytesIO()
+                doc.save(doc_io)
+                doc_io.seek(0)
+
+                st.success("✅ Đã tạo file Word thành công! Nhấn nút bên dưới để tải về máy.")
+                st.download_button(
+                    label="⬇️ TẢI FILE BÁO CÁO (Word .docx)",
+                    data=doc_io,
+                    file_name="Bao_Cao_Dung_Moi_Son.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+            except Exception as e:
+                st.error(f"❌ Lỗi khi tạo file Word. Chi tiết lỗi: {e}")
