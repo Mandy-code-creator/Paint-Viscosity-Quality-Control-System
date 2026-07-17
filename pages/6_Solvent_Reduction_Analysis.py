@@ -147,9 +147,11 @@ exported_figs = {}
 # 5. HIERARCHICAL OVERVIEW (TREEMAP)
 # ==========================================
 st.subheader("🗂️ 塗料階層總覽 (Hierarchical Overview)")
-st.markdown("Hierarchy: **Vendor ➔ Resin ➔ Position ➔ Solvent Type ➔ Paint Code**. Box size represents total solvent usage (kg).")
+st.markdown("Hierarchy: **Vendor ➔ Resin ➔ Position ➔ Solvent Type ➔ Paint Code**. Kích thước các ô vuông đại diện cho lượng dung môi tiêu thụ (kg).")
 
-# Chuẩn bị dữ liệu cho Treemap để tính toán Delta_V (Biến động độ nhớt) và Ratio (Tỷ lệ dung môi)
+# Bộ màu Pastel dịu nhẹ sang trọng, thay thế màu đỏ chói
+soft_palette = ["#4A90E2", "#50E3C2", "#F5A623", "#B8E986", "#9013FE", "#4A4A4A", "#F8E71C", "#7ED321"]
+
 tree_df = filter_df.groupby(["Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint_Code"]).agg(
     添加重量=("添加重量", "sum"),
     Delta_V=("Delta_V", "median"), 
@@ -162,21 +164,36 @@ fig_tree = px.treemap(
     path=[px.Constant("Total"), "Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint_Code"],
     values="添加重量", 
     color="Resin",  
-    color_discrete_sequence=px.colors.qualitative.Pastel, # ĐỔI MÀU DỊU MẮT HƠN
-    custom_data=["Delta_V", "Solvent_Ratio_Percent"], # Truyền thêm dữ liệu độ nhớt và tỷ lệ
+    color_discrete_sequence=soft_palette, 
+    custom_data=["Delta_V", "Solvent_Ratio_Percent"],
     title=f"Hierarchical Breakdown of Solvent Usage (kg)<br><sup>Filters: {filter_details}</sup>",
-    height=700
+    height=750
 )
 
-# Cập nhật Label và Tooltip chi tiết
+# Can thiệp sâu để In trực tiếp các thông số lên các Ô Lớn và fix lỗi NaN
+tree_data = fig_tree.data[0]
+custom_texts = []
+
+for label, custom_val, w_val in zip(tree_data.labels, tree_data.customdata, tree_data.values):
+    val_str = f"{w_val:,.0f} kg" if not pd.isna(w_val) else "0 kg"
+    
+    # Nếu là nhóm cha (Vendor, Resin, v.v...) Plotly trả về '(?)' -> Chỉ in Tổng Usage
+    if str(custom_val[0]) == '(?)' or pd.isna(custom_val[0]):
+        custom_texts.append(f"<b>{label}</b><br>Usage: {val_str}")
+    # Nếu là mã sơn chi tiết -> In Full thông tin độ nhớt và tỷ lệ lên mặt ô vuông
+    else:
+        custom_texts.append(f"<b>{label}</b><br>Usage: {val_str}<br>Drop: ~{custom_val[0]:.1f} s<br>Ratio: ~{custom_val[1]:.1f}%")
+
 fig_tree.update_traces(
-    texttemplate="<b>%{label}</b><br>%{value:,.0f} kg", # Hiển thị trên ô vuông
-    hovertemplate="<b>%{label}</b><br>Solvent Usage: %{value:,.1f} kg<br>Visc Drop (Biến động): ~%{customdata[0]:.1f} s<br>Solvent Added (Tỷ lệ thêm): ~%{customdata[1]:.1f}%", # Hiển thị khi rê chuột
-    root_color="#f8f9fa"
+    text=custom_texts,
+    texttemplate="%{text}",                     # Ép hiển thị text custom trực tiếp trên mặt ô
+    hovertemplate="%{text}<extra></extra>",     # Hover cũng đồng bộ (không còn bị rác NaN)
+    root_color="#f8f9fa",
+    textfont=dict(size=14)                      # Chữ to rõ ràng hơn
 )
-# Tăng margin-top (t=90) để tránh lỗi chữ đè lên khối Total
-fig_tree.update_layout(margin=dict(t=90, l=10, r=10, b=10)) 
 
+# Đẩy margin-top để không bị dính chữ tiêu đề
+fig_tree.update_layout(margin=dict(t=90, l=10, r=10, b=10)) 
 st.plotly_chart(fig_tree, use_container_width=True)
 exported_figs["1. Hierarchical Treemap"] = fig_tree
 st.markdown("<br>", unsafe_allow_html=True)
@@ -207,7 +224,7 @@ with tab_ranking:
         
         fig1 = px.bar(
             df_melt, x="value", y="Paint_Code", color="variable", barmode="group", orientation='h', 
-            height=chart_height, color_discrete_map={"塗料 (Paint)": "#5B8FF9", "稀釋劑 (Solvent)": "#F6BD16"}
+            height=chart_height, color_discrete_map={"塗料 (Paint)": "#5B8FF9", "稀釋劑 (Solvent)": "#F5A623"}
         )
         fig1.update_yaxes(dtick=1, title="", categoryorder="total ascending")
         fig1.update_xaxes(title="Weight (kg)")
@@ -233,7 +250,7 @@ with tab_ranking:
     # Dual Axis Chart
     fig_dual = go.Figure()
     fig_dual.add_trace(go.Bar(x=summary_df["Paint_Code"], y=summary_df["Total_Paint_kg"], name="Paint (kg)", marker_color="#5B8FF9", yaxis="y1"))
-    fig_dual.add_trace(go.Bar(x=summary_df["Paint_Code"], y=summary_df["Total_Solvent_kg"], name="Solvent (kg)", marker_color="#F6BD16", yaxis="y1"))
+    fig_dual.add_trace(go.Bar(x=summary_df["Paint_Code"], y=summary_df["Total_Solvent_kg"], name="Solvent (kg)", marker_color="#F5A623", yaxis="y1"))
     fig_dual.add_trace(go.Scatter(x=summary_df["Paint_Code"], y=summary_df["Weighted_Ratio_Percent"], name="Solvent Ratio (%)", mode="lines+markers", line=dict(color="#5AD8A6", width=3), marker=dict(size=8), yaxis="y2"))
     
     for i, row in summary_df.iterrows():
@@ -272,7 +289,7 @@ with tab_detail:
         fig3.add_trace(go.Scatter(x=detail_df["Record_Index"], y=detail_df["黏度(秒)_1"], mode="lines+markers", name="After Viscosity", marker=dict(color="#5AD8A6", size=8), yaxis="y1"))
         
         if "溫度" in detail_df.columns and not detail_df["溫度"].isna().all():
-            fig3.add_trace(go.Scatter(x=detail_df["Record_Index"], y=detail_df["溫度"], mode="lines+markers", name="Temperature (°C)", marker=dict(color="#F6BD16", size=8, symbol="diamond"), line=dict(color="#F6BD16", width=2, dash="dot"), yaxis="y2"))
+            fig3.add_trace(go.Scatter(x=detail_df["Record_Index"], y=detail_df["溫度"], mode="lines+markers", name="Temperature (°C)", marker=dict(color="#F5A623", size=8, symbol="diamond"), line=dict(color="#F5A623", width=2, dash="dot"), yaxis="y2"))
             chart_title = "Viscosity & Temperature Variation (Before vs After)"
         else:
             chart_title = "Viscosity Variation (Before vs After)"
