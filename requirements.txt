@@ -7,5 +7,5 @@ statsmodels
 graphviz
 streamlit-agraph
 python-docx
-kaleido
+kaleido==0.1.0.post1
 matplotlib
