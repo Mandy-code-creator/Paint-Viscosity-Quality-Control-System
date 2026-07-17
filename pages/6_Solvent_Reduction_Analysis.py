@@ -34,7 +34,7 @@ df["Batch_ID"] = df["塗料批號"]
 pos_map = {"TP": "Primer", "正底漆": "Primer", "BP": "Primer", "背底漆": "Primer", "TF": "Top Finish", "正面漆": "Top Finish", "BF": "Back Finish", "背面漆": "Back Finish"}
 df["Position_UI"] = df["塗裝位置"].map(pos_map).fillna(df["塗裝位置"])
 
-# Clean Numeric Columns - Thêm cột "溫度" (Nhiệt độ)
+# Clean Numeric Columns
 num_cols = ["塗料重量", "添加重量", "黏度(秒)", "黏度(秒)_1", "溫度"]
 for col in num_cols:
     df[col] = pd.to_numeric(df.get(col, np.nan), errors="coerce")
@@ -99,25 +99,25 @@ selected_vendor = col1.selectbox("Vendor (供應商)", vendor_opts)
 if selected_vendor != "All":
     filter_df = filter_df[filter_df["Vendor"] == selected_vendor]
 
-# --- 2. Resin Filter (Ăn theo Vendor đã chọn) ---
+# --- 2. Resin Filter ---
 resin_opts = ["All"] + sorted([str(x) for x in filter_df["Resin"].unique() if x != "Unknown"])
 selected_resin = col2.selectbox("Resin Type (樹脂種類)", resin_opts)
 if selected_resin != "All":
     filter_df = filter_df[filter_df["Resin"] == selected_resin]
 
-# --- 3. Position Filter (Ăn theo Resin và Vendor đã chọn) ---
+# --- 3. Position Filter ---
 pos_opts = ["All"] + sorted([str(x) for x in filter_df["Position_UI"].unique() if x != "Unknown"])
 selected_position = col3.selectbox("Coating Position (塗裝位置)", pos_opts)
 if selected_position != "All":
     filter_df = filter_df[filter_df["Position_UI"] == selected_position]
 
-# --- 4. Solvent Filter (Ăn theo các bộ lọc trước) ---
+# --- 4. Solvent Filter ---
 solvent_opts = ["All"] + sorted([str(x) for x in filter_df["Solvent_Type"].unique() if x != "Unknown"])
 selected_solvent = col4.selectbox("Solvent Type (稀釋劑種類)", solvent_opts)
 if selected_solvent != "All":
     filter_df = filter_df[filter_df["Solvent_Type"] == selected_solvent]
 
-# --- 5. Production Line Multiselect (Ăn theo toàn bộ bộ lọc trên) ---
+# --- 5. Production Line Multiselect ---
 line_opts = sorted([str(x) for x in filter_df["線別"].unique() if x != "Unknown"])
 selected_lines = col5.multiselect("Production Line (產線)", line_opts, default=line_opts)
 
@@ -145,8 +145,33 @@ else:
 st.info(f"📅 **資料期間 (Analysis Period):** {period_label} ｜ 📊 **符合條件紀錄數 (Valid Records):** {len(filter_df):,} 筆")
 st.markdown("<br>", unsafe_allow_html=True)
 
-# Lấy chuỗi filter hiện tại để dùng cho các biểu đồ
 filter_details = f"Vendor: {selected_vendor} | Resin: {selected_resin} | Position: {selected_position} | Solvent: {selected_solvent}"
+
+# ==========================================
+# 5.5 HIERARCHICAL OVERVIEW (TREEMAP)
+# ==========================================
+st.subheader("🗂️ 塗料階層總覽 (Hierarchical Overview)")
+st.markdown("Biểu đồ phân cấp từ **Nhà cung ứng ➔ Loại nhựa ➔ Vị trí ➔ Loại dung môi ➔ Mã sơn**. Kích thước các khối đại diện cho lượng dung môi tiêu thụ (kg). Bạn có thể **click vào từng khối** để phóng to xem chi tiết.")
+
+# Tạo biểu đồ Treemap
+fig_tree = px.treemap(
+    filter_df,
+    path=[px.Constant("Tất cả (Total)"), "Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint_Code"],
+    values="添加重量", # Kích thước khối theo Tổng lượng dung môi
+    color="Vendor",    # Phân màu theo Vendor cho dễ nhìn
+    title=f"Hierarchical Breakdown of Solvent Usage (kg)<br><sup>Filters: {filter_details}</sup>",
+    height=650
+)
+# Hiển thị tên (label), giá trị (value) và phần trăm (%)
+fig_tree.update_traces(
+    textinfo="label+value+percent parent",
+    root_color="lightgrey"
+)
+fig_tree.update_layout(margin=dict(t=50, l=25, r=25, b=25))
+
+st.plotly_chart(fig_tree, use_container_width=True)
+
+st.markdown("<br>", unsafe_allow_html=True)
 
 # ==========================================
 # 6. TABS & VISUALIZATION
@@ -309,13 +334,13 @@ with tab_detail:
             yaxis="y1"
         ))
         
-        # 3. Nhiệt độ (Temperature) - Y2 (Chỉ vẽ nếu cột tồn tại và có dữ liệu hợp lệ)
+        # 3. Nhiệt độ (Temperature) - Y2
         if "溫度" in detail_df.columns and not detail_df["溫度"].isna().all():
             fig3.add_trace(go.Scatter(
                 x=detail_df["Record_Index"], y=detail_df["溫度"],
                 mode="lines+markers", name="Temperature (溫度)",
                 marker=dict(color="#FF7F0E", size=8, symbol="diamond"),
-                line=dict(color="#FF7F0E", width=2, dash="dot"), # Đường nét đứt màu cam
+                line=dict(color="#FF7F0E", width=2, dash="dot"), 
                 text=detail_df["Batch_ID"], hoverinfo="text+y+name",
                 yaxis="y2"
             ))
@@ -323,7 +348,6 @@ with tab_detail:
         else:
             chart_title = "Viscosity Variation (Before vs After)"
         
-        # Cấu hình Trục Y kép (Dual Axis)
         fig3.update_layout(
             title=f"{chart_title}<br><sup>Filters Applied: {detail_title_filter}</sup>",
             xaxis_title="Record Output Sequence",
@@ -334,7 +358,6 @@ with tab_detail:
         st.plotly_chart(fig3, use_container_width=True)
 
     with ch4:
-        # BIỂU ĐỒ LƯỢNG DUNG MÔI TIÊU THỤ THEO CHUYỀN
         line_usage = build_summary(detail_df, ["線別"]).sort_values("Total_Solvent_kg")
         fig4 = px.bar(
             line_usage, x="Total_Solvent_kg", y="線別", text="Weighted_Ratio_Percent", 
