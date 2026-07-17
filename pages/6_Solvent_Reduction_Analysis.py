@@ -319,52 +319,67 @@ with tab_line:
             exported_figs["8. Line Comparison - Solvent Ratio"] = fig6
 # ==========================================
 # ==========================================
-# 7. XUẤT BÁO CÁO WORD (ÉP RESET KALEIDO SCOPE)
+# 7. EXPORT INTERACTIVE HTML REPORT
 # ==========================================
-import gc
-import time
-import plotly.io as pio
+import io
+import pandas as pd
 
 st.markdown("---")
-st.subheader("📄 Xuất Báo Cáo Word (Export Report)")
+st.subheader("📄 Export Report")
 
-if not HAS_DOCX:
-    st.error("⚠️ Thư viện `python-docx` chưa được cài đặt.")
-else:
-    if st.button("📥 Generate & Download Word Report", type="primary"):
-        with st.spinner("⏳ Đang ép render biểu đồ (vui lòng chờ, hệ thống đang xử lý từng ảnh một)..."):
-            try:
-                doc = Document()
-                doc.add_heading('Báo Cáo Phân Tích Giảm Lượng Dung Môi', 0)
-                doc.add_paragraph(f"Ngày phân tích: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                
-                for fig_title, fig in exported_figs.items():
-                    doc.add_heading(fig_title, level=2)
-                    
-                    # 🌟 VŨ KHÍ CUỐI CÙNG: Ép Kaleido khởi động lại hoàn toàn cho MỖI biểu đồ
-                    pio.kaleido.scope._default_kaleido_scope = None
-                    time.sleep(0.5) # Nghỉ nửa giây để hệ điều hành kịp dọn dẹp tiến trình cũ
-                    
-                    # Giảm scale xuống 1 để render nhẹ nhất có thể
-                    img_bytes = fig.to_image(format="png", width=800, height=500, scale=1)
-                    
-                    image_stream = io.BytesIO(img_bytes)
-                    doc.add_picture(image_stream, width=Inches(6.0))
-                    
-                    del img_bytes, image_stream
-                    gc.collect()
-                
-                doc_buffer = io.BytesIO()
-                doc.save(doc_buffer)
-                doc_buffer.seek(0)
-                
-                st.success("✅ File Word đã được tạo thành công!")
-                st.download_button(
-                    label="💾 Tải file Word (.docx)",
-                    data=doc_buffer,
-                    file_name=f"Solvent_Report.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
-                
-            except Exception as e:
-                st.error(f"❌ Kaleido vẫn bị lỗi: {e}")
+st.info("💡 Due to system limitations with static image generation, the report will be exported as an interactive HTML file. (系統限制，報告將匯出為互動式 HTML 檔案)")
+
+if st.button("📥 Generate & Download Report", type="primary"):
+    with st.spinner("⏳ Generating HTML report..."):
+        try:
+            # Report content in Traditional Chinese
+            html_content = f"""
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <title>稀釋劑減量機會分析報告 (Solvent Reduction Opportunity Report)</title>
+                <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+                <style>
+                    body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 40px; background-color: #f0f2f6; }}
+                    h1 {{ color: #1f77b4; text-align: center; font-size: 32px; }}
+                    h2 {{ color: #2c3e50; border-bottom: 2px solid #bdc3c7; padding-bottom: 8px; margin-top: 50px; font-size: 20px; }}
+                    .info-box {{ background-color: #ffffff; padding: 20px; border-radius: 10px; margin-bottom: 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-left: 5px solid #1f77b4; }}
+                    .info-box p {{ margin: 8px 0; font-size: 16px; color: #333; }}
+                    .chart-container {{ background-color: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 30px; }}
+                </style>
+            </head>
+            <body>
+                <h1>📊 稀釋劑減量機會分析報告</h1>
+                <div class="info-box">
+                    <p><strong>🕒 分析日期 (Analysis Date):</strong> {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                    <p><strong>🔍 篩選條件 (Filters Applied):</strong> {filter_details}</p>
+                </div>
+            """
+
+            for fig_title, fig in exported_figs.items():
+                fig_html = fig.to_html(full_html=False, include_plotlyjs=False)
+                html_content += f"""
+                <h2>{fig_title}</h2>
+                <div class="chart-container">
+                    {fig_html}
+                </div>
+                """
+
+            html_content += """
+            </body>
+            </html>
+            """
+
+            html_buffer = io.BytesIO(html_content.encode('utf-8'))
+            
+            st.success("✅ Report generated successfully!")
+            
+            st.download_button(
+                label="💾 Download Interactive Report (.html)",
+                data=html_buffer,
+                file_name=f"Solvent_Report_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.html",
+                mime="text/html"
+            )
+
+        except Exception as e:
+            st.error(f"❌ Error generating report: {e}")
