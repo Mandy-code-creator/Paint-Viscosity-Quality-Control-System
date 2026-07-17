@@ -327,12 +327,12 @@ import pandas as pd
 st.markdown("---")
 st.subheader("📄 Export Report")
 
-st.info("💡 Due to system limitations with static image generation, the report will be exported as an interactive HTML file. (系統限制，報告將匯出為互動式 HTML 檔案)")
+st.info("💡 The report is exported as an interactive HTML file to preserve exact chart dimensions and functionality. (報告將匯出為互動式 HTML 檔案，以保留精確的圖表尺寸和功能)")
 
 if st.button("📥 Generate & Download Report", type="primary"):
     with st.spinner("⏳ Generating HTML report..."):
         try:
-            # Report content in Traditional Chinese
+            # Report structure in Traditional Chinese
             html_content = f"""
             <html>
             <head>
@@ -345,7 +345,7 @@ if st.button("📥 Generate & Download Report", type="primary"):
                     h2 {{ color: #2c3e50; border-bottom: 2px solid #bdc3c7; padding-bottom: 8px; margin-top: 50px; font-size: 20px; }}
                     .info-box {{ background-color: #ffffff; padding: 20px; border-radius: 10px; margin-bottom: 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-left: 5px solid #1f77b4; }}
                     .info-box p {{ margin: 8px 0; font-size: 16px; color: #333; }}
-                    .chart-container {{ background-color: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 30px; }}
+                    .chart-container {{ background-color: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 30px; width: 100%; overflow: hidden; }}
                 </style>
             </head>
             <body>
@@ -357,7 +357,17 @@ if st.button("📥 Generate & Download Report", type="primary"):
             """
 
             for fig_title, fig in exported_figs.items():
-                fig_html = fig.to_html(full_html=False, include_plotlyjs=False)
+                # ÉP BIỂU ĐỒ GIỮ ĐÚNG TỶ LỆ VÀ GIÃN RỘNG NHƯ TRÊN APP
+                fig.update_layout(autosize=True, margin=dict(l=20, r=20, t=50, b=20))
+                
+                # Render với width 100% thay vì kích thước tĩnh
+                fig_html = fig.to_html(
+                    full_html=False, 
+                    include_plotlyjs=False, 
+                    default_width="100%", 
+                    default_height="600px"
+                )
+                
                 html_content += f"""
                 <h2>{fig_title}</h2>
                 <div class="chart-container">
