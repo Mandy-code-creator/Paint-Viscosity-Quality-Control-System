@@ -34,8 +34,8 @@ df["Batch_ID"] = df["塗料批號"]
 pos_map = {"TP": "Primer", "正底漆": "Primer", "BP": "Primer", "背底漆": "Primer", "TF": "Top Finish", "正面漆": "Top Finish", "BF": "Back Finish", "背面漆": "Back Finish"}
 df["Position_UI"] = df["塗裝位置"].map(pos_map).fillna(df["塗裝位置"])
 
-# Clean Numeric Columns
-num_cols = ["塗料重量", "添加重量", "黏度(秒)", "黏度(秒)_1"]
+# Clean Numeric Columns - Thêm cột "溫度" (Nhiệt độ)
+num_cols = ["塗料重量", "添加重量", "黏度(秒)", "黏度(秒)_1", "溫度"]
 for col in num_cols:
     df[col] = pd.to_numeric(df.get(col, np.nan), errors="coerce")
 
@@ -214,7 +214,6 @@ with tab_ranking:
     dual_df = summary_df.copy()
     fig_dual = go.Figure()
 
-    # Cột khối lượng Paint
     fig_dual.add_trace(go.Bar(
         x=dual_df["Paint_Code"],
         y=dual_df["Total_Paint_kg"],
@@ -223,7 +222,6 @@ with tab_ranking:
         yaxis="y1"
     ))
 
-    # Cột khối lượng Solvent
     fig_dual.add_trace(go.Bar(
         x=dual_df["Paint_Code"],
         y=dual_df["Total_Solvent_kg"],
@@ -232,7 +230,6 @@ with tab_ranking:
         yaxis="y1"
     ))
 
-    # Đường tỷ lệ dung môi (%) - Chỉ vẽ đường và điểm (ẩn text mặc định)
     fig_dual.add_trace(go.Scatter(
         x=dual_df["Paint_Code"],
         y=dual_df["Weighted_Ratio_Percent"],
@@ -243,7 +240,6 @@ with tab_ranking:
         yaxis="y2"
     ))
 
-    # Thêm Label số liệu với NỀN TRẮNG
     for i, row in dual_df.iterrows():
         fig_dual.add_annotation(
             x=row["Paint_Code"],
@@ -285,36 +281,54 @@ with tab_detail:
     
     st.write(f"**Total Records:** {len(detail_df)} | **Batches:** {detail_df['Batch_ID'].nunique()} | **Lines:** {detail_df['線別'].nunique()}")
     
-    # Chuỗi tiêu đề đầy đủ cho Tab 2
     detail_title_filter = f"{filter_details} | Paint Code: {selected_code}"
 
     ch3, ch4 = st.columns(2)
     with ch3:
-        # BIỂU ĐỒ BIẾN ĐỘNG ĐỘ NHỚT (BEFORE vs AFTER)
-        # Tạo index giả lập để làm trục X theo các lần pha (Record)
+        # BIỂU ĐỒ BIẾN ĐỘNG ĐỘ NHỚT VÀ NHIỆT ĐỘ (KẾT HỢP TRỤC Y KÉP)
         detail_df = detail_df.reset_index(drop=True)
         detail_df["Record_Index"] = detail_df.index + 1
         
         fig3 = go.Figure()
-        # Độ nhớt ban đầu (Before)
+        
+        # 1. Độ nhớt ban đầu (Before Viscosity) - Y1
         fig3.add_trace(go.Scatter(
             x=detail_df["Record_Index"], y=detail_df["黏度(秒)"],
             mode="lines+markers", name="Before Viscosity (黏度)",
             marker=dict(color="#1F77B4", size=8),
-            text=detail_df["Batch_ID"], hoverinfo="text+y+name"
+            text=detail_df["Batch_ID"], hoverinfo="text+y+name",
+            yaxis="y1"
         ))
-        # Độ nhớt sau pha (After)
+        
+        # 2. Độ nhớt sau pha (After Viscosity) - Y1
         fig3.add_trace(go.Scatter(
             x=detail_df["Record_Index"], y=detail_df["黏度(秒)_1"],
             mode="lines+markers", name="After Viscosity (黏度_1)",
             marker=dict(color="#2CA02C", size=8),
-            text=detail_df["Batch_ID"], hoverinfo="text+y+name"
+            text=detail_df["Batch_ID"], hoverinfo="text+y+name",
+            yaxis="y1"
         ))
         
+        # 3. Nhiệt độ (Temperature) - Y2 (Chỉ vẽ nếu cột tồn tại và có dữ liệu hợp lệ)
+        if "溫度" in detail_df.columns and not detail_df["溫度"].isna().all():
+            fig3.add_trace(go.Scatter(
+                x=detail_df["Record_Index"], y=detail_df["溫度"],
+                mode="lines+markers", name="Temperature (溫度)",
+                marker=dict(color="#FF7F0E", size=8, symbol="diamond"),
+                line=dict(color="#FF7F0E", width=2, dash="dot"), # Đường nét đứt màu cam
+                text=detail_df["Batch_ID"], hoverinfo="text+y+name",
+                yaxis="y2"
+            ))
+            chart_title = "Viscosity & Temperature Variation (Before vs After)"
+        else:
+            chart_title = "Viscosity Variation (Before vs After)"
+        
+        # Cấu hình Trục Y kép (Dual Axis)
         fig3.update_layout(
-            title=f"Viscosity Variation (Before vs After)<br><sup>Filters Applied: {detail_title_filter}</sup>",
+            title=f"{chart_title}<br><sup>Filters Applied: {detail_title_filter}</sup>",
             xaxis_title="Record Output Sequence",
-            yaxis_title="Viscosity (s)",
+            yaxis=dict(title="Viscosity (s)", side="left"),
+            yaxis2=dict(title="Temperature (°C)", overlaying="y", side="right", showgrid=False),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
         st.plotly_chart(fig3, use_container_width=True)
