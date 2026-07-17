@@ -229,12 +229,16 @@ with tab_ranking:
         yaxis="y1"
     ))
 
-    # Đường tỷ lệ dung môi (%)
+    # Đường tỷ lệ dung môi (%) - Đã thêm Text hiển thị số liệu
     fig_dual.add_trace(go.Scatter(
         x=dual_df["Paint_Code"],
         y=dual_df["Weighted_Ratio_Percent"],
         name="Solvent Ratio (%)",
-        mode="lines+markers",
+        mode="lines+markers+text",               # Hiển thị đường, điểm và chữ
+        text=dual_df["Weighted_Ratio_Percent"],  # Dữ liệu chữ để hiển thị
+        texttemplate='%{text:.2f}%',             # Format dạng phần trăm (VD: 16.50%)
+        textposition="top center",               # Đặt số nằm phía trên điểm
+        textfont=dict(color="#2CA02C", size=12), # Đồng màu với đường line
         line=dict(color="#2CA02C", width=3),
         marker=dict(size=8),
         yaxis="y2"
@@ -249,7 +253,7 @@ with tab_ranking:
         title=dynamic_title,
         xaxis=dict(title="Paint Code"),
         yaxis=dict(title="Weight (kg)", side="left", showgrid=False),
-        yaxis2=dict(title="Solvent Ratio (%)", overlaying="y", side="right", showgrid=False),
+        yaxis2=dict(title="Solvent Ratio (%)", overlaying="y", side="right", showgrid=False, range=[0, dual_df["Weighted_Ratio_Percent"].max() * 1.2]), # Tăng khoảng trống phía trên để không bị cắt text
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         height=600
     )
