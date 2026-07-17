@@ -318,60 +318,53 @@ with tab_line:
             st.plotly_chart(fig6, use_container_width=True)
             exported_figs["8. Line Comparison - Solvent Ratio"] = fig6
 # ==========================================
-# 7. XUẤT BÁO CÁO WORD (EXPORT TO DOCX) - FIX FREEZE
+# ==========================================
+# 7. XUẤT BÁO CÁO WORD (ÉP RESET KALEIDO SCOPE)
 # ==========================================
 import gc
+import time
 import plotly.io as pio
-
-# 🌟 VŨ KHÍ BÍ MẬT TRỊ TREO APP: Tắt MathJax scope của Kaleido
-pio.kaleido.scope.mathjax = None 
 
 st.markdown("---")
 st.subheader("📄 Xuất Báo Cáo Word (Export Report)")
 
 if not HAS_DOCX:
-    st.error("⚠️ Thư viện `python-docx` chưa được cài đặt. Vui lòng chạy lệnh: `pip install python-docx`")
+    st.error("⚠️ Thư viện `python-docx` chưa được cài đặt.")
 else:
     if st.button("📥 Generate & Download Word Report", type="primary"):
-        with st.spinner("⏳ Đang xử lý biểu đồ và tạo file Word (có thể mất 10-20 giây, vui lòng không thao tác)..."):
+        with st.spinner("⏳ Đang ép render biểu đồ (vui lòng chờ, hệ thống đang xử lý từng ảnh một)..."):
             try:
                 doc = Document()
                 doc.add_heading('Báo Cáo Phân Tích Giảm Lượng Dung Môi', 0)
                 doc.add_paragraph(f"Ngày phân tích: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                doc.add_paragraph(f"Thông tin bộ lọc: {filter_details}")
                 
                 for fig_title, fig in exported_figs.items():
                     doc.add_heading(fig_title, level=2)
                     
-                    # Force GC trước khi render để dọn dẹp tiến trình rác
-                    gc.collect() 
+                    # 🌟 VŨ KHÍ CUỐI CÙNG: Ép Kaleido khởi động lại hoàn toàn cho MỖI biểu đồ
+                    pio.kaleido.scope._default_kaleido_scope = None
+                    time.sleep(0.5) # Nghỉ nửa giây để hệ điều hành kịp dọn dẹp tiến trình cũ
                     
-                    # Gọi hàm to_image với engine được chỉ định rõ
-                    img_bytes = fig.to_image(format="png", width=800, height=500, scale=1.5, engine="kaleido")
+                    # Giảm scale xuống 1 để render nhẹ nhất có thể
+                    img_bytes = fig.to_image(format="png", width=800, height=500, scale=1)
                     
                     image_stream = io.BytesIO(img_bytes)
                     doc.add_picture(image_stream, width=Inches(6.0))
                     
-                    # Dọn dẹp ngay sau khi chèn xong 1 ảnh
-                    del img_bytes
-                    del image_stream
+                    del img_bytes, image_stream
                     gc.collect()
                 
                 doc_buffer = io.BytesIO()
                 doc.save(doc_buffer)
                 doc_buffer.seek(0)
                 
-                # Khởi động lại scope để an toàn cho lần bấm sau
-                pio.kaleido.scope._default_mathjax = None
-                
                 st.success("✅ File Word đã được tạo thành công!")
-                
                 st.download_button(
                     label="💾 Tải file Word (.docx)",
                     data=doc_buffer,
-                    file_name=f"Solvent_Report_{pd.Timestamp.now().strftime('%Y%m%d')}.docx",
+                    file_name=f"Solvent_Report.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
                 
             except Exception as e:
-                st.error(f"❌ Có lỗi xảy ra trong quá trình xuất ảnh. Chi tiết lỗi: {e}")
+                st.error(f"❌ Kaleido vẫn bị lỗi: {e}")
