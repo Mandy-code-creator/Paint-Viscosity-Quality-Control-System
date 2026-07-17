@@ -240,9 +240,13 @@ with tab_ranking:
         yaxis="y2"
     ))
 
-    # Cấu hình trục
+    # Xây dựng chuỗi hiển thị điều kiện lọc hiện tại
+    filter_details = f"Vendor: {selected_vendor} | Resin: {selected_resin} | Position: {selected_position} | Solvent: {selected_solvent}"
+    dynamic_title = f"Paint & Solvent Usage vs. Solvent Ratio<br><sup>Filters Applied: {filter_details}</sup>"
+
+    # Cấu hình trục và thêm tiêu đề động
     fig_dual.update_layout(
-        title="Paint & Solvent Usage vs. Solvent Ratio",
+        title=dynamic_title,
         xaxis=dict(title="Paint Code"),
         yaxis=dict(title="Weight (kg)", side="left", showgrid=False),
         yaxis2=dict(title="Solvent Ratio (%)", overlaying="y", side="right", showgrid=False),
