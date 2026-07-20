@@ -755,9 +755,9 @@ with tab_pilot:
     # Main chart: Pilot ranking
     # ------------------------------------------------------
     color_map = {
-        "優先試用": "#5AD8A6",
-        "可進一步評估": "#F6BD16",
-        "暫不建議": "#E8684A"
+        "優先試用": "#2F5597",
+        "可進一步評估": "#7F8C8D",
+        "暫不建議": "#B7B7B7"
     }
 
     pilot_chart_df = (
@@ -768,11 +768,10 @@ with tab_pilot:
 
     pilot_chart_df["Chart_Label"] = pilot_chart_df.apply(
         lambda row: (
-            f"{row['Pilot_Score']:.1f}分｜"
-            f"稀釋劑{row['Total_Solvent_kg']:,.0f}kg｜"
-            f"添加{row['Weighted_Ratio_Percent']:.1f}%｜"
-            f"穩定率{row['Stable_Coverage']:.0%}｜"
-            f"{int(row['Historical_Records'])}筆"
+            f"{row['Pilot_Score']:.1f}分  ｜  "
+            f"{row['Total_Solvent_kg']:,.0f}kg  ｜  "
+            f"{row['Weighted_Ratio_Percent']:.1f}%  ｜  "
+            f"{row['Stable_Coverage']:.0%}"
         ),
         axis=1
     )
@@ -795,9 +794,9 @@ with tab_pilot:
         ],
         title=(
             "各色號預調漆試用優先順序"
-            f"<br><sup>依稀釋劑用量、塗料用量、添加比例、穩定率及歷史資料量綜合評估｜{filter_details}</sup>"
+            f"<br><sup>綜合考量稀釋劑用量、塗料用量、添加比例、穩定率及歷史資料量｜{filter_details}</sup>"
         ),
-        height=max(520, len(pilot_top_df) * 52)
+        height=max(560, len(pilot_top_df) * 56)
     )
 
     fig_pilot_score.update_traces(
@@ -820,11 +819,11 @@ with tab_pilot:
         title="試用優先分數",
         range=[0, 110],
         showline=True,
-        linewidth=1.5,
-        linecolor="black",
+        linewidth=1.2,
+        linecolor="#4B5563",
         mirror=True,
         showgrid=True,
-        gridcolor="#EAEAEA"
+        gridcolor="#E5E7EB"
     )
 
     fig_pilot_score.update_yaxes(
@@ -838,14 +837,29 @@ with tab_pilot:
     fig_pilot_score.update_layout(
         plot_bgcolor="white",
         paper_bgcolor="white",
-        margin=dict(l=100, r=360, t=115, b=75),
+        margin=dict(l=110, r=220, t=150, b=80),
+        bargap=0.28,
+        font=dict(
+            family="Arial, Microsoft JhengHei, sans-serif",
+            size=12,
+            color="#334155"
+        ),
+        title=dict(
+            x=0.0,
+            xanchor="left",
+            y=0.98,
+            yanchor="top",
+            font=dict(size=18, color="#1F2937")
+        ),
         legend_title_text="評估結果",
         legend=dict(
             orientation="h",
             yanchor="bottom",
-            y=1.02,
+            y=1.10,
             xanchor="right",
-            x=1
+            x=1,
+            bgcolor="rgba(255,255,255,0)",
+            font=dict(size=11)
         )
     )
 
@@ -944,19 +958,19 @@ with tab_pilot:
             ),
             "加權添加比例": st.column_config.NumberColumn(
                 "加權添加比例 (%)",
-                format="%.2f"
+                format="%.1f"
             ),
             "添加比例中位數": st.column_config.NumberColumn(
                 "添加比例中位數 (%)",
-                format="%.2f"
+                format="%.1f"
             ),
             "添加比例P25": st.column_config.NumberColumn(
                 "添加比例P25 (%)",
-                format="%.2f"
+                format="%.1f"
             ),
             "添加比例P75": st.column_config.NumberColumn(
                 "添加比例P75 (%)",
-                format="%.2f"
+                format="%.1f"
             ),
             "添加比例穩定率": st.column_config.NumberColumn(
                 "添加比例穩定率 (%)",
@@ -967,11 +981,11 @@ with tab_pilot:
             ),
             "相對四分位距（參考）": st.column_config.NumberColumn(
                 "相對四分位距（參考）",
-                format="%.3f"
+                format="%.1f"
             ),
             "添加比例CV（參考）": st.column_config.NumberColumn(
                 "添加比例CV（參考）",
-                format="%.3f"
+                format="%.1f"
             ),
             "添加前黏度中位數": st.column_config.NumberColumn(
                 "添加前黏度中位數 (秒)",
