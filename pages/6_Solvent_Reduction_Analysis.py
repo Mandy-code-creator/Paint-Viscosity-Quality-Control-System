@@ -505,45 +505,201 @@ with tab_pilot:
     st.caption("評分權重：稀釋劑總用量30%、塗料使用量20%、添加比例20%、比例穩定性20%、歷史資料量10%。")
 
     color_map = {"優先試用":"#5AD8A6", "可進一步評估":"#F6BD16", "暫不建議":"#E8684A"}
-    cc1, cc2 = st.columns(2)
 
-    with cc1:
-        fig_pilot_score = px.bar(
-            pilot_top_df.sort_values("Pilot_Score"),
-            x="Pilot_Score", y="Paint_Code", orientation="h",
-            color="Evaluation_Result", color_discrete_map=color_map,
-            text="Pilot_Score",
-            custom_data=["Total_Solvent_kg","Total_Paint_kg","Weighted_Ratio_Percent","Ratio_CV","Historical_Records"],
-            title=f"Pilot Paint Code Priority Ranking<br><sup>Filters: {filter_details}</sup>",
-            height=max(480, len(pilot_top_df)*42)
-        )
-        fig_pilot_score.update_traces(
-            texttemplate="%{text:.1f}", textposition="outside",
-            hovertemplate="<b>%{y}</b><br>Pilot Score: %{x:.1f}<br>Total Solvent: %{customdata[0]:,.1f} kg<br>Total Paint: %{customdata[1]:,.1f} kg<br>Weighted Ratio: %{customdata[2]:.2f}%<br>Ratio CV: %{customdata[3]:.3f}<br>Historical Records: %{customdata[4]:,.0f}<extra></extra>"
-        )
-        fig_pilot_score.update_xaxes(title="Pilot Score", range=[0,110])
-        fig_pilot_score.update_yaxes(title="")
-        st.plotly_chart(fig_pilot_score, use_container_width=True)
-        exported_figs["9. Pilot Paint Code Priority Ranking"] = fig_pilot_score
+    # =====================================================
+    # Chart 1: Pilot priority ranking - full width
+    # =====================================================
+    fig_pilot_score = px.bar(
+        pilot_top_df.sort_values("Pilot_Score"),
+        x="Pilot_Score",
+        y="Paint_Code",
+        orientation="h",
+        color="Evaluation_Result",
+        color_discrete_map=color_map,
+        text="Pilot_Score",
+        custom_data=[
+            "Total_Solvent_kg",
+            "Total_Paint_kg",
+            "Weighted_Ratio_Percent",
+            "Ratio_CV",
+            "Historical_Records"
+        ],
+        title=(
+            "各色號預調漆試用優先順序"
+            f"<br><sup>篩選條件：{filter_details}</sup>"
+        ),
+        height=max(520, len(pilot_top_df) * 48)
+    )
 
-    with cc2:
-        fig_opportunity = px.scatter(
-            pilot_top_df, x="Ratio_CV", y="Total_Solvent_kg",
-            size="Total_Paint_kg", color="Evaluation_Result",
-            color_discrete_map=color_map, text="Paint_Code",
-            custom_data=["Pilot_Score","Weighted_Ratio_Percent","Historical_Records"],
-            title="Solvent Opportunity vs. Ratio Stability<br><sup>Lower CV = More Stable</sup>",
-            height=max(480, len(pilot_top_df)*42)
+    fig_pilot_score.update_traces(
+        texttemplate="%{text:.1f}",
+        textposition="outside",
+        cliponaxis=False,
+        hovertemplate=(
+            "<b>%{y}</b><br>"
+            "試用優先分數：%{x:.1f}<br>"
+            "稀釋劑總用量：%{customdata[0]:,.1f} kg<br>"
+            "塗料總用量：%{customdata[1]:,.1f} kg<br>"
+            "加權添加比例：%{customdata[2]:.2f}%<br>"
+            "添加比例 CV：%{customdata[3]:.3f}<br>"
+            "歷史紀錄數：%{customdata[4]:,.0f}"
+            "<extra></extra>"
         )
-        fig_opportunity.update_traces(
-            textposition="top center",
-            hovertemplate="<b>%{text}</b><br>Ratio CV: %{x:.3f}<br>Total Solvent: %{y:,.1f} kg<br>Pilot Score: %{customdata[0]:.1f}<br>Weighted Ratio: %{customdata[1]:.2f}%<br>Historical Records: %{customdata[2]:,.0f}<extra></extra>"
+    )
+
+    fig_pilot_score.update_xaxes(
+        title="試用優先分數",
+        range=[0, 110],
+        showline=True,
+        linewidth=1.5,
+        linecolor="black",
+        mirror=True,
+        showgrid=True,
+        gridcolor="#EAEAEA"
+    )
+
+    fig_pilot_score.update_yaxes(
+        title="",
+        showline=True,
+        linewidth=1.5,
+        linecolor="black",
+        mirror=True
+    )
+
+    fig_pilot_score.update_layout(
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        margin=dict(l=90, r=60, t=95, b=65),
+        legend_title_text="評估結果",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
         )
-        fig_opportunity.add_vline(x=stable_cv_limit, line_dash="dash", annotation_text="CV Stability Limit")
-        fig_opportunity.update_xaxes(title="Solvent Ratio CV")
-        fig_opportunity.update_yaxes(title="Total Solvent Usage (kg)")
-        st.plotly_chart(fig_opportunity, use_container_width=True)
-        exported_figs["10. Solvent Opportunity vs Ratio Stability"] = fig_opportunity
+    )
+
+    st.plotly_chart(fig_pilot_score, use_container_width=True)
+    exported_figs["9. Pilot Paint Code Priority Ranking"] = fig_pilot_score
+
+    # =====================================================
+    # Chart 2: Solvent opportunity vs ratio stability
+    # Full width, limited labels to avoid overlap
+    # =====================================================
+    opportunity_df = pilot_top_df.copy()
+    label_codes = set(
+        opportunity_df.nlargest(
+            min(5, len(opportunity_df)),
+            "Pilot_Score"
+        )["Paint_Code"]
+    )
+    opportunity_df["Display_Label"] = np.where(
+        opportunity_df["Paint_Code"].isin(label_codes),
+        opportunity_df["Paint_Code"],
+        ""
+    )
+
+    fig_opportunity = px.scatter(
+        opportunity_df,
+        x="Ratio_CV",
+        y="Total_Solvent_kg",
+        size="Total_Paint_kg",
+        color="Evaluation_Result",
+        color_discrete_map=color_map,
+        text="Display_Label",
+        custom_data=[
+            "Paint_Code",
+            "Pilot_Score",
+            "Weighted_Ratio_Percent",
+            "Historical_Records",
+            "Total_Paint_kg"
+        ],
+        title=(
+            "各色號稀釋劑使用量與添加比例穩定性"
+            "<br><sup>CV越低代表添加比例越穩定；氣泡越大代表塗料使用量越高</sup>"
+        ),
+        height=620
+    )
+
+    label_positions = [
+        "top center",
+        "bottom center",
+        "top left",
+        "top right",
+        "bottom right"
+    ]
+
+    for trace in fig_opportunity.data:
+        positions = []
+        for label in trace.text:
+            if label:
+                idx = list(opportunity_df["Display_Label"]).index(label)
+                positions.append(label_positions[idx % len(label_positions)])
+            else:
+                positions.append("middle center")
+        trace.textposition = positions
+        trace.textfont = dict(size=11)
+        trace.hovertemplate = (
+            "<b>%{customdata[0]}</b><br>"
+            "添加比例 CV：%{x:.3f}<br>"
+            "稀釋劑總用量：%{y:,.1f} kg<br>"
+            "塗料總用量：%{customdata[4]:,.1f} kg<br>"
+            "試用優先分數：%{customdata[1]:.1f}<br>"
+            "加權添加比例：%{customdata[2]:.2f}%<br>"
+            "歷史紀錄數：%{customdata[3]:,.0f}"
+            "<extra></extra>"
+        )
+
+    fig_opportunity.add_vline(
+        x=stable_cv_limit,
+        line_dash="dash",
+        line_width=2,
+        line_color="black",
+        annotation_text=f"穩定性界線 CV={stable_cv_limit:.2f}",
+        annotation_position="top right",
+        annotation_font=dict(size=11)
+    )
+
+    fig_opportunity.update_xaxes(
+        title="添加比例變異係數（CV）",
+        showline=True,
+        linewidth=1.5,
+        linecolor="black",
+        mirror=True,
+        showgrid=True,
+        gridcolor="#EAEAEA",
+        zeroline=False
+    )
+
+    fig_opportunity.update_yaxes(
+        title="稀釋劑總用量（kg）",
+        showline=True,
+        linewidth=1.5,
+        linecolor="black",
+        mirror=True,
+        showgrid=True,
+        gridcolor="#EAEAEA",
+        rangemode="tozero"
+    )
+
+    fig_opportunity.update_layout(
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        margin=dict(l=85, r=70, t=105, b=75),
+        legend_title_text="評估結果",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
+    )
+
+    st.plotly_chart(fig_opportunity, use_container_width=True)
+    st.caption("圖中僅顯示試用優先分數最高的5個色號名稱，其餘色號可將滑鼠移至氣泡查看完整資料。")
+    exported_figs["10. Solvent Opportunity vs Ratio Stability"] = fig_opportunity
 
     st.markdown("---")
     st.markdown("### 色號試用評估明細")
