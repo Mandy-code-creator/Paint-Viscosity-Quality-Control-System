@@ -51,10 +51,17 @@ num_cols = ["塗料重量", "添加重量", "黏度(秒)", "黏度(秒)_1", "溫
 for col in num_cols:
     df[col] = pd.to_numeric(df.get(col, np.nan), errors="coerce")
 
+# ---------------------------------------------------------
+# NEW LOGIC: Subtract solvent weight from total mixture 
+# to get the exact base paint weight before calculations.
+# ---------------------------------------------------------
+df["塗料重量"] = df["塗料重量"] - df["添加重量"]
+
 df["Delta_V"] = df["黏度(秒)"] - df["黏度(秒)_1"]
 df["Solvent_Ratio_Percent"] = np.where(df["塗料重量"] > 0, df["添加重量"] / df["塗料重量"] * 100, np.nan)
 df["Viscosity_Sensitivity"] = np.where(df["Solvent_Ratio_Percent"] > 0, df["Delta_V"] / df["Solvent_Ratio_Percent"], np.nan)
 
+# Strict filter ensuring base paint weight is greater than 0 after deduction
 df = df[(df["塗料重量"]>0) & (df["添加重量"]>0) & (df["黏度(秒)"]>0) & (df["黏度(秒)_1"]>0) & (df["Delta_V"]>0)].copy()
 
 if df.empty:
