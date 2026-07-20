@@ -319,7 +319,7 @@ with tab_line:
             exported_figs["8. Line Comparison - Solvent Ratio"] = fig6
 # ==========================================
 # ==========================================
-# 7. EXPORT INTERACTIVE HTML REPORT
+# 7. EXPORT INTERACTIVE HTML REPORT (FIXED)
 # ==========================================
 import io
 import pandas as pd
@@ -327,18 +327,17 @@ import pandas as pd
 st.markdown("---")
 st.subheader("📄 Export Report")
 
-st.info("💡 The report is exported as an interactive HTML file to preserve exact chart dimensions and functionality. (報告將匯出為互動式 HTML 檔案，以保留精確的圖表尺寸和功能)")
+st.info("💡 The report is exported as an interactive HTML file to preserve exact chart dimensions and functionality. (報告將匯出為互動式 HTML 檔案)")
 
 if st.button("📥 Generate & Download Report", type="primary"):
     with st.spinner("⏳ Generating HTML report..."):
         try:
-            # Report structure in Traditional Chinese
+            # 1. Xóa link script CDN cứng, chỉ giữ lại cấu trúc giao diện
             html_content = f"""
             <html>
             <head>
                 <meta charset="utf-8">
                 <title>稀釋劑減量機會分析報告 (Solvent Reduction Opportunity Report)</title>
-                <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
                 <style>
                     body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 40px; background-color: #f0f2f6; }}
                     h1 {{ color: #1f77b4; text-align: center; font-size: 32px; }}
@@ -356,16 +355,16 @@ if st.button("📥 Generate & Download Report", type="primary"):
                 </div>
             """
 
-            for fig_title, fig in exported_figs.items():
-                # Xóa ép lề cứng, bật tự động căn lề trục Y để không bị cắt chữ
-                fig.update_layout(autosize=True)
-                fig.update_yaxes(automargin=True)
-                fig.update_xaxes(automargin=True)
+            # 2. Xử lý biểu đồ: Không mutate (can thiệp) vào layout gốc nữa
+            for i, (fig_title, fig) in enumerate(exported_figs.items()):
                 
-                # Render với width 100% thay vì kích thước tĩnh
+                # Gọi thư viện Plotly chuẩn cho biểu đồ đầu tiên, các biểu đồ sau tự động ăn theo để nhẹ file
+                inc_js = 'cdn' if i == 0 else False
+                
+                # Render với mặc định 100% width, KHÔNG dùng update_yaxes
                 fig_html = fig.to_html(
                     full_html=False, 
-                    include_plotlyjs=False, 
+                    include_plotlyjs=inc_js, 
                     default_width="100%", 
                     default_height="600px"
                 )
