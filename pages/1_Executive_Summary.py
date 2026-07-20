@@ -70,7 +70,7 @@ def export_chart_to_word(
 
     headers = [
         "Valid Paint Batches",
-        "Valid Adjustment Records",
+        "Valid Paint Buckets",
         "Median Sensitivity",
         "P10-P90 Ratio Range",
         "Maximum Viscosity Drop"
@@ -254,7 +254,7 @@ def export_chart_to_word(
     note_run = note.add_run(
         "Note: Orange points represent viscosity before solvent addition. "
         "Blue points represent viscosity after solvent addition. "
-        "The dotted line connects the same adjustment record."
+        "The dotted line connects the initial and final viscosity of the same paint bucket."
     )
     note_run.italic = True
     note_run.font.size = Pt(8)
@@ -369,14 +369,38 @@ def reset_execution_states():
 @st.cache_data(show_spinner=False)
 def prepare_valid_records(df):
     """
-    Clean valid adjustment records only.
-    Does NOT apply >30 batch filter.
-    Tab 4 uses this full valid dataset.
+    Convert raw rows into valid historical adjustment records.
+
+    Confirmed source-data rules
+    ---------------------------
+    General paint codes:
+    1. The same paint batch + paint bucket may contain multiple rows because
+       solvent was added more than once.
+    2. 添加重量 is cumulative; therefore use the LAST cumulative value.
+    3. 塗料重量 includes cumulative solvent already added.
+    4. Initial viscosity = FIRST 黏度(秒).
+    5. Final viscosity = LAST 黏度(秒)_1.
+
+    Special paint code PS30213X8:
+    1. 塗料桶號 identifies a large source tank.
+    2. Paint is drawn from that source tank into separate small mixing buckets.
+    3. Even when batch and bucket number repeat, every row is an independent
+       first-time mixing record.
+    4. Therefore PS30213X8 rows must NOT be merged.
+
+    Ratio definition
+    ----------------
+        Original_Paint_Weight = 塗料重量 - 添加重量
+        Solvent_Ratio_Percent = 添加重量 / Original_Paint_Weight * 100
     """
     data = df.copy()
 
     if data.empty:
         return data
+
+    SPECIAL_INDEPENDENT_PAINT_CODES = {
+        "PS30213X8"
+    }
 
     required_columns = [
         "添加重量",
@@ -386,7 +410,9 @@ def prepare_valid_records(df):
         "Resin",
         "Vendor",
         "Solvent_Type",
-        "塗料批號"
+        "塗料批號",
+        "塗料桶號",
+        "塗料編號"
     ]
 
     missing_columns = [
@@ -433,60 +459,253 @@ def prepare_valid_records(df):
         .fillna(data["塗裝位置"])
     )
 
+    data["塗料編號"] = (
+        data["塗料編號"]
+        .astype(str)
+        .str.strip()
+    )
+
     data = data[
         (data["添加重量"] > 0)
         & (data["塗料重量"] > 0)
-        & (data["黏度(秒)"] > data["黏度(秒)_1"])
+        & (data["黏度(秒)"].notna())
+        & (data["黏度(秒)_1"].notna())
         & (data["Resin"].notna())
         & (data["Vendor"].notna())
         & (data["Solvent_Type"].notna())
         & (data["塗料批號"].notna())
+        & (data["塗料桶號"].notna())
+        & (data["塗料編號"].notna())
     ].copy()
 
     if data.empty:
         return data
 
-    data["Delta_V"] = data["黏度(秒)"] - data["黏度(秒)_1"]
+    data["_Original_Row_Order"] = np.arange(len(data))
 
-    data = data[data["Delta_V"] > 0].copy()
+    # =====================================================
+    # 1. SPECIAL CODE: EACH ROW IS AN INDEPENDENT MIX
+    # =====================================================
+    special_df = data[
+        data["塗料編號"].isin(SPECIAL_INDEPENDENT_PAINT_CODES)
+    ].copy()
 
-    if data.empty:
-        return data
+    if not special_df.empty:
+        special_df["Raw_Adjustment_Rows"] = 1
+        special_df["Cumulative_Add_Decreased"] = False
+        special_df["Cumulative_Solvent_Added"] = special_df["添加重量"]
+        special_df["Final_Mixture_Weight"] = special_df["塗料重量"]
+        special_df["Original_Paint_Weight"] = (
+            special_df["Final_Mixture_Weight"]
+            - special_df["Cumulative_Solvent_Added"]
+        )
+        special_df["Dilution_Base"] = special_df["Original_Paint_Weight"]
 
-    data["Dilution_Base"] = data["塗料重量"]
+    # =====================================================
+    # 2. NORMAL CODES: MERGE MULTIPLE ROWS OF SAME BUCKET
+    # =====================================================
+    normal_df = data[
+        ~data["塗料編號"].isin(SPECIAL_INDEPENDENT_PAINT_CODES)
+    ].copy()
 
-    data["Solvent_Ratio_Percent"] = (
-        data["添加重量"]
-        / data["Dilution_Base"]
+    if not normal_df.empty:
+        sort_cols = []
+
+        if "攪拌日期" in normal_df.columns:
+            normal_df["_Sort_Date"] = pd.to_datetime(
+                normal_df["攪拌日期"],
+                errors="coerce"
+            )
+            sort_cols.append("_Sort_Date")
+
+        if "攪拌時間(起)" in normal_df.columns:
+            time_text = (
+                normal_df["攪拌時間(起)"]
+                .astype(str)
+                .str.replace(r"\.0$", "", regex=True)
+                .str.replace(":", "", regex=False)
+                .str.strip()
+                .str.zfill(4)
+            )
+            normal_df["_Sort_Start_Time"] = pd.to_numeric(
+                time_text,
+                errors="coerce"
+            )
+            sort_cols.append("_Sort_Start_Time")
+
+        sort_cols.append("_Original_Row_Order")
+
+        bucket_group_cols = [
+            "塗料批號",
+            "塗料桶號",
+            "塗料編號"
+        ]
+
+        if "攪拌日期" in normal_df.columns:
+            bucket_group_cols.insert(0, "攪拌日期")
+
+        for optional_key in [
+            "Solvent_Type",
+            "Position_UI"
+        ]:
+            if optional_key in normal_df.columns:
+                bucket_group_cols.append(optional_key)
+
+        normal_df = normal_df.sort_values(
+            bucket_group_cols + sort_cols,
+            kind="stable"
+        )
+
+        normal_df["_Previous_Cumulative_Add"] = (
+            normal_df
+            .groupby(bucket_group_cols, dropna=False)["添加重量"]
+            .shift(1)
+        )
+
+        normal_df["_Cumulative_Add_Decreased"] = (
+            normal_df["_Previous_Cumulative_Add"].notna()
+            & (
+                normal_df["添加重量"]
+                < normal_df["_Previous_Cumulative_Add"]
+            )
+        )
+
+        agg_map = {
+            "黏度(秒)": "first",
+            "黏度(秒)_1": "last",
+            "添加重量": "last",
+            "塗料重量": "last",
+            "Resin": "first",
+            "Vendor": "first",
+            "塗裝位置": "first",
+            "_Original_Row_Order": "size",
+            "_Cumulative_Add_Decreased": "max"
+        }
+
+        if "溫度" in normal_df.columns:
+            agg_map["溫度"] = "median"
+
+        for optional_col in [
+            "稀釋劑",
+            "稀釋劑批號",
+            "稀釋劑桶號",
+            "攪拌時間(起)",
+            "攪拌時間(迄)"
+        ]:
+            if (
+                optional_col in normal_df.columns
+                and optional_col not in bucket_group_cols
+            ):
+                agg_map[optional_col] = "last"
+
+        normal_bucket_df = (
+            normal_df
+            .groupby(
+                bucket_group_cols,
+                dropna=False,
+                as_index=False
+            )
+            .agg(agg_map)
+        )
+
+        normal_bucket_df = normal_bucket_df.rename(columns={
+            "_Original_Row_Order": "Raw_Adjustment_Rows",
+            "_Cumulative_Add_Decreased": "Cumulative_Add_Decreased"
+        })
+
+        normal_bucket_df["Cumulative_Solvent_Added"] = (
+            normal_bucket_df["添加重量"]
+        )
+
+        normal_bucket_df["Final_Mixture_Weight"] = (
+            normal_bucket_df["塗料重量"]
+        )
+
+        normal_bucket_df["Original_Paint_Weight"] = (
+            normal_bucket_df["Final_Mixture_Weight"]
+            - normal_bucket_df["Cumulative_Solvent_Added"]
+        )
+
+        normal_bucket_df["Dilution_Base"] = (
+            normal_bucket_df["Original_Paint_Weight"]
+        )
+    else:
+        normal_bucket_df = pd.DataFrame()
+
+    # =====================================================
+    # 3. COMBINE BOTH LOGICS
+    # =====================================================
+    frames = []
+
+    if not normal_bucket_df.empty:
+        frames.append(normal_bucket_df)
+
+    if not special_df.empty:
+        frames.append(special_df)
+
+    if not frames:
+        return pd.DataFrame()
+
+    bucket_df = pd.concat(
+        frames,
+        ignore_index=True,
+        sort=False
+    )
+
+    # =====================================================
+    # 4. COMMON CALCULATIONS
+    # =====================================================
+    bucket_df["Delta_V"] = (
+        bucket_df["黏度(秒)"]
+        - bucket_df["黏度(秒)_1"]
+    )
+
+    bucket_df["Solvent_Ratio_Percent"] = (
+        bucket_df["Cumulative_Solvent_Added"]
+        / bucket_df["Dilution_Base"].replace(0, np.nan)
         * 100
     )
 
-    data["Sensitivity"] = (
-        data["Delta_V"]
-        / data["Solvent_Ratio_Percent"].replace(0, np.nan)
+    bucket_df["Sensitivity"] = (
+        bucket_df["Delta_V"]
+        / bucket_df["Solvent_Ratio_Percent"].replace(0, np.nan)
     )
 
-    data = data[
-        data["Sensitivity"].notna()
-        & np.isfinite(data["Sensitivity"])
-        & (data["Sensitivity"] > 0)
+    bucket_df = bucket_df[
+        (bucket_df["Cumulative_Add_Decreased"] == False)
+        & (bucket_df["Original_Paint_Weight"] > 0)
+        & (bucket_df["黏度(秒)"] > bucket_df["黏度(秒)_1"])
+        & (bucket_df["Delta_V"] > 0)
+        & (bucket_df["Solvent_Ratio_Percent"] > 0)
+        & bucket_df["Sensitivity"].notna()
+        & np.isfinite(bucket_df["Sensitivity"])
+        & (bucket_df["Sensitivity"] > 0)
     ].copy()
 
-    data["Initial_Viscosity_Zone"] = (
-        data["黏度(秒)"]
+    if bucket_df.empty:
+        return bucket_df
+
+    bucket_df["Initial_Viscosity_Zone"] = (
+        bucket_df["黏度(秒)"]
         .apply(get_viscosity_zone)
     )
 
-    if "溫度" in data.columns:
-        data["Temperature_Zone"] = (
-            data["溫度"]
+    if "溫度" in bucket_df.columns:
+        bucket_df["Temperature_Zone"] = (
+            bucket_df["溫度"]
             .apply(get_temperature_zone)
         )
     else:
-        data["溫度"] = np.nan
-        data["Temperature_Zone"] = "Unknown"
+        bucket_df["溫度"] = np.nan
+        bucket_df["Temperature_Zone"] = "Unknown"
 
-    return data.copy()
+    bucket_df["Record_Logic"] = np.where(
+        bucket_df["塗料編號"].isin(SPECIAL_INDEPENDENT_PAINT_CODES),
+        "Independent row - large source tank",
+        "Merged by paint batch and paint bucket"
+    )
+
+    return bucket_df.copy()
 
 
 @st.cache_data(show_spinner=False)
@@ -872,7 +1091,7 @@ with tab1:
     )
 
     c2.metric(
-        "Valid Adjustment Records",
+        "Valid Paint Buckets",
         f"{adjustment_record_count:,}"
     )
 
