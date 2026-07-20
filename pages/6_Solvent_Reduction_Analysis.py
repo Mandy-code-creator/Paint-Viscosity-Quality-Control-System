@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 import io
 
 # ==========================================
-# THƯ VIỆN XUẤT WORD (Kiểm tra xem máy đã cài chưa)
+# WORD EXPORT LIBRARY (Check if installed)
 # ==========================================
 try:
     from docx import Document
@@ -40,7 +40,10 @@ df["Solvent_Type"] = df["Solvent_Type"].str.upper()
 invalid_vals = {"", "NAN", "NONE", "NULL", "N/A", "NA", "-", "--"}
 df.replace(list(invalid_vals), "Unknown", inplace=True)
 
+# Standardize Identifiers
 df["Batch_ID"] = df["塗料批號"]
+df["Bucket_Number"] = df.get("塗料桶號", pd.Series("Unknown", index=df.index)).fillna("Unknown").astype(str).str.strip()
+
 pos_map = {"TP": "Primer", "正底漆": "Primer", "BP": "Primer", "背底漆": "Primer", "TF": "Top Finish", "正面漆": "Top Finish", "BF": "Back Finish", "背面漆": "Back Finish"}
 df["Position_UI"] = df["塗裝位置"].map(pos_map).fillna(df["塗裝位置"])
 
@@ -58,11 +61,23 @@ if df.empty:
     st.warning("⚠️ No valid dilution records remain after data cleaning.")
     st.stop()
 
+# Time Parsing & Deduplication Logic
 date_col = next((c for c in ["攪拌日期", "調整日期", "生產日期", "Date"] if c in df.columns), None)
+time_col = next((c for c in ["攪拌時間", "攪拌時間(迄)", "Time"] if c in df.columns), None)
+
+sort_cols = ["Batch_ID", "Bucket_Number"]
 if date_col:
     df["_Analysis_Date"] = pd.to_datetime(df[date_col], errors="coerce")
+    sort_cols.append("_Analysis_Date")
 else:
     df["_Analysis_Date"] = pd.NaT
+
+if time_col:
+    sort_cols.append(time_col)
+
+# Prevent double counting: Sort chronologically and keep ONLY the final state of each bucket
+df = df.sort_values(by=sort_cols, ascending=True)
+df = df.drop_duplicates(subset=["Batch_ID", "Bucket_Number"], keep='last').copy()
 
 # ==========================================
 # 3. CORE LOGIC HELPER
@@ -140,7 +155,7 @@ st.info(f"📅 **資料期間 (Analysis Period):** {period_label} ｜ 📊 **符
 filter_details = f"Vendor: {selected_vendor} | Resin: {selected_resin} | Position: {selected_position} | Solvent: {selected_solvent}"
 st.markdown("<br>", unsafe_allow_html=True)
 
-# Khởi tạo Dict lưu trữ các biểu đồ để xuất ra Word
+# Initialize Dictionary to store charts for Word export
 exported_figs = {}
 
 # ==========================================
@@ -149,7 +164,7 @@ exported_figs = {}
 st.subheader("🗂️ 塗料階層總覽 (Hierarchical Overview)")
 st.markdown("Hierarchy: **Vendor ➔ Resin ➔ Position ➔ Solvent Type ➔ Paint Code**. Box size represents total solvent usage (kg).")
 
-# Chuẩn bị dữ liệu cho Treemap để tính toán Delta_V (Biến động độ nhớt) và Ratio (Tỷ lệ dung môi)
+# Prepare Treemap data for Delta_V and Ratio calculation
 tree_df = filter_df.groupby(["Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint_Code"]).agg(
     添加重量=("添加重量", "sum"),
     Delta_V=("Delta_V", "median"), 
@@ -162,19 +177,19 @@ fig_tree = px.treemap(
     path=[px.Constant("Total"), "Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint_Code"],
     values="添加重量", 
     color="Resin",  
-    color_discrete_sequence=px.colors.qualitative.Pastel, # ĐỔI MÀU DỊU MẮT HƠN
-    custom_data=["Delta_V", "Solvent_Ratio_Percent"], # Truyền thêm dữ liệu độ nhớt và tỷ lệ
+    color_discrete_sequence=px.colors.qualitative.Pastel, # SOFTER COLOR PALETTE
+    custom_data=["Delta_V", "Solvent_Ratio_Percent"], # Pass viscosity and ratio data
     title=f"Hierarchical Breakdown of Solvent Usage (kg)<br><sup>Filters: {filter_details}</sup>",
     height=700
 )
 
-# Cập nhật Label và Tooltip chi tiết
+# Update Labels and Tooltips
 fig_tree.update_traces(
-    texttemplate="<b>%{label}</b><br>%{value:,.0f} kg", # Hiển thị trên ô vuông
-    hovertemplate="<b>%{label}</b><br>Solvent Usage: %{value:,.1f} kg<br>Visc Drop (Biến động): ~%{customdata[0]:.1f} s<br>Solvent Added (Tỷ lệ thêm): ~%{customdata[1]:.1f}%", # Hiển thị khi rê chuột
+    texttemplate="<b>%{label}</b><br>%{value:,.0f} kg",
+    hovertemplate="<b>%{label}</b><br>Solvent Usage: %{value:,.1f} kg<br>Visc Drop: ~%{customdata[0]:.1f} s<br>Solvent Added: ~%{customdata[1]:.1f}%",
     root_color="#f8f9fa"
 )
-# Tăng margin-top (t=90) để tránh lỗi chữ đè lên khối Total
+# Increase top margin (t=90) to prevent text overlapping the Total block
 fig_tree.update_layout(margin=dict(t=90, l=10, r=10, b=10)) 
 
 st.plotly_chart(fig_tree, use_container_width=True)
@@ -185,17 +200,17 @@ st.markdown("<br>", unsafe_allow_html=True)
 # 6. TABS & VISUALIZATION
 # ==========================================
 tab_ranking, tab_detail, tab_line = st.tabs([
-    "1️⃣ 塗料消耗排名 (Paint Code Ranking)", 
+    "1️⃣ 塗料消耗排名 (Top 10 Paint Code Ranking)", 
     "2️⃣ 塗料詳細分析 (Paint Code Details)", 
     "3️⃣ 產線黏度比較 (Line Comparison)"
 ])
 
 # ----- TAB 1: RANKING -----
 with tab_ranking:
-    st.subheader("1. Paint Code Solvent Consumption (Top 20)")
+    st.subheader("1. Paint Code Solvent Consumption (Top 10)")
     
     full_summary_df = build_summary(filter_df, ["Vendor", "Resin", "Position_UI", "Paint_Code", "Solvent_Type"])
-    summary_df = full_summary_df.sort_values("Total_Solvent_kg", ascending=False).head(20).reset_index(drop=True)
+    summary_df = full_summary_df.sort_values("Total_Solvent_kg", ascending=False).head(10).reset_index(drop=True)
     summary_df.insert(0, "Rank", np.arange(1, len(summary_df) + 1))
 
     chart_height = max(450, len(summary_df) * 32)
@@ -234,7 +249,7 @@ with tab_ranking:
     fig_dual = go.Figure()
     fig_dual.add_trace(go.Bar(x=summary_df["Paint_Code"], y=summary_df["Total_Paint_kg"], name="Paint (kg)", marker_color="#5B8FF9", yaxis="y1"))
     fig_dual.add_trace(go.Bar(x=summary_df["Paint_Code"], y=summary_df["Total_Solvent_kg"], name="Solvent (kg)", marker_color="#F6BD16", yaxis="y1"))
-    fig_dual.add_trace(go.Scatter(x=summary_df["Paint_Code"], y=summary_df["Weighted_Ratio_Percent"], name="Solvent Ratio (%)", mode="lines+markers", line=dict(color="#5AD8A6", width=3), marker=dict(size=8), yaxis="y2"))
+    fig_dual.add_trace(go.Scatter(x=summary_df["Paint_Code"], y=summary_df["Weighted_Ratio_Percent"], name="Solvent Ratio (%)", mode="lines+markers", line=dict(color="DeepSkyBlue", width=3), marker=dict(size=8), yaxis="y2"))
     
     for i, row in summary_df.iterrows():
         fig_dual.add_annotation(
@@ -317,12 +332,10 @@ with tab_line:
             fig6.update_yaxes(title="")
             st.plotly_chart(fig6, use_container_width=True)
             exported_figs["8. Line Comparison - Solvent Ratio"] = fig6
+
 # ==========================================
+# 7. EXPORT INTERACTIVE HTML REPORT
 # ==========================================
-# 7. EXPORT INTERACTIVE HTML REPORT (FIXED)
-# ==========================================
-import io
-import pandas as pd
 
 st.markdown("---")
 st.subheader("📄 Export Report")
@@ -332,7 +345,7 @@ st.info("💡 The report is exported as an interactive HTML file to preserve exa
 if st.button("📥 Generate & Download Report", type="primary"):
     with st.spinner("⏳ Generating HTML report..."):
         try:
-            # 1. Xóa link script CDN cứng, chỉ giữ lại cấu trúc giao diện
+            # Remove hardcoded CDN script link, keep layout structure
             html_content = f"""
             <html>
             <head>
@@ -355,13 +368,13 @@ if st.button("📥 Generate & Download Report", type="primary"):
                 </div>
             """
 
-            # 2. Xử lý biểu đồ: Không mutate (can thiệp) vào layout gốc nữa
+            # Process charts: Do not mutate original layout
             for i, (fig_title, fig) in enumerate(exported_figs.items()):
                 
-                # Gọi thư viện Plotly chuẩn cho biểu đồ đầu tiên, các biểu đồ sau tự động ăn theo để nhẹ file
+                # Call standard Plotly for the first chart, subsequent charts inherit to reduce file size
                 inc_js = 'cdn' if i == 0 else False
                 
-                # Render với mặc định 100% width, KHÔNG dùng update_yaxes
+                # Render with default 100% width, DO NOT use update_yaxes
                 fig_html = fig.to_html(
                     full_html=False, 
                     include_plotlyjs=inc_js, 
