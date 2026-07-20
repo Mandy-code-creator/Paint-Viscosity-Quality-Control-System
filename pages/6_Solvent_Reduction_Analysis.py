@@ -242,7 +242,6 @@ with tab_ranking:
     st.subheader("1. Paint Code Solvent Consumption (Top 10)")
     
     full_summary_df = build_summary(filter_df, ["Vendor", "Resin", "Position_UI", "Paint_Code", "Solvent_Type"])
-    # Strictly limit to Top 10 for management review
     summary_df = full_summary_df.sort_values("Total_Solvent_kg", ascending=False).head(10).reset_index(drop=True)
     summary_df.insert(0, "Rank", np.arange(1, len(summary_df) + 1))
 
@@ -250,6 +249,7 @@ with tab_ranking:
     
     ch1, ch2 = st.columns(2)
     with ch1:
+        # Biểu đồ này chỉ hiển thị trên app, KHÔNG xuất ra báo cáo
         df_melt = summary_df.melt(id_vars="Paint_Code", value_vars=["Total_Paint_kg", "Total_Solvent_kg"])
         df_melt["variable"] = df_melt["variable"].map({"Total_Paint_kg": "塗料 (Paint)", "Total_Solvent_kg": "稀釋劑 (Solvent)"})
         
@@ -261,9 +261,10 @@ with tab_ranking:
         fig1.update_xaxes(title="Weight (kg)")
         fig1.update_layout(title="Paint vs Solvent Usage", legend_title_text="", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
         st.plotly_chart(fig1, use_container_width=True)
-        exported_figs["2. Paint vs Solvent (kg)"] = fig1
+        # Đã xóa exported_figs["2. Paint vs Solvent (kg)"] = fig1
 
     with ch2:
+        # Biểu đồ này chỉ hiển thị trên app, KHÔNG xuất ra báo cáo
         sorted_df = summary_df.sort_values("Weighted_Ratio_Percent", ascending=True)
         fig2 = px.bar(
             sorted_df, x="Weighted_Ratio_Percent", y="Paint_Code", orientation='h', text_auto='.2f', 
@@ -274,7 +275,7 @@ with tab_ranking:
         fig2.update_xaxes(title="Ratio (%)")
         fig2.update_layout(title="Weighted Solvent Ratio (%)")
         st.plotly_chart(fig2, use_container_width=True)
-        exported_figs["3. Weighted Solvent Ratio"] = fig2
+        # Đã xóa exported_figs["3. Weighted Solvent Ratio"] = fig2
 
     st.markdown("---")
     
