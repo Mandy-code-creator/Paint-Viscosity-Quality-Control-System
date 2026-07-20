@@ -776,6 +776,11 @@ with tab_pilot:
         axis=1
     )
 
+    st.markdown("### 圖1　各色號預調漆試用優先順序")
+    st.caption(
+        "依稀釋劑使用量、塗料使用量、添加比例、穩定率及歷史資料量綜合評估。"
+    )
+
     fig_pilot_score = px.bar(
         pilot_chart_df,
         x="Pilot_Score",
@@ -793,7 +798,7 @@ with tab_pilot:
             "Historical_Records"
         ],
         title=(
-            "各色號預調漆試用優先順序"
+            "<b>各色號預調漆試用優先順序</b>"
             f"<br><sup>分數越高代表越適合優先評估｜{filter_details}</sup>"
         ),
         height=max(560, len(pilot_top_df) * 56)
@@ -842,7 +847,7 @@ with tab_pilot:
     fig_pilot_score.update_layout(
         plot_bgcolor="white",
         paper_bgcolor="white",
-        margin=dict(l=110, r=80, t=145, b=80),
+        margin=dict(l=110, r=80, t=190, b=80),
         bargap=0.28,
         font=dict(
             family="Arial, Microsoft JhengHei, sans-serif",
@@ -850,17 +855,17 @@ with tab_pilot:
             color="#334155"
         ),
         title=dict(
-            x=0.0,
-            xanchor="left",
-            y=0.98,
+            x=0.5,
+            xanchor="center",
+            y=0.97,
             yanchor="top",
-            font=dict(size=18, color="#1F2937")
+            font=dict(size=21, color="#1F2937")
         ),
         legend_title_text="評估結果",
         legend=dict(
             orientation="h",
             yanchor="bottom",
-            y=1.10,
+            y=1.16,
             xanchor="right",
             x=1,
             bgcolor="rgba(255,255,255,0)",
