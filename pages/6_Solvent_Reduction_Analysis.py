@@ -61,7 +61,9 @@ if df.empty:
     st.warning("⚠️ No valid dilution records remain after data cleaning.")
     st.stop()
 
-# Time Parsing & Deduplication Logic
+# ==========================================
+# 2.1 TIME PARSING & DEDUPLICATION LOGIC
+# ==========================================
 date_col = next((c for c in ["攪拌日期", "調整日期", "生產日期", "Date"] if c in df.columns), None)
 time_col = next((c for c in ["攪拌時間", "攪拌時間(迄)", "Time"] if c in df.columns), None)
 
@@ -75,9 +77,33 @@ else:
 if time_col:
     sort_cols.append(time_col)
 
-# Prevent double counting: Sort chronologically and keep ONLY the final state of each bucket
+# Sort entire dataset chronologically
 df = df.sort_values(by=sort_cols, ascending=True)
-df = df.drop_duplicates(subset=["Batch_ID", "Bucket_Number"], keep='last').copy()
+
+# Identify special paint codes drawn from large drums over multiple days
+special_paint_codes = ["PS30213X8"]
+is_special_paint = df["Paint_Code"].isin(special_paint_codes)
+
+# Process Standard Paint Codes
+df_standard = df[~is_special_paint].copy()
+df_standard = df_standard.drop_duplicates(
+    subset=["Batch_ID", "Bucket_Number"], 
+    keep="last"
+)
+
+# Process Special Paint Codes
+df_special = df[is_special_paint].copy()
+if not df_special.empty:
+    df_special["Operation_Date"] = df_special["_Analysis_Date"].dt.date
+    df_special = df_special.drop_duplicates(
+        subset=["Batch_ID", "Bucket_Number", "Operation_Date"], 
+        keep="last"
+    )
+    df_special = df_special.drop(columns=["Operation_Date"])
+
+# Merge and Restore Chronological Order
+df = pd.concat([df_standard, df_special], ignore_index=True)
+df = df.sort_values(by=["Batch_ID", "Bucket_Number", "_Analysis_Date"])
 
 # ==========================================
 # 3. CORE LOGIC HELPER
@@ -155,7 +181,7 @@ st.info(f"📅 **資料期間 (Analysis Period):** {period_label} ｜ 📊 **符
 filter_details = f"Vendor: {selected_vendor} | Resin: {selected_resin} | Position: {selected_position} | Solvent: {selected_solvent}"
 st.markdown("<br>", unsafe_allow_html=True)
 
-# Initialize Dictionary to store charts for Word export
+# Initialize Dictionary to store charts for HTML export
 exported_figs = {}
 
 # ==========================================
@@ -164,7 +190,7 @@ exported_figs = {}
 st.subheader("🗂️ 塗料階層總覽 (Hierarchical Overview)")
 st.markdown("Hierarchy: **Vendor ➔ Resin ➔ Position ➔ Solvent Type ➔ Paint Code**. Box size represents total solvent usage (kg).")
 
-# Prepare Treemap data for Delta_V and Ratio calculation
+# Prepare Treemap data
 tree_df = filter_df.groupby(["Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint_Code"]).agg(
     添加重量=("添加重量", "sum"),
     Delta_V=("Delta_V", "median"), 
@@ -177,8 +203,8 @@ fig_tree = px.treemap(
     path=[px.Constant("Total"), "Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint_Code"],
     values="添加重量", 
     color="Resin",  
-    color_discrete_sequence=px.colors.qualitative.Pastel, # SOFTER COLOR PALETTE
-    custom_data=["Delta_V", "Solvent_Ratio_Percent"], # Pass viscosity and ratio data
+    color_discrete_sequence=px.colors.qualitative.Pastel,
+    custom_data=["Delta_V", "Solvent_Ratio_Percent"],
     title=f"Hierarchical Breakdown of Solvent Usage (kg)<br><sup>Filters: {filter_details}</sup>",
     height=700
 )
@@ -189,7 +215,6 @@ fig_tree.update_traces(
     hovertemplate="<b>%{label}</b><br>Solvent Usage: %{value:,.1f} kg<br>Visc Drop: ~%{customdata[0]:.1f} s<br>Solvent Added: ~%{customdata[1]:.1f}%",
     root_color="#f8f9fa"
 )
-# Increase top margin (t=90) to prevent text overlapping the Total block
 fig_tree.update_layout(margin=dict(t=90, l=10, r=10, b=10)) 
 
 st.plotly_chart(fig_tree, use_container_width=True)
@@ -210,6 +235,7 @@ with tab_ranking:
     st.subheader("1. Paint Code Solvent Consumption (Top 10)")
     
     full_summary_df = build_summary(filter_df, ["Vendor", "Resin", "Position_UI", "Paint_Code", "Solvent_Type"])
+    # Strictly limit to Top 10 for management review
     summary_df = full_summary_df.sort_values("Total_Solvent_kg", ascending=False).head(10).reset_index(drop=True)
     summary_df.insert(0, "Rank", np.arange(1, len(summary_df) + 1))
 
@@ -249,6 +275,7 @@ with tab_ranking:
     fig_dual = go.Figure()
     fig_dual.add_trace(go.Bar(x=summary_df["Paint_Code"], y=summary_df["Total_Paint_kg"], name="Paint (kg)", marker_color="#5B8FF9", yaxis="y1"))
     fig_dual.add_trace(go.Bar(x=summary_df["Paint_Code"], y=summary_df["Total_Solvent_kg"], name="Solvent (kg)", marker_color="#F6BD16", yaxis="y1"))
+    # Implementation of the Deep Sky Blue visual standard
     fig_dual.add_trace(go.Scatter(x=summary_df["Paint_Code"], y=summary_df["Weighted_Ratio_Percent"], name="Solvent Ratio (%)", mode="lines+markers", line=dict(color="DeepSkyBlue", width=3), marker=dict(size=8), yaxis="y2"))
     
     for i, row in summary_df.iterrows():
@@ -336,7 +363,6 @@ with tab_line:
 # ==========================================
 # 7. EXPORT INTERACTIVE HTML REPORT
 # ==========================================
-
 st.markdown("---")
 st.subheader("📄 Export Report")
 
@@ -345,7 +371,6 @@ st.info("💡 The report is exported as an interactive HTML file to preserve exa
 if st.button("📥 Generate & Download Report", type="primary"):
     with st.spinner("⏳ Generating HTML report..."):
         try:
-            # Remove hardcoded CDN script link, keep layout structure
             html_content = f"""
             <html>
             <head>
@@ -368,13 +393,9 @@ if st.button("📥 Generate & Download Report", type="primary"):
                 </div>
             """
 
-            # Process charts: Do not mutate original layout
             for i, (fig_title, fig) in enumerate(exported_figs.items()):
-                
-                # Call standard Plotly for the first chart, subsequent charts inherit to reduce file size
                 inc_js = 'cdn' if i == 0 else False
                 
-                # Render with default 100% width, DO NOT use update_yaxes
                 fig_html = fig.to_html(
                     full_html=False, 
                     include_plotlyjs=inc_js, 
