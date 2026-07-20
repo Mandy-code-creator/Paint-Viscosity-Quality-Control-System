@@ -419,7 +419,7 @@ if st.button("📥 Generate & Download Report", type="primary"):
             <html>
             <head>
                 <meta charset="utf-8">
-                <title>各色號稀釋劑的消耗與管控評估 (Solvent Reduction Opportunity Report)</title>
+                <title>各色號稀釋劑使用分析與評估(Solvent Reduction Opportunity Report)</title>
                 <style>
                     body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 40px; background-color: #f0f2f6; }}
                     h1 {{ color: #1f77b4; text-align: center; font-size: 32px; }}
@@ -430,7 +430,7 @@ if st.button("📥 Generate & Download Report", type="primary"):
                 </style>
             </head>
             <body>
-                <h1>📊 各色號稀釋劑的消耗與管控評估 </h1>
+                <h1>📊各色號稀釋劑使用分析與評估 </h1>
                 <div class="info-box">
                     <p><strong>🕒 分析日期 (Analysis Date):</strong> {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
                     <p><strong>🔍 篩選條件 (Filters Applied):</strong> {filter_details}</p>
