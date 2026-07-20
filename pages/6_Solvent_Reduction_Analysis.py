@@ -357,8 +357,10 @@ if st.button("📥 Generate & Download Report", type="primary"):
             """
 
             for fig_title, fig in exported_figs.items():
-                # ÉP BIỂU ĐỒ GIỮ ĐÚNG TỶ LỆ VÀ GIÃN RỘNG NHƯ TRÊN APP
-                fig.update_layout(autosize=True, margin=dict(l=20, r=20, t=50, b=20))
+                # Xóa ép lề cứng, bật tự động căn lề trục Y để không bị cắt chữ
+                fig.update_layout(autosize=True)
+                fig.update_yaxes(automargin=True)
+                fig.update_xaxes(automargin=True)
                 
                 # Render với width 100% thay vì kích thước tĩnh
                 fig_html = fig.to_html(
