@@ -210,7 +210,7 @@ fig_tree = px.treemap(
     path=[px.Constant("Total"), "Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint_Code"],
     values="添加重量", 
     color="Resin",  
-    color_discrete_sequence=px.colors.qualitative.T10,
+    color_discrete_sequence=px.colors.qualitative.Pastel,
     custom_data=["Delta_V", "Solvent_Ratio_Percent"],
     title=f"Hierarchical Breakdown of Solvent Usage (kg)<br><sup>Filters: {filter_details}</sup>",
     height=700
@@ -250,58 +250,58 @@ with tab_ranking:
     
     ch1, ch2 = st.columns(2)
     with ch1:
-        # This chart is only displayed in the app, NOT exported to the report
+        # Biểu đồ này chỉ hiển thị trên app, KHÔNG xuất ra báo cáo
         df_melt = summary_df.melt(id_vars="Paint_Code", value_vars=["Total_Paint_kg", "Total_Solvent_kg"])
         df_melt["variable"] = df_melt["variable"].map({"Total_Paint_kg": "塗料 (Paint)", "Total_Solvent_kg": "稀釋劑 (Solvent)"})
         
         fig1 = px.bar(
             df_melt, x="value", y="Paint_Code", color="variable", barmode="group", orientation='h', 
-            height=chart_height, color_discrete_map={"塗料 (Paint)": "#1F77B4", "稀釋劑 (Solvent)": "#FF7F0E"}
+            height=chart_height, color_discrete_map={"塗料 (Paint)": "#5B8FF9", "稀釋劑 (Solvent)": "#F6BD16"}
         )
         fig1.update_yaxes(dtick=1, title="", categoryorder="total ascending")
         fig1.update_xaxes(title="Weight (kg)")
         fig1.update_layout(title="Paint vs Solvent Usage", legend_title_text="", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
         st.plotly_chart(fig1, use_container_width=True)
-        # Removed exported_figs["2. Paint vs Solvent (kg)"] = fig1
+        # Đã xóa exported_figs["2. Paint vs Solvent (kg)"] = fig1
 
     with ch2:
-        # This chart is only displayed in the app, NOT exported to the report
+        # Biểu đồ này chỉ hiển thị trên app, KHÔNG xuất ra báo cáo
         sorted_df = summary_df.sort_values("Weighted_Ratio_Percent", ascending=True)
         fig2 = px.bar(
             sorted_df, x="Weighted_Ratio_Percent", y="Paint_Code", orientation='h', text_auto='.2f', 
-            height=chart_height, color_discrete_sequence=["#1F77B4"]
+            height=chart_height, color_discrete_sequence=["#5B8FF9"]
         )
         fig2.update_traces(textposition="outside", cliponaxis=False)
         fig2.update_yaxes(dtick=1, title="")
         fig2.update_xaxes(title="Ratio (%)")
         fig2.update_layout(title="Weighted Solvent Ratio (%)")
         st.plotly_chart(fig2, use_container_width=True)
-        # Removed exported_figs["3. Weighted Solvent Ratio"] = fig2
+        # Đã xóa exported_figs["3. Weighted Solvent Ratio"] = fig2
 
     st.markdown("---")
     
     # Dual Axis Chart
     fig_dual = go.Figure()
     
-    # Paint (kg) column - Display text values
+    # Cột Paint (kg) - Thêm text hiển thị giá trị
     fig_dual.add_trace(go.Bar(
         x=summary_df["Paint_Code"], 
         y=summary_df["Total_Paint_kg"], 
         name="Paint (kg)", 
-        marker_color="#1F77B4", 
+        marker_color="#5B8FF9", 
         yaxis="y1",
-        text=summary_df["Total_Paint_kg"].apply(lambda x: f"{x:,.0f}"), # Number format with comma
+        text=summary_df["Total_Paint_kg"].apply(lambda x: f"{x:,.0f}"), # Định dạng số có dấu phẩy
         textposition="auto"
     ))
     
-    # Solvent (kg) column - Display text values
+    # Cột Solvent (kg) - Thêm text hiển thị giá trị
     fig_dual.add_trace(go.Bar(
         x=summary_df["Paint_Code"], 
         y=summary_df["Total_Solvent_kg"], 
         name="Solvent (kg)", 
-        marker_color="#FF7F0E", 
+        marker_color="#F6BD16", 
         yaxis="y1",
-        text=summary_df["Total_Solvent_kg"].apply(lambda x: f"{x:,.0f}"), # Number format with comma
+        text=summary_df["Total_Solvent_kg"].apply(lambda x: f"{x:,.0f}"), # Định dạng số có dấu phẩy
         textposition="auto"
     ))
     
@@ -338,7 +338,7 @@ with tab_ranking:
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         height=600,
         uniformtext_minsize=8, 
-        uniformtext_mode='hide' # Auto-hide text if column is too small
+        uniformtext_mode='hide' # Tự động ẩn text nếu cột quá nhỏ không đủ chỗ chứa
     )
     st.plotly_chart(fig_dual, use_container_width=True)
     exported_figs["4. Dual Axis Usage vs Ratio"] = fig_dual
@@ -356,11 +356,11 @@ with tab_detail:
         detail_df["Record_Index"] = detail_df.index + 1
         
         fig3 = go.Figure()
-        fig3.add_trace(go.Scatter(x=detail_df["Record_Index"], y=detail_df["黏度(秒)"], mode="lines+markers", name="Before Viscosity", marker=dict(color="#1F77B4", size=8), yaxis="y1"))
-        fig3.add_trace(go.Scatter(x=detail_df["Record_Index"], y=detail_df["黏度(秒)_1"], mode="lines+markers", name="After Viscosity", marker=dict(color="#2CA02C", size=8), yaxis="y1"))
+        fig3.add_trace(go.Scatter(x=detail_df["Record_Index"], y=detail_df["黏度(秒)"], mode="lines+markers", name="Before Viscosity", marker=dict(color="#5B8FF9", size=8), yaxis="y1"))
+        fig3.add_trace(go.Scatter(x=detail_df["Record_Index"], y=detail_df["黏度(秒)_1"], mode="lines+markers", name="After Viscosity", marker=dict(color="#5AD8A6", size=8), yaxis="y1"))
         
         if "溫度" in detail_df.columns and not detail_df["溫度"].isna().all():
-            fig3.add_trace(go.Scatter(x=detail_df["Record_Index"], y=detail_df["溫度"], mode="lines+markers", name="Temperature (°C)", marker=dict(color="#FF7F0E", size=8, symbol="diamond"), line=dict(color="#FF7F0E", width=2, dash="dot"), yaxis="y2"))
+            fig3.add_trace(go.Scatter(x=detail_df["Record_Index"], y=detail_df["溫度"], mode="lines+markers", name="Temperature (°C)", marker=dict(color="#F6BD16", size=8, symbol="diamond"), line=dict(color="#F6BD16", width=2, dash="dot"), yaxis="y2"))
             chart_title = "Viscosity & Temperature Variation (Before vs After)"
         else:
             chart_title = "Viscosity Variation (Before vs After)"
@@ -376,7 +376,7 @@ with tab_detail:
 
     with ch4:
         line_usage = build_summary(detail_df, ["線別"]).sort_values("Total_Solvent_kg")
-        fig4 = px.bar(line_usage, x="Total_Solvent_kg", y="線別", text="Weighted_Ratio_Percent", orientation='h', title=f"Solvent Usage by Line<br><sup>Filters: {detail_title_filter}</sup>", color_discrete_sequence=["#1F77B4"])
+        fig4 = px.bar(line_usage, x="Total_Solvent_kg", y="線別", text="Weighted_Ratio_Percent", orientation='h', title=f"Solvent Usage by Line<br><sup>Filters: {detail_title_filter}</sup>", color_discrete_sequence=["#5B8FF9"])
         fig4.update_traces(texttemplate='%{text:.2f}%', textposition='outside')
         fig4.update_yaxes(title="")
         fig4.update_xaxes(title="Total Solvent (kg)")
@@ -401,7 +401,7 @@ with tab_line:
             exported_figs["7. Line Comparison - Viscosity Drop"] = fig5
 
         with ch6:
-            fig6 = px.bar(line_summary.sort_values("Weighted_Ratio_Percent"), x="Weighted_Ratio_Percent", y="線別", orientation='h', text_auto='.2f', title="Weighted Solvent Ratio", color_discrete_sequence=["#1F77B4"])
+            fig6 = px.bar(line_summary.sort_values("Weighted_Ratio_Percent"), x="Weighted_Ratio_Percent", y="線別", orientation='h', text_auto='.2f', title="Weighted Solvent Ratio", color_discrete_sequence=["#5AD8A6"])
             fig6.update_yaxes(title="")
             st.plotly_chart(fig6, use_container_width=True)
             exported_figs["8. Line Comparison - Solvent Ratio"] = fig6
@@ -755,9 +755,9 @@ with tab_pilot:
     # Main chart: Pilot ranking
     # ------------------------------------------------------
     color_map = {
-        "優先試用": "#1F77B4",         # Corporate Blue
-        "可進一步評估": "#F39C12",      # BI Amber
-        "暫不建議": "#95A5A6"          # Neutral Gray
+        "優先試用": "#2F6B6D",
+        "可進一步評估": "#6F8FAF",
+        "暫不建議": "#C9C5BE"
     }
 
     pilot_chart_df = (
@@ -768,10 +768,10 @@ with tab_pilot:
 
     pilot_chart_df["Chart_Label"] = pilot_chart_df.apply(
         lambda row: (
-            f"{row['Pilot_Score']:.1f}分  ｜  "
-            f"{row['Total_Solvent_kg']:,.0f}kg  ｜  "
-            f"{row['Weighted_Ratio_Percent']:.1f}%  ｜  "
-            f"{row['Stable_Coverage']:.0%}"
+            f"{row['Pilot_Score']:.1f}分｜"
+            f"稀釋劑{row['Total_Solvent_kg']:,.0f}kg｜"
+            f"添加{row['Weighted_Ratio_Percent']:.1f}%｜"
+            f"穩定{row['Stable_Coverage']:.0%}"
         ),
         axis=1
     )
@@ -794,7 +794,7 @@ with tab_pilot:
         ],
         title=(
             "各色號預調漆試用優先順序"
-            f"<br><sup>綜合考量稀釋劑用量、塗料用量、添加比例、穩定率及歷史資料量｜{filter_details}</sup>"
+            f"<br><sup>分數越高代表越適合優先評估｜{filter_details}</sup>"
         ),
         height=max(560, len(pilot_top_df) * 56)
     )
@@ -817,7 +817,12 @@ with tab_pilot:
 
     fig_pilot_score.update_xaxes(
         title="試用優先分數",
-        range=[0, 110],
+        # Extend the plotting area only for the outside labels.
+        # Tick marks still stop at 100 because Pilot Score is a 0-100 score.
+        range=[0, 155],
+        tickmode="array",
+        tickvals=[0, 20, 40, 60, 80, 100],
+        ticktext=["0", "20", "40", "60", "80", "100"],
         showline=True,
         linewidth=1.2,
         linecolor="#4B5563",
@@ -837,7 +842,7 @@ with tab_pilot:
     fig_pilot_score.update_layout(
         plot_bgcolor="white",
         paper_bgcolor="white",
-        margin=dict(l=110, r=220, t=150, b=80),
+        margin=dict(l=110, r=80, t=145, b=80),
         bargap=0.28,
         font=dict(
             family="Arial, Microsoft JhengHei, sans-serif",
@@ -864,6 +869,16 @@ with tab_pilot:
     )
 
     st.plotly_chart(fig_pilot_score, use_container_width=True)
+
+    st.info(
+        "圖中數字依序為："
+        "① 試用優先分數；"
+        "② 稀釋劑歷史總用量；"
+        "③ 加權添加比例；"
+        "④ 添加比例穩定率。"
+        "橫軸分數仍為0–100分，100分右側空間僅供顯示完整標籤。"
+    )
+
     exported_figs["9. Paint Code Pilot Priority Ranking"] = fig_pilot_score
 
     # ------------------------------------------------------
@@ -874,82 +889,48 @@ with tab_pilot:
     st.markdown("---")
     st.markdown("### 色號試用評估明細")
 
+    # ------------------------------------------------------
+    # Concise management summary table
+    # ------------------------------------------------------
     pilot_output = pilot_df[
         [
             "Pilot_Rank",
             "Paint_Code",
-            "Evaluation_Result",
             "Pilot_Score",
-            "Historical_Records",
-            "Historical_Batches",
-            "Total_Paint_kg",
             "Total_Solvent_kg",
             "Weighted_Ratio_Percent",
-            "Median_Ratio_Percent",
-            "Ratio_P25",
-            "Ratio_P75",
             "Stable_Coverage",
-            "Stability_Level",
-            "Relative_IQR",
-            "Ratio_CV",
-            "Median_Before_Viscosity",
-            "Median_After_Viscosity",
-            "After_Viscosity_P25",
-            "After_Viscosity_P75",
-            "Median_Viscosity_Drop",
-            "Production_Lines"
+            "Historical_Records",
+            "Evaluation_Result"
         ]
     ].copy()
+
+    pilot_output["Stable_Coverage"] = (
+        pilot_output["Stable_Coverage"] * 100
+    )
 
     pilot_output = pilot_output.rename(columns={
         "Pilot_Rank": "排名",
         "Paint_Code": "色號",
-        "Evaluation_Result": "評估結果",
         "Pilot_Score": "試用優先分數",
-        "Historical_Records": "歷史紀錄數",
-        "Historical_Batches": "歷史批號數",
-        "Total_Paint_kg": "塗料總用量",
         "Total_Solvent_kg": "稀釋劑總用量",
         "Weighted_Ratio_Percent": "加權添加比例",
-        "Median_Ratio_Percent": "添加比例中位數",
-        "Ratio_P25": "添加比例P25",
-        "Ratio_P75": "添加比例P75",
         "Stable_Coverage": "添加比例穩定率",
-        "Stability_Level": "添加比例穩定度",
-        "Relative_IQR": "相對四分位距（參考）",
-        "Ratio_CV": "添加比例CV（參考）",
-        "Median_Before_Viscosity": "添加前黏度中位數",
-        "Median_After_Viscosity": "添加後黏度中位數",
-        "After_Viscosity_P25": "添加後黏度P25",
-        "After_Viscosity_P75": "添加後黏度P75",
-        "Median_Viscosity_Drop": "降黏幅度中位數",
-        "Production_Lines": "使用產線數"
+        "Historical_Records": "歷史紀錄數",
+        "Evaluation_Result": "評估結果"
     })
-
-    pilot_output["添加比例穩定率"] = (
-        pilot_output["添加比例穩定率"] * 100
-    )
 
     st.dataframe(
         pilot_output,
         column_config={
-            "排名": st.column_config.NumberColumn("排名", format="%d"),
+            "排名": st.column_config.NumberColumn(
+                "排名",
+                format="%d"
+            ),
             "試用優先分數": st.column_config.ProgressColumn(
                 "試用優先分數",
                 min_value=0,
                 max_value=100,
-                format="%.1f"
-            ),
-            "歷史紀錄數": st.column_config.NumberColumn(
-                "歷史紀錄數",
-                format="%d"
-            ),
-            "歷史批號數": st.column_config.NumberColumn(
-                "歷史批號數",
-                format="%d"
-            ),
-            "塗料總用量": st.column_config.NumberColumn(
-                "塗料總用量 (kg)",
                 format="%.1f"
             ),
             "稀釋劑總用量": st.column_config.NumberColumn(
@@ -960,60 +941,28 @@ with tab_pilot:
                 "加權添加比例 (%)",
                 format="%.1f"
             ),
-            "添加比例中位數": st.column_config.NumberColumn(
-                "添加比例中位數 (%)",
-                format="%.1f"
-            ),
-            "添加比例P25": st.column_config.NumberColumn(
-                "添加比例P25 (%)",
-                format="%.1f"
-            ),
-            "添加比例P75": st.column_config.NumberColumn(
-                "添加比例P75 (%)",
-                format="%.1f"
-            ),
             "添加比例穩定率": st.column_config.NumberColumn(
                 "添加比例穩定率 (%)",
                 format="%.1f"
             ),
-            "添加比例穩定度": st.column_config.TextColumn(
-                "添加比例穩定度"
-            ),
-            "相對四分位距（參考）": st.column_config.NumberColumn(
-                "相對四分位距（參考）",
-                format="%.1f"
-            ),
-            "添加比例CV（參考）": st.column_config.NumberColumn(
-                "添加比例CV（參考）",
-                format="%.1f"
-            ),
-            "添加前黏度中位數": st.column_config.NumberColumn(
-                "添加前黏度中位數 (秒)",
-                format="%.1f"
-            ),
-            "添加後黏度中位數": st.column_config.NumberColumn(
-                "添加後黏度中位數 (秒)",
-                format="%.1f"
-            ),
-            "添加後黏度P25": st.column_config.NumberColumn(
-                "添加後黏度P25 (秒)",
-                format="%.1f"
-            ),
-            "添加後黏度P75": st.column_config.NumberColumn(
-                "添加後黏度P75 (秒)",
-                format="%.1f"
-            ),
-            "降黏幅度中位數": st.column_config.NumberColumn(
-                "降黏幅度中位數 (秒)",
-                format="%.1f"
-            ),
-            "使用產線數": st.column_config.NumberColumn(
-                "使用產線數",
+            "歷史紀錄數": st.column_config.NumberColumn(
+                "歷史紀錄數",
                 format="%d"
             )
         },
         use_container_width=True,
         hide_index=True
+    )
+
+    st.caption(
+        "表中僅保留試用決策所需資訊；工程統計細節仍保留於計算邏輯中。"
+    )
+
+    pilot_table_html = pilot_output.to_html(
+        index=False,
+        border=0,
+        classes="summary-table",
+        justify="center"
     )
 
     # ------------------------------------------------------
@@ -1096,6 +1045,11 @@ if st.button("📥 Generate & Download Report", type="primary"):
                     .info-box {{ background-color: #ffffff; padding: 20px; border-radius: 10px; margin-bottom: 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-left: 5px solid #1f77b4; }}
                     .info-box p {{ margin: 8px 0; font-size: 16px; color: #333; }}
                     .chart-container {{ background-color: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 30px; width: 100%; overflow: hidden; }}
+                    .table-container {{ background-color: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 30px; overflow-x: auto; }}
+                    .summary-table {{ width: 100%; border-collapse: collapse; font-size: 14px; }}
+                    .summary-table th {{ background-color: #2F6B6D; color: white; padding: 10px 8px; border: 1px solid #d9e1e8; text-align: center; }}
+                    .summary-table td {{ padding: 9px 8px; border: 1px solid #d9e1e8; text-align: center; }}
+                    .summary-table tr:nth-child(even) {{ background-color: #f7f9fb; }}
                 </style>
             </head>
             <body>
@@ -1122,6 +1076,13 @@ if st.button("📥 Generate & Download Report", type="primary"):
                     {fig_html}
                 </div>
                 """
+
+            html_content += f"""
+                <h2>試用色號評估摘要表</h2>
+                <div class="table-container">
+                    {pilot_table_html}
+                </div>
+            """
 
             html_content += """
             </body>
