@@ -9,7 +9,6 @@ from docx import Document
 from docx.shared import Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-
 # =========================================================
 # PAGE CONFIGURATION
 # =========================================================
@@ -25,7 +24,6 @@ st.markdown(
     "to specific Resin, Coating Position, and Solvent types."
 )
 
-
 # =========================================================
 # 1. DATA LOADING
 # =========================================================
@@ -38,7 +36,6 @@ group_a = st.session_state.get("group_a_data", pd.DataFrame()).copy()
 if group_a.empty:
     st.error("❌ The dataset is empty. Please check the uploaded file.")
     st.stop()
-
 
 # =========================================================
 # 2. SIDEBAR FILTERS & DATA MAPPING
@@ -67,7 +64,6 @@ for col in ["Vendor", "Resin", "Solvent_Type"]:
     if col not in group_a.columns:
         group_a[col] = "Unknown"
 
-
 # -------------------------
 # Vendor Filter
 # -------------------------
@@ -86,7 +82,6 @@ vendor_df = group_a[
     group_a["Vendor"] == selected_vendor
 ].copy()
 
-
 # -------------------------
 # Resin Filter
 # -------------------------
@@ -103,7 +98,6 @@ if selected_resin_filter != "All Resins":
     vendor_df = vendor_df[
         vendor_df["Resin"] == selected_resin_filter
     ].copy()
-
 
 # -------------------------
 # Coating Position Filter
@@ -124,11 +118,11 @@ if selected_position != "All Positions":
         filtered_df["Position_UI"] == selected_position
     ].copy()
 
-
-# Grade A-B filter
-if "Grade" in filtered_df.columns:
+# Grade A-B Strict Filter
+grade_col = next((c for c in ["Grade", "Quality_Level", "等級"] if c in filtered_df.columns), None)
+if grade_col:
     filtered_df = filtered_df[
-        filtered_df["Grade"].isin(["A", "B", "A-B"])
+        filtered_df[grade_col].isin(["A", "B", "A-B"])
     ].copy()
 
 if filtered_df.empty:
@@ -138,7 +132,6 @@ if filtered_df.empty:
         f"Position: {selected_position}."
     )
     st.stop()
-
 
 # =========================================================
 # 3. DATA CLEANING & CALCULATIONS
@@ -157,7 +150,7 @@ for col in required_cols:
         errors="coerce"
     )
 
-# Keep valid dilution records only
+# Keep valid basic records
 filtered_df = filtered_df[
     (filtered_df["塗料重量"] > 0)
     & (filtered_df["添加重量"] > 0)
@@ -168,18 +161,61 @@ if filtered_df.empty:
     st.warning("⚠️ No valid dilution records after data cleaning.")
     st.stop()
 
+# =========================================================
+# 3.1 CHRONOLOGICAL SORTING & DEDUPLICATION LOGIC
+# =========================================================
+filtered_df["Batch_ID"] = filtered_df.get("塗料批號", "Unknown").astype(str).str.strip()
+filtered_df["Bucket_Number"] = filtered_df.get("塗料桶號", "Unknown").astype(str).str.strip()
+filtered_df["Paint_Code"] = filtered_df.get("塗料編號", "Unknown").astype(str).str.strip().str.upper()
 
+date_col = next((c for c in ["攪拌日期", "調整日期", "生產日期", "Date"] if c in filtered_df.columns), None)
+time_col = next((c for c in ["攪拌時間", "攪拌時間(迄)", "Time"] if c in filtered_df.columns), None)
+
+sort_cols = ["Batch_ID", "Bucket_Number"]
+if date_col:
+    filtered_df["_Analysis_Date"] = pd.to_datetime(filtered_df[date_col], errors="coerce")
+    sort_cols.append("_Analysis_Date")
+else:
+    filtered_df["_Analysis_Date"] = pd.NaT
+
+if time_col:
+    sort_cols.append(time_col)
+
+filtered_df = filtered_df.sort_values(by=sort_cols, ascending=True)
+
+special_paint_codes = ["PS30213X8"]
+is_special_paint = filtered_df["Paint_Code"].isin(special_paint_codes)
+
+# 1. Standard Paint Codes
+df_standard = filtered_df[~is_special_paint].copy()
+df_standard = df_standard.drop_duplicates(
+    subset=["Batch_ID", "Bucket_Number"], 
+    keep="last"
+)
+
+# 2. Special Paint Codes
+df_special = filtered_df[is_special_paint].copy()
+if not df_special.empty:
+    df_special["Operation_Date"] = df_special["_Analysis_Date"].dt.date
+    df_special = df_special.drop_duplicates(
+        subset=["Batch_ID", "Bucket_Number", "Operation_Date"], 
+        keep="last"
+    )
+    df_special = df_special.drop(columns=["Operation_Date"])
+
+# 3. Merge Back
+filtered_df = pd.concat([df_standard, df_special], ignore_index=True)
+filtered_df = filtered_df.sort_values(by=["Batch_ID", "Bucket_Number", "_Analysis_Date"])
+
+# =========================================================
+# 3.2 ENGINEERING CALCULATIONS
+# =========================================================
 # Viscosity reduction
 filtered_df["Delta_V"] = (
     filtered_df["黏度(秒)"]
     - filtered_df["黏度(秒)_1"]
 )
 
-# ---------------------------------------------------------
-# NEW LOGIC:
-# Dilution base = actual paint weight only
-# No 120 kg operating paint is included
-# ---------------------------------------------------------
 filtered_df["Dilution_Base_kg"] = filtered_df["塗料重量"]
 
 # Solvent ratio (%)
@@ -216,7 +252,6 @@ if filtered_df.empty:
     st.warning("⚠️ No valid records remain after calculations.")
     st.stop()
 
-
 # =========================================================
 # 4. HIERARCHY SUMMARY
 # =========================================================
@@ -228,7 +263,6 @@ def calculate_advanced_metrics(group):
             "Sat_Limit": np.nan
         })
 
-    # Expanded Bins for finer granularity
     bins = [0, 3, 5] + list(range(7, 26)) + [np.inf]
     labels = ["0-3", "3-5", "5-7"] + [f"{i}-{i+1}" for i in range(7, 25)] + [">25"]
     midpoints = [1.5, 4, 6] + [i + 0.5 for i in range(7, 25)] + [26]
@@ -321,8 +355,6 @@ if tree_summary.empty:
     st.warning("⚠️ No valid paint consumption data available.")
     st.stop()
 
-
-# =========================================================
 # =========================================================
 # 5. GRAPHVIZ HIERARCHY (4-LEVEL STABLE LAYOUT)
 # =========================================================
@@ -458,6 +490,7 @@ for resin in tree_summary["Resin"].unique():
             graph.edge(pos_id, leaf_id)
 
 st.graphviz_chart(graph, use_container_width=True)
+
 # =========================================================
 # 6. SATURATION ANALYSIS
 # =========================================================
@@ -526,15 +559,11 @@ baseline_records = 0
 
 
 if len(saturation_df) < 5:
-
     st.warning(
         "⚠️ Historical records are insufficient for saturation analysis "
         "(minimum 5 records required)."
     )
-
 else:
-
-    # Expanded Bins for finer UI granularity
     bins = [0, 3, 5] + list(range(7, 26)) + [np.inf]
     labels = ["0–3%", "3–5%", "5–7%"] + [f"{i}–{i+1}%" for i in range(7, 25)] + [">25%"]
     midpoints = [1.5, 4, 6] + [i + 0.5 for i in range(7, 25)] + [26]
@@ -561,13 +590,10 @@ else:
     ].copy()
 
     if efficiency_summary.empty:
-
         st.warning(
             "⚠️ Not enough records in each solvent-ratio interval."
         )
-
     else:
-
         baseline_efficiency = efficiency_summary[
             "Median_Efficiency"
         ].iloc[0]
@@ -665,13 +691,14 @@ else:
 
         ax.set_ylim(y_min, y_max)
 
-        alert_color = "red"
+        ref_color = "DeepSkyBlue"
+        fill_color = "red"
 
         if abs(stop_ratio - warning_ratio) < 0.2:
 
             ax.axvline(
                 stop_ratio,
-                color=alert_color,
+                color=ref_color,
                 linestyle="--",
                 linewidth=2.2
             )
@@ -679,7 +706,7 @@ else:
             ax.axvspan(
                 stop_ratio,
                 x_max,
-                color=alert_color,
+                color=fill_color,
                 alpha=0.10
             )
 
@@ -691,14 +718,14 @@ else:
                 ),
                 xytext=(8, 0),
                 textcoords="offset points",
-                color=alert_color,
+                color=ref_color,
                 fontsize=10,
                 fontweight="bold",
                 va="center",
                 ha="left",
                 bbox=dict(
                     facecolor="white",
-                    edgecolor=alert_color,
+                    edgecolor=ref_color,
                     boxstyle="round,pad=0.3",
                     alpha=0.9
                 )
@@ -708,14 +735,14 @@ else:
 
             ax.axvline(
                 warning_ratio,
-                color=alert_color,
+                color=ref_color,
                 linestyle=":",
                 linewidth=2
             )
 
             ax.axvline(
                 stop_ratio,
-                color=alert_color,
+                color=ref_color,
                 linestyle="--",
                 linewidth=2.2
             )
@@ -723,14 +750,14 @@ else:
             ax.axvspan(
                 warning_ratio,
                 stop_ratio,
-                color=alert_color,
+                color=fill_color,
                 alpha=0.05
             )
 
             ax.axvspan(
                 stop_ratio,
                 x_max,
-                color=alert_color,
+                color=fill_color,
                 alpha=0.10
             )
 
@@ -742,7 +769,7 @@ else:
                 ),
                 xytext=(-8, 0),
                 textcoords="offset points",
-                color=alert_color,
+                color=ref_color,
                 fontsize=10,
                 fontweight="bold",
                 va="center",
@@ -762,14 +789,14 @@ else:
                 ),
                 xytext=(8, 0),
                 textcoords="offset points",
-                color=alert_color,
+                color=ref_color,
                 fontsize=10,
                 fontweight="bold",
                 va="center",
                 ha="left",
                 bbox=dict(
                     facecolor="white",
-                    edgecolor=alert_color,
+                    edgecolor=ref_color,
                     boxstyle="round,pad=0.3",
                     alpha=0.9
                 )
@@ -1011,7 +1038,7 @@ try:
         chart_caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
         # =========================================================
-        # 3. KEY RESULTS (KEEP ORIGINAL)
+        # 3. KEY RESULTS
         # =========================================================
         doc.add_heading(
             "3. Key Results",
@@ -1042,43 +1069,38 @@ try:
         )
 
         # =========================================================
-        # 4. SATURATION ANALYSIS DATA (ADDED AS REQUESTED)
+        # 4. SATURATION ANALYSIS DATA 
         # =========================================================
         doc.add_heading(
             "4. Saturation Analysis Data",
             level=1
         )
         
-        # Initialize table with 4 columns
         detail_table = doc.add_table(rows=1, cols=4)
         detail_table.style = "Table Grid"
 
-        # Set column headers
         detail_hdr = detail_table.rows[0].cells
         detail_hdr[0].text = "Solvent Ratio Range"
         detail_hdr[1].text = "Records"
         detail_hdr[2].text = "Median Efficiency (s/%)"
         detail_hdr[3].text = "Efficiency Retention (%)"
 
-        # Bold table headers
         for cell in detail_hdr:
             for paragraph in cell.paragraphs:
                 for run in paragraph.runs:
                     run.bold = True
 
-        # Populate data from efficiency_summary dataframe
         for _, row in efficiency_summary.iterrows():
             row_cells = detail_table.add_row().cells
             row_cells[0].text = str(row["Ratio_Bin"])
             row_cells[1].text = str(int(row["Records"]))
             row_cells[2].text = f"{row['Median_Efficiency']:.2f}"
             
-            # Format percentage to remove trailing zeros matching the app
             retention_str = f"{row['Efficiency_Retention_Percent']:.4f}".rstrip('0').rstrip('.')
             row_cells[3].text = retention_str
 
         # =========================================================
-        # 5. BASELINE SAMPLE CALCULATION (CHANGE NUMBER FROM 4 TO 5)
+        # 5. BASELINE SAMPLE CALCULATION 
         # =========================================================
         doc.add_heading(
             "5. 基準數據判定與計算範例 "
