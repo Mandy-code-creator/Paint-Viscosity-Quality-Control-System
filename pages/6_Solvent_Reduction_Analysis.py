@@ -210,7 +210,7 @@ fig_tree = px.treemap(
     path=[px.Constant("Total"), "Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint_Code"],
     values="添加重量", 
     color="Resin",  
-    color_discrete_sequence=px.colors.qualitative.Pastel,
+    color_discrete_sequence=px.colors.qualitative.T10,
     custom_data=["Delta_V", "Solvent_Ratio_Percent"],
     title=f"Hierarchical Breakdown of Solvent Usage (kg)<br><sup>Filters: {filter_details}</sup>",
     height=700
@@ -250,58 +250,58 @@ with tab_ranking:
     
     ch1, ch2 = st.columns(2)
     with ch1:
-        # Biểu đồ này chỉ hiển thị trên app, KHÔNG xuất ra báo cáo
+        # This chart is only displayed in the app, NOT exported to the report
         df_melt = summary_df.melt(id_vars="Paint_Code", value_vars=["Total_Paint_kg", "Total_Solvent_kg"])
         df_melt["variable"] = df_melt["variable"].map({"Total_Paint_kg": "塗料 (Paint)", "Total_Solvent_kg": "稀釋劑 (Solvent)"})
         
         fig1 = px.bar(
             df_melt, x="value", y="Paint_Code", color="variable", barmode="group", orientation='h', 
-            height=chart_height, color_discrete_map={"塗料 (Paint)": "#5B8FF9", "稀釋劑 (Solvent)": "#F6BD16"}
+            height=chart_height, color_discrete_map={"塗料 (Paint)": "#1F77B4", "稀釋劑 (Solvent)": "#FF7F0E"}
         )
         fig1.update_yaxes(dtick=1, title="", categoryorder="total ascending")
         fig1.update_xaxes(title="Weight (kg)")
         fig1.update_layout(title="Paint vs Solvent Usage", legend_title_text="", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
         st.plotly_chart(fig1, use_container_width=True)
-        # Đã xóa exported_figs["2. Paint vs Solvent (kg)"] = fig1
+        # Removed exported_figs["2. Paint vs Solvent (kg)"] = fig1
 
     with ch2:
-        # Biểu đồ này chỉ hiển thị trên app, KHÔNG xuất ra báo cáo
+        # This chart is only displayed in the app, NOT exported to the report
         sorted_df = summary_df.sort_values("Weighted_Ratio_Percent", ascending=True)
         fig2 = px.bar(
             sorted_df, x="Weighted_Ratio_Percent", y="Paint_Code", orientation='h', text_auto='.2f', 
-            height=chart_height, color_discrete_sequence=["#5B8FF9"]
+            height=chart_height, color_discrete_sequence=["#1F77B4"]
         )
         fig2.update_traces(textposition="outside", cliponaxis=False)
         fig2.update_yaxes(dtick=1, title="")
         fig2.update_xaxes(title="Ratio (%)")
         fig2.update_layout(title="Weighted Solvent Ratio (%)")
         st.plotly_chart(fig2, use_container_width=True)
-        # Đã xóa exported_figs["3. Weighted Solvent Ratio"] = fig2
+        # Removed exported_figs["3. Weighted Solvent Ratio"] = fig2
 
     st.markdown("---")
     
     # Dual Axis Chart
     fig_dual = go.Figure()
     
-    # Cột Paint (kg) - Thêm text hiển thị giá trị
+    # Paint (kg) column - Display text values
     fig_dual.add_trace(go.Bar(
         x=summary_df["Paint_Code"], 
         y=summary_df["Total_Paint_kg"], 
         name="Paint (kg)", 
-        marker_color="#5B8FF9", 
+        marker_color="#1F77B4", 
         yaxis="y1",
-        text=summary_df["Total_Paint_kg"].apply(lambda x: f"{x:,.0f}"), # Định dạng số có dấu phẩy
+        text=summary_df["Total_Paint_kg"].apply(lambda x: f"{x:,.0f}"), # Number format with comma
         textposition="auto"
     ))
     
-    # Cột Solvent (kg) - Thêm text hiển thị giá trị
+    # Solvent (kg) column - Display text values
     fig_dual.add_trace(go.Bar(
         x=summary_df["Paint_Code"], 
         y=summary_df["Total_Solvent_kg"], 
         name="Solvent (kg)", 
-        marker_color="#F6BD16", 
+        marker_color="#FF7F0E", 
         yaxis="y1",
-        text=summary_df["Total_Solvent_kg"].apply(lambda x: f"{x:,.0f}"), # Định dạng số có dấu phẩy
+        text=summary_df["Total_Solvent_kg"].apply(lambda x: f"{x:,.0f}"), # Number format with comma
         textposition="auto"
     ))
     
@@ -338,7 +338,7 @@ with tab_ranking:
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         height=600,
         uniformtext_minsize=8, 
-        uniformtext_mode='hide' # Tự động ẩn text nếu cột quá nhỏ không đủ chỗ chứa
+        uniformtext_mode='hide' # Auto-hide text if column is too small
     )
     st.plotly_chart(fig_dual, use_container_width=True)
     exported_figs["4. Dual Axis Usage vs Ratio"] = fig_dual
@@ -356,11 +356,11 @@ with tab_detail:
         detail_df["Record_Index"] = detail_df.index + 1
         
         fig3 = go.Figure()
-        fig3.add_trace(go.Scatter(x=detail_df["Record_Index"], y=detail_df["黏度(秒)"], mode="lines+markers", name="Before Viscosity", marker=dict(color="#5B8FF9", size=8), yaxis="y1"))
-        fig3.add_trace(go.Scatter(x=detail_df["Record_Index"], y=detail_df["黏度(秒)_1"], mode="lines+markers", name="After Viscosity", marker=dict(color="#5AD8A6", size=8), yaxis="y1"))
+        fig3.add_trace(go.Scatter(x=detail_df["Record_Index"], y=detail_df["黏度(秒)"], mode="lines+markers", name="Before Viscosity", marker=dict(color="#1F77B4", size=8), yaxis="y1"))
+        fig3.add_trace(go.Scatter(x=detail_df["Record_Index"], y=detail_df["黏度(秒)_1"], mode="lines+markers", name="After Viscosity", marker=dict(color="#2CA02C", size=8), yaxis="y1"))
         
         if "溫度" in detail_df.columns and not detail_df["溫度"].isna().all():
-            fig3.add_trace(go.Scatter(x=detail_df["Record_Index"], y=detail_df["溫度"], mode="lines+markers", name="Temperature (°C)", marker=dict(color="#F6BD16", size=8, symbol="diamond"), line=dict(color="#F6BD16", width=2, dash="dot"), yaxis="y2"))
+            fig3.add_trace(go.Scatter(x=detail_df["Record_Index"], y=detail_df["溫度"], mode="lines+markers", name="Temperature (°C)", marker=dict(color="#FF7F0E", size=8, symbol="diamond"), line=dict(color="#FF7F0E", width=2, dash="dot"), yaxis="y2"))
             chart_title = "Viscosity & Temperature Variation (Before vs After)"
         else:
             chart_title = "Viscosity Variation (Before vs After)"
@@ -376,7 +376,7 @@ with tab_detail:
 
     with ch4:
         line_usage = build_summary(detail_df, ["線別"]).sort_values("Total_Solvent_kg")
-        fig4 = px.bar(line_usage, x="Total_Solvent_kg", y="線別", text="Weighted_Ratio_Percent", orientation='h', title=f"Solvent Usage by Line<br><sup>Filters: {detail_title_filter}</sup>", color_discrete_sequence=["#5B8FF9"])
+        fig4 = px.bar(line_usage, x="Total_Solvent_kg", y="線別", text="Weighted_Ratio_Percent", orientation='h', title=f"Solvent Usage by Line<br><sup>Filters: {detail_title_filter}</sup>", color_discrete_sequence=["#1F77B4"])
         fig4.update_traces(texttemplate='%{text:.2f}%', textposition='outside')
         fig4.update_yaxes(title="")
         fig4.update_xaxes(title="Total Solvent (kg)")
@@ -401,7 +401,7 @@ with tab_line:
             exported_figs["7. Line Comparison - Viscosity Drop"] = fig5
 
         with ch6:
-            fig6 = px.bar(line_summary.sort_values("Weighted_Ratio_Percent"), x="Weighted_Ratio_Percent", y="線別", orientation='h', text_auto='.2f', title="Weighted Solvent Ratio", color_discrete_sequence=["#5AD8A6"])
+            fig6 = px.bar(line_summary.sort_values("Weighted_Ratio_Percent"), x="Weighted_Ratio_Percent", y="線別", orientation='h', text_auto='.2f', title="Weighted Solvent Ratio", color_discrete_sequence=["#1F77B4"])
             fig6.update_yaxes(title="")
             st.plotly_chart(fig6, use_container_width=True)
             exported_figs["8. Line Comparison - Solvent Ratio"] = fig6
@@ -755,9 +755,9 @@ with tab_pilot:
     # Main chart: Pilot ranking
     # ------------------------------------------------------
     color_map = {
-        "優先試用": "#2F6B6D",
-        "可進一步評估": "#6F8FAF",
-        "暫不建議": "#C9C5BE"
+        "優先試用": "#1F77B4",         # Corporate Blue
+        "可進一步評估": "#F39C12",      # BI Amber
+        "暫不建議": "#95A5A6"          # Neutral Gray
     }
 
     pilot_chart_df = (
@@ -768,10 +768,10 @@ with tab_pilot:
 
     pilot_chart_df["Chart_Label"] = pilot_chart_df.apply(
         lambda row: (
-            f"分數 {row['Pilot_Score']:.1f}  ｜  "
-            f"稀釋劑 {row['Total_Solvent_kg']:,.0f} kg  ｜  "
-            f"添加比例 {row['Weighted_Ratio_Percent']:.1f}%  ｜  "
-            f"穩定率 {row['Stable_Coverage']:.0%}"
+            f"{row['Pilot_Score']:.1f}分  ｜  "
+            f"{row['Total_Solvent_kg']:,.0f}kg  ｜  "
+            f"{row['Weighted_Ratio_Percent']:.1f}%  ｜  "
+            f"{row['Stable_Coverage']:.0%}"
         ),
         axis=1
     )
@@ -794,7 +794,7 @@ with tab_pilot:
         ],
         title=(
             "各色號預調漆試用優先順序"
-            f"<br><sup>分數越高代表越適合優先評估｜{filter_details}</sup>"
+            f"<br><sup>綜合考量稀釋劑用量、塗料用量、添加比例、穩定率及歷史資料量｜{filter_details}</sup>"
         ),
         height=max(560, len(pilot_top_df) * 56)
     )
@@ -837,7 +837,7 @@ with tab_pilot:
     fig_pilot_score.update_layout(
         plot_bgcolor="white",
         paper_bgcolor="white",
-        margin=dict(l=110, r=430, t=145, b=80),
+        margin=dict(l=110, r=220, t=150, b=80),
         bargap=0.28,
         font=dict(
             family="Arial, Microsoft JhengHei, sans-serif",
@@ -864,17 +864,6 @@ with tab_pilot:
     )
 
     st.plotly_chart(fig_pilot_score, use_container_width=True)
-
-    st.info(
-        "圖中數字依序為："
-        "① 試用優先分數；"
-        "② 稀釋劑歷史總用量；"
-        "③ 加權添加比例；"
-        "④ 添加比例穩定率。"
-        "分數越高代表越適合優先評估預調漆；"
-        "穩定率越高代表歷史添加比例越集中。"
-    )
-
     exported_figs["9. Paint Code Pilot Priority Ranking"] = fig_pilot_score
 
     # ------------------------------------------------------
