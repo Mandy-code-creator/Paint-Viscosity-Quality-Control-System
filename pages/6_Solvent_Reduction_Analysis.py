@@ -280,10 +280,39 @@ with tab_ranking:
     
     # Dual Axis Chart
     fig_dual = go.Figure()
-    fig_dual.add_trace(go.Bar(x=summary_df["Paint_Code"], y=summary_df["Total_Paint_kg"], name="Paint (kg)", marker_color="#5B8FF9", yaxis="y1"))
-    fig_dual.add_trace(go.Bar(x=summary_df["Paint_Code"], y=summary_df["Total_Solvent_kg"], name="Solvent (kg)", marker_color="#F6BD16", yaxis="y1"))
+    
+    # Cột Paint (kg) - Thêm text hiển thị giá trị
+    fig_dual.add_trace(go.Bar(
+        x=summary_df["Paint_Code"], 
+        y=summary_df["Total_Paint_kg"], 
+        name="Paint (kg)", 
+        marker_color="#5B8FF9", 
+        yaxis="y1",
+        text=summary_df["Total_Paint_kg"].apply(lambda x: f"{x:,.0f}"), # Định dạng số có dấu phẩy
+        textposition="auto"
+    ))
+    
+    # Cột Solvent (kg) - Thêm text hiển thị giá trị
+    fig_dual.add_trace(go.Bar(
+        x=summary_df["Paint_Code"], 
+        y=summary_df["Total_Solvent_kg"], 
+        name="Solvent (kg)", 
+        marker_color="#F6BD16", 
+        yaxis="y1",
+        text=summary_df["Total_Solvent_kg"].apply(lambda x: f"{x:,.0f}"), # Định dạng số có dấu phẩy
+        textposition="auto"
+    ))
+    
     # Implementation of the Deep Sky Blue visual standard
-    fig_dual.add_trace(go.Scatter(x=summary_df["Paint_Code"], y=summary_df["Weighted_Ratio_Percent"], name="Solvent Ratio (%)", mode="lines+markers", line=dict(color="DeepSkyBlue", width=3), marker=dict(size=8), yaxis="y2"))
+    fig_dual.add_trace(go.Scatter(
+        x=summary_df["Paint_Code"], 
+        y=summary_df["Weighted_Ratio_Percent"], 
+        name="Solvent Ratio (%)", 
+        mode="lines+markers", 
+        line=dict(color="DeepSkyBlue", width=3), 
+        marker=dict(size=8), 
+        yaxis="y2"
+    ))
     
     for i, row in summary_df.iterrows():
         fig_dual.add_annotation(
@@ -297,9 +326,17 @@ with tab_ranking:
         title=f"Paint & Solvent Usage vs. Solvent Ratio<br><sup>Filters Applied: {filter_details}</sup>",
         xaxis=dict(title="Paint Code"),
         yaxis=dict(title="Weight (kg)", side="left", showgrid=False),
-        yaxis2=dict(title="Solvent Ratio (%)", overlaying="y", side="right", showgrid=False, range=[0, summary_df["Weighted_Ratio_Percent"].max() * 1.25]),
+        yaxis2=dict(
+            title="Solvent Ratio (%)", 
+            overlaying="y", 
+            side="right", 
+            showgrid=False, 
+            range=[0, summary_df["Weighted_Ratio_Percent"].max() * 1.25]
+        ),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        height=600
+        height=600,
+        uniformtext_minsize=8, 
+        uniformtext_mode='hide' # Tự động ẩn text nếu cột quá nhỏ không đủ chỗ chứa
     )
     st.plotly_chart(fig_dual, use_container_width=True)
     exported_figs["4. Dual Axis Usage vs Ratio"] = fig_dual
