@@ -404,7 +404,52 @@ with tab_line:
             fig6.update_yaxes(title="")
             st.plotly_chart(fig6, use_container_width=True)
             exported_figs["8. Line Comparison - Solvent Ratio"] = fig6
+# ----- TAB 4: TRIAL PAINT CODE EVALUATION -----
+with tab_evaluation:
+    st.subheader("4. 試用色號導入評估 (Trial Paint Code Evaluation)")
+    st.markdown("依據塗料使用量、稀釋劑添加量、添加比例穩定性及歷史資料量，評估各色號導入預調漆之優先順序。")
 
+    # 1. Tổng hợp dữ liệu theo Paint_Code
+    eval_df = filter_df.groupby("Paint_Code").agg(
+        Total_Paint=("塗料重量", "sum"),
+        Total_Solvent=("添加重量", "sum"),
+        Record_Count=("Paint_Code", "size"),
+        Median_Ratio=("Solvent_Ratio_Percent", "median"),
+        P10_Ratio=("Solvent_Ratio_Percent", lambda x: x.quantile(0.1)),
+        P90_Ratio=("Solvent_Ratio_Percent", lambda x: x.quantile(0.9)),
+        CV_Ratio=("Solvent_Ratio_Percent", lambda x: x.std() / x.mean() if x.mean() != 0 else np.nan),
+        Avg_DeltaV=("Delta_V", "median")
+    ).reset_index()
+
+    # 2. Logic đánh giá
+    def evaluate_code(row):
+        # Loại các mã dữ liệu ít hoặc sản lượng thấp
+        if row["Record_Count"] < 10 or row["Total_Paint"] < 500:
+            return "暫不建議"
+        # Đánh giá dựa trên độ ổn định (CV < 0.15 là ổn định) và sản lượng
+        if row["CV_Ratio"] < 0.15 and row["Total_Paint"] > 2000:
+            return "優先試用"
+        return "可進一步評估"
+
+    eval_df["Recommendation"] = eval_df.apply(evaluate_code, axis=1)
+
+    # 3. Hiển thị bảng kết quả
+    st.dataframe(
+        eval_df.sort_values("Total_Paint", ascending=False),
+        column_config={
+            "Recommendation": st.column_config.SelectboxColumn(
+                "評估結論 (Recommendation)",
+                options=["優先試用", "可進一步評估", "暫不建議"]
+            ),
+            "CV_Ratio": st.column_config.NumberColumn("CV (Stability)", format="%.3f"),
+            "Total_Paint": st.column_config.NumberColumn("Total Paint (kg)", format="%.0f")
+        },
+        use_container_width=True
+    )
+
+    # 4. Xuất CSV để Sếp xem file
+    csv = eval_df.to_csv(index=False).encode('utf-8')
+    st.download_button("📥 Download Evaluation Table", csv, "Trial_Evaluation.csv", "text/csv")
 # ==========================================
 # 7. EXPORT INTERACTIVE HTML REPORT
 # ==========================================
