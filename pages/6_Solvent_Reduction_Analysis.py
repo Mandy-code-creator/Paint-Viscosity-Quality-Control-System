@@ -755,9 +755,9 @@ with tab_pilot:
     # Main chart: Pilot ranking
     # ------------------------------------------------------
     color_map = {
-        "優先試用": "#2F5597",
-        "可進一步評估": "#7F8C8D",
-        "暫不建議": "#B7B7B7"
+        "優先試用": "#2F6B6D",
+        "可進一步評估": "#6F8FAF",
+        "暫不建議": "#C9C5BE"
     }
 
     pilot_chart_df = (
@@ -768,10 +768,10 @@ with tab_pilot:
 
     pilot_chart_df["Chart_Label"] = pilot_chart_df.apply(
         lambda row: (
-            f"{row['Pilot_Score']:.1f}分  ｜  "
-            f"{row['Total_Solvent_kg']:,.0f}kg  ｜  "
-            f"{row['Weighted_Ratio_Percent']:.1f}%  ｜  "
-            f"{row['Stable_Coverage']:.0%}"
+            f"分數 {row['Pilot_Score']:.1f}  ｜  "
+            f"稀釋劑 {row['Total_Solvent_kg']:,.0f} kg  ｜  "
+            f"添加比例 {row['Weighted_Ratio_Percent']:.1f}%  ｜  "
+            f"穩定率 {row['Stable_Coverage']:.0%}"
         ),
         axis=1
     )
@@ -794,7 +794,7 @@ with tab_pilot:
         ],
         title=(
             "各色號預調漆試用優先順序"
-            f"<br><sup>綜合考量稀釋劑用量、塗料用量、添加比例、穩定率及歷史資料量｜{filter_details}</sup>"
+            f"<br><sup>分數越高代表越適合優先評估｜{filter_details}</sup>"
         ),
         height=max(560, len(pilot_top_df) * 56)
     )
@@ -837,7 +837,7 @@ with tab_pilot:
     fig_pilot_score.update_layout(
         plot_bgcolor="white",
         paper_bgcolor="white",
-        margin=dict(l=110, r=220, t=150, b=80),
+        margin=dict(l=110, r=430, t=145, b=80),
         bargap=0.28,
         font=dict(
             family="Arial, Microsoft JhengHei, sans-serif",
@@ -864,6 +864,17 @@ with tab_pilot:
     )
 
     st.plotly_chart(fig_pilot_score, use_container_width=True)
+
+    st.info(
+        "圖中數字依序為："
+        "① 試用優先分數；"
+        "② 稀釋劑歷史總用量；"
+        "③ 加權添加比例；"
+        "④ 添加比例穩定率。"
+        "分數越高代表越適合優先評估預調漆；"
+        "穩定率越高代表歷史添加比例越集中。"
+    )
+
     exported_figs["9. Paint Code Pilot Priority Ranking"] = fig_pilot_score
 
     # ------------------------------------------------------
