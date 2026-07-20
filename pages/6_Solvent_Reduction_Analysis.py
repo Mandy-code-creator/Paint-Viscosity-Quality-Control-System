@@ -231,10 +231,12 @@ st.markdown("<br>", unsafe_allow_html=True)
 # ==========================================
 # 6. TABS & VISUALIZATION
 # ==========================================
-tab_ranking, tab_detail, tab_line = st.tabs([
-    "1️⃣ 塗料消耗排名 (Top 10 Paint Code Ranking)", 
-    "2️⃣ 塗料詳細分析 (Paint Code Details)", 
-    "3️⃣ 產線黏度比較 (Line Comparison)"
+# Cập nhật dòng này để khai báo tab_evaluation
+tab_ranking, tab_detail, tab_line, tab_evaluation = st.tabs([
+    "1️⃣ 塗料消耗排名 (Top 10)", 
+    "2️⃣ 塗料詳細分析 (Details)", 
+    "3️⃣ 產線黏度比較 (Line Comparison)",
+    "4️⃣ 試用色號評估 (Evaluation)"
 ])
 
 # ----- TAB 1: RANKING -----
