@@ -6,6 +6,13 @@ import plotly.graph_objects as go
 import streamlit as st
 
 
+@st.cache_data(show_spinner=False)
+def dataframe_to_csv_bytes(dataframe: pd.DataFrame) -> bytes:
+    """Convert a dataframe to UTF-8 BOM CSV once and reuse the result."""
+    return dataframe.to_csv(index=False).encode("utf-8-sig")
+
+
+
 # =========================================================
 # 1. PAGE CONFIGURATION
 # =========================================================
@@ -970,13 +977,14 @@ if selected_overview_codes:
         height=min(760, max(240, len(wide_filtered) * 35 + 38)),
     )
 
-    wide_csv = wide_filtered.to_csv(index=False).encode("utf-8-sig")
+    wide_csv = dataframe_to_csv_bytes(wide_filtered)
     st.download_button(
         label="下載全色號季節橫向比較表 CSV",
         data=wide_csv,
         file_name="Seasonal_Viscosity_All_Paint_Codes_Wide.csv",
         mime="text/csv",
         key="download_wide_overview_csv",
+        on_click="ignore",
     )
 
 else:
@@ -1614,13 +1622,14 @@ else:
 st.markdown("---")
 st.subheader("📥 資料匯出")
 
-csv_data = season_display.to_csv(index=False).encode("utf-8-sig")
+csv_data = dataframe_to_csv_bytes(season_display)
 
 st.download_button(
     label="下載季節黏度比較表 CSV",
     data=csv_data,
     file_name=f"Seasonal_Viscosity_{selected_paint_code}.csv",
     mime="text/csv",
+    on_click="ignore",
 )
 
 
@@ -1744,7 +1753,7 @@ if st.button("產生互動式季節分析報告 HTML", type="primary"):
         </html>
         """
 
-        html_buffer = io.BytesIO(html_content.encode("utf-8"))
+        html_buffer = html_content.encode("utf-8")
 
         st.success("✅ 季節分析報告已產生。")
 
@@ -1758,6 +1767,7 @@ if st.button("產生互動式季節分析報告 HTML", type="primary"):
                 f".html"
             ),
             mime="text/html",
+            on_click="ignore",
         )
 
     except Exception as error:
