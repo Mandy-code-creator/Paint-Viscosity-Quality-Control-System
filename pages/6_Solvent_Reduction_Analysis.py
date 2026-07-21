@@ -101,7 +101,11 @@ df_standard = df_standard.drop_duplicates(
 # Process Special Paint Codes
 df_special = df[is_special_paint].copy()
 if not df_special.empty:
-    
+    df_special["Operation_Date"] = df_special["_Analysis_Date"].dt.date
+    df_special = df_special.drop_duplicates(
+        subset=["Batch_ID", "Bucket_Number", "Operation_Date"], 
+        keep="last"
+    )
     df_special = df_special.drop(columns=["Operation_Date"])
 
 # Merge and Restore Chronological Order
@@ -246,7 +250,7 @@ with tab_ranking:
     
     ch1, ch2 = st.columns(2)
     with ch1:
-        # Biểu đồ này chỉ hiển thị trên app, KHÔNG xuất ra báo cáo
+        # This chart is only displayed in the app, NOT exported to the report
         df_melt = summary_df.melt(id_vars="Paint_Code", value_vars=["Total_Paint_kg", "Total_Solvent_kg"])
         df_melt["variable"] = df_melt["variable"].map({"Total_Paint_kg": "塗料 (Paint)", "Total_Solvent_kg": "稀釋劑 (Solvent)"})
         
@@ -258,10 +262,10 @@ with tab_ranking:
         fig1.update_xaxes(title="Weight (kg)")
         fig1.update_layout(title="Paint vs Solvent Usage", legend_title_text="", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
         st.plotly_chart(fig1, use_container_width=True)
-        # Đã xóa exported_figs["2. Paint vs Solvent (kg)"] = fig1
+        # Removed exported_figs["2. Paint vs Solvent (kg)"] = fig1
 
     with ch2:
-        # Biểu đồ này chỉ hiển thị trên app, KHÔNG xuất ra báo cáo
+        # This chart is only displayed in the app, NOT exported to the report
         sorted_df = summary_df.sort_values("Weighted_Ratio_Percent", ascending=True)
         fig2 = px.bar(
             sorted_df, x="Weighted_Ratio_Percent", y="Paint_Code", orientation='h', text_auto='.2f', 
@@ -272,32 +276,32 @@ with tab_ranking:
         fig2.update_xaxes(title="Ratio (%)")
         fig2.update_layout(title="Weighted Solvent Ratio (%)")
         st.plotly_chart(fig2, use_container_width=True)
-        # Đã xóa exported_figs["3. Weighted Solvent Ratio"] = fig2
+        # Removed exported_figs["3. Weighted Solvent Ratio"] = fig2
 
     st.markdown("---")
     
     # Dual Axis Chart
     fig_dual = go.Figure()
     
-    # Cột Paint (kg) - Thêm text hiển thị giá trị
+    # Paint (kg) column - Add text to display value
     fig_dual.add_trace(go.Bar(
         x=summary_df["Paint_Code"], 
         y=summary_df["Total_Paint_kg"], 
         name="Paint (kg)", 
         marker_color="#5B8FF9", 
         yaxis="y1",
-        text=summary_df["Total_Paint_kg"].apply(lambda x: f"{x:,.0f}"), # Định dạng số có dấu phẩy
+        text=summary_df["Total_Paint_kg"].apply(lambda x: f"{x:,.0f}"), # Comma format
         textposition="auto"
     ))
     
-    # Cột Solvent (kg) - Thêm text hiển thị giá trị
+    # Solvent (kg) column - Add text to display value
     fig_dual.add_trace(go.Bar(
         x=summary_df["Paint_Code"], 
         y=summary_df["Total_Solvent_kg"], 
         name="Solvent (kg)", 
         marker_color="#F6BD16", 
         yaxis="y1",
-        text=summary_df["Total_Solvent_kg"].apply(lambda x: f"{x:,.0f}"), # Định dạng số có dấu phẩy
+        text=summary_df["Total_Solvent_kg"].apply(lambda x: f"{x:,.0f}"), # Comma format
         textposition="auto"
     ))
     
@@ -334,7 +338,7 @@ with tab_ranking:
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         height=600,
         uniformtext_minsize=8, 
-        uniformtext_mode='hide' # Tự động ẩn text nếu cột quá nhỏ không đủ chỗ chứa
+        uniformtext_mode='hide' # Automatically hide text if the column is too small
     )
     st.plotly_chart(fig_dual, use_container_width=True)
     exported_figs["4. Dual Axis Usage vs Ratio"] = fig_dual
@@ -772,7 +776,7 @@ with tab_pilot:
         axis=1
     )
 
-    st.markdown("### 圖1　各色號預調漆試用優先順序")
+    st.markdown("### 圖1 各色號預調漆試用優先順序")
     st.caption(
         "依稀釋劑使用量、塗料使用量、添加比例、穩定率及歷史資料量綜合評估。"
     )
@@ -920,6 +924,10 @@ with tab_pilot:
         "Historical_Records": "歷史紀錄數",
         "Evaluation_Result": "評估結果"
     })
+
+    # NEW: Round numerical columns to 1 decimal place to strictly format DataFrames/HTML/CSV exports
+    cols_to_round = ["試用優先分數", "稀釋劑總用量", "加權添加比例", "添加比例穩定率"]
+    pilot_output[cols_to_round] = pilot_output[cols_to_round].round(1)
 
     st.dataframe(
         pilot_output,
