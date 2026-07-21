@@ -101,11 +101,7 @@ df_standard = df_standard.drop_duplicates(
 # Process Special Paint Codes
 df_special = df[is_special_paint].copy()
 if not df_special.empty:
-    df_special["Operation_Date"] = df_special["_Analysis_Date"].dt.date
-    df_special = df_special.drop_duplicates(
-        subset=["Batch_ID", "Bucket_Number", "Operation_Date"], 
-        keep="last"
-    )
+    
     df_special = df_special.drop(columns=["Operation_Date"])
 
 # Merge and Restore Chronological Order
