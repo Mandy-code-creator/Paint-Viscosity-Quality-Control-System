@@ -464,6 +464,12 @@ with tab_pilot:
             "暫不考慮 (Ignore)": "#C9C5BE"
         }
 
+        # Label optimization to prevent clutter (only label points above the volume limit)
+        pilot_df["Display_Label"] = pilot_df.apply(
+            lambda x: x["Paint_Code"] if x["Total_Solvent_kg"] >= target_vol_limit else "", 
+            axis=1
+        )
+
         # Plotly Scatter Matrix
         fig_matrix = px.scatter(
             pilot_df,
@@ -473,7 +479,7 @@ with tab_pilot:
             color="Strategy_Quadrant",
             color_discrete_map=color_map,
             hover_name="Paint_Code",
-            text="Paint_Code",
+            text="Display_Label",
             custom_data=["Total_Solvent_kg", "Weighted_Ratio_Percent", "Stable_Coverage", "Historical_Records"],
             title=f"<b>試用色號決策矩陣 (Decision Matrix)</b><br><sup>Bubble size = Dilution Ratio (%) | Filters: {filter_details}</sup>",
             height=650
@@ -535,7 +541,6 @@ with tab_pilot:
         )
     else:
         st.warning("⚠️ 歷史紀錄數不足，無法產生矩陣分析。(Not enough historical data)")
-
 # ==========================================
 # 7. EXPORT INTERACTIVE HTML REPORT
 # ==========================================
