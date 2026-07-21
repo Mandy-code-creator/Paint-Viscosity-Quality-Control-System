@@ -396,7 +396,6 @@ with tab_line:
         st.info(f"ℹ️ Paint code **{comp_code}** is currently only used on line **{used_line}**. Comparison requires data from at least two production lines. (此色號僅在單一產線使用，無法進行比較)")
 
 # ----- TAB 4: PILOT PAINT CODE EVALUATION (MATRIX APPROACH) -----
-# ----- TAB 4: PILOT PAINT CODE EVALUATION (MATRIX APPROACH) -----
 with tab_pilot:
     st.subheader("4. 試用色號評估矩陣 (Pilot Paint Code Matrix)")
 
@@ -415,7 +414,31 @@ with tab_pilot:
     with set3:
         target_stability_limit = st.number_input("高穩定門檻 (Stability Threshold - %)", min_value=0.30, max_value=1.00, value=0.70, step=0.05, format="%.2f")
 
-    STABLE_BAND_PERCENT_POINT = 2.0
+    # ------------------------------------------------------
+    # EMPIRICAL BACK-TESTING FOR TOLERANCE BAND
+    # ------------------------------------------------------
+    all_ratios = filter_df["Solvent_Ratio_Percent"].dropna()
+    if not all_ratios.empty:
+        historical_std = all_ratios.std(ddof=1)
+        # Suggest ±1.5 Std as empirical baseline (cap between 1.0 and 5.0)
+        suggested_tolerance = float(round(max(1.0, min(5.0, historical_std * 1.5)), 1))
+    else:
+        historical_std = 0.0
+        suggested_tolerance = 2.0
+
+    st.info(
+        f"📊 **Data Back-testing (數據回測):** "
+        f"Historical standard deviation (歷史標準差) is **{historical_std:.2f}%**. "
+        f"System recommends a tolerance band of **±{suggested_tolerance}%**."
+    )
+
+    STABLE_BAND_PERCENT_POINT = st.number_input(
+        "Tolerance Band (容許誤差範圍 - ±%)", 
+        min_value=0.5, 
+        max_value=10.0, 
+        value=suggested_tolerance, 
+        step=0.5
+    )
 
     # Helper functions
     def safe_cv(series):
@@ -563,6 +586,7 @@ with tab_pilot:
         )
     else:
         st.warning("⚠️ 歷史紀錄數不足，無法產生矩陣分析。(Not enough historical data to generate matrix)")
+
 # ==========================================
 # 7. EXPORT INTERACTIVE HTML REPORT
 # ==========================================
@@ -574,6 +598,9 @@ st.info("💡 The report is exported as an interactive HTML file to preserve exa
 if st.button("📥 Generate & Download Report", type="primary"):
     with st.spinner("⏳ Generating HTML report..."):
         try:
+            # FIX: Create HTML table from DataFrame before injecting it into the template
+            pilot_table_html = display_df.to_html(index=False, classes="summary-table") if 'display_df' in locals() else "<p>No data available.</p>"
+            
             html_content = f"""
             <html>
             <head>
