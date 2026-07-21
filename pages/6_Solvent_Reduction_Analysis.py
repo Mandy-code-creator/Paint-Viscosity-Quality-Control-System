@@ -401,8 +401,9 @@ with tab_pilot:
     st.subheader("4. 試用色號評估矩陣 (Pilot Paint Code Matrix)")
 
     st.markdown(
-        "放棄主觀計分，改用**效益與可行性矩陣 (Cost-Benefit & Feasibility Matrix)** 進行戰略分類。"
-        "透過分析稀釋劑消耗量（效益）與添加比例穩定度（可行性），直觀找出最佳試用目標。"
+        "透過分析稀釋劑消耗量（效益）與添加比例穩定度（可行性），直觀找出最佳試用目標。<br>"
+        "*(Utilizing a Cost-Benefit & Feasibility Matrix to identify the best candidates for pilot testing.)*",
+        unsafe_allow_html=True
     )
 
     # User defines the crosshair (thresholds) for the Matrix
@@ -419,7 +420,26 @@ with tab_pilot:
     # Helper functions
     def safe_cv(series):
         values = pd.to_numeric(series, errors="coerce").dropna()
-        return np.nan if len(values) < 2 or values.mean() <= 0 else values.std(ddof=1) / values.mean()
+        if len(values) < 2:
+            return np.nan
+            
+        # 1. IQR Outlier Filter Logic
+        Q1 = values.quantile(0.25)
+        Q3 = values.quantile(0.75)
+        IQR = Q3 - Q1
+        
+        # 2. Define Upper/Lower Bounds
+        lower_bound = Q1 - 1.5 * IQR
+        upper_bound = Q3 + 1.5 * IQR
+        
+        # 3. Filter Outliers
+        filtered_values = values[(values >= lower_bound) & (values <= upper_bound)]
+        
+        # 4. Calculate CV on clean data
+        if len(filtered_values) < 2 or filtered_values.mean() <= 0:
+            return np.nan
+            
+        return filtered_values.std(ddof=1) / filtered_values.mean()
 
     def stable_coverage(series):
         values = pd.to_numeric(series, errors="coerce").dropna()
@@ -480,20 +500,22 @@ with tab_pilot:
             color_discrete_map=color_map,
             hover_name="Paint_Code",
             text="Display_Label",
-            custom_data=["Total_Solvent_kg", "Weighted_Ratio_Percent", "Stable_Coverage", "Historical_Records"],
+            custom_data=["Total_Solvent_kg", "Weighted_Ratio_Percent", "Stable_Coverage", "Historical_Records", "Ratio_CV"],
             title=f"<b>試用色號決策矩陣 (Decision Matrix)</b><br><sup>Bubble size = Dilution Ratio (%) | Filters: {filter_details}</sup>",
             height=650
         )
 
+        # Updated hover template to include CV
         fig_matrix.update_traces(
             textposition='top center',
             hovertemplate=(
                 "<b>%{hovertext}</b><br>"
                 "──────────────────<br>"
-                "稀釋劑總用量：%{customdata[0]:,.1f} kg<br>"
-                "添加比例穩定度：%{customdata[2]:.1%}<br>"
-                "加權添加比例：%{customdata[1]:.2f}%<br>"
-                "歷史紀錄數：%{customdata[3]:,.0f} 筆<br>"
+                "稀釋劑總用量 (Solvent): %{customdata[0]:,.1f} kg<br>"
+                "添加比例穩定度 (Stability): %{customdata[2]:.1%}<br>"
+                "加權添加比例 (Ratio): %{customdata[1]:.2f}%<br>"
+                "CV值 (Filtered CV): %{customdata[4]:.3f}<br>"
+                "歷史紀錄數 (Records): %{customdata[3]:,.0f} 筆<br>"
                 "<extra></extra>"
             )
         )
@@ -529,18 +551,18 @@ with tab_pilot:
         st.dataframe(
             display_df,
             column_config={
-                "Paint_Code": "色號",
-                "Strategy_Quadrant": "戰略分類",
-                "Total_Solvent_kg": st.column_config.NumberColumn("稀釋劑總用量 (kg)", format="%.1f"),
-                "Weighted_Ratio_Percent": st.column_config.NumberColumn("加權添加比例 (%)", format="%.1f"),
-                "Stable_Coverage": st.column_config.NumberColumn("穩定度", format="%.2f"),
-                "Ratio_CV": st.column_config.NumberColumn("CV值", format="%.3f"),
-                "Historical_Records": "紀錄數"
+                "Paint_Code": "色號 (Paint Code)",
+                "Strategy_Quadrant": "戰略分類 (Strategy)",
+                "Total_Solvent_kg": st.column_config.NumberColumn("稀釋劑總用量 (Solvent - kg)", format="%.1f"),
+                "Weighted_Ratio_Percent": st.column_config.NumberColumn("加權添加比例 (Ratio - %)", format="%.1f"),
+                "Stable_Coverage": st.column_config.NumberColumn("穩定度 (Stability)", format="%.2f"),
+                "Ratio_CV": st.column_config.NumberColumn("CV值 (Filtered CV)", format="%.3f"),
+                "Historical_Records": "紀錄數 (Records)"
             },
             use_container_width=True, hide_index=True
         )
     else:
-        st.warning("⚠️ 歷史紀錄數不足，無法產生矩陣分析。(Not enough historical data)")
+        st.warning("⚠️ 歷史紀錄數不足，無法產生矩陣分析。(Not enough historical data to generate matrix)")
 # ==========================================
 # 7. EXPORT INTERACTIVE HTML REPORT
 # ==========================================
