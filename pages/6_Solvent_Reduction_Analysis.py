@@ -391,6 +391,9 @@ with tab_line:
             fig6.update_yaxes(title="")
             st.plotly_chart(fig6, use_container_width=True)
             exported_figs["8. Line Comparison - Solvent Ratio"] = fig6
+    else:
+        used_line = line_summary["線別"].iloc[0] if not line_summary.empty else "Unknown"
+        st.info(f"ℹ️ Paint code **{comp_code}** is currently only used on line **{used_line}**. Comparison requires data from at least two production lines. (此色號僅在單一產線使用，無法進行比較)")
 
 # ----- TAB 4: PILOT PAINT CODE EVALUATION -----
 with tab_pilot:
