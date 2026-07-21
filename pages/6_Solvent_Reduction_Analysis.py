@@ -87,26 +87,19 @@ if time_col:
 # Sort entire dataset chronologically
 df = df.sort_values(by=sort_cols, ascending=True)
 
-# Identify special paint codes drawn from large drums over multiple days
+# Identify special paint codes
 special_paint_codes = ["PS30213X8"]
 is_special_paint = df["Paint_Code"].isin(special_paint_codes)
 
-# Process Standard Paint Codes
+# Process Standard Paint Codes (Apply deduplication)
 df_standard = df[~is_special_paint].copy()
 df_standard = df_standard.drop_duplicates(
     subset=["Batch_ID", "Bucket_Number"], 
     keep="last"
 )
 
-# Process Special Paint Codes
+# Process Special Paint Codes (NO deduplication, keep all records for PS30213X8)
 df_special = df[is_special_paint].copy()
-if not df_special.empty:
-    df_special["Operation_Date"] = df_special["_Analysis_Date"].dt.date
-    df_special = df_special.drop_duplicates(
-        subset=["Batch_ID", "Bucket_Number", "Operation_Date"], 
-        keep="last"
-    )
-    df_special = df_special.drop(columns=["Operation_Date"])
 
 # Merge and Restore Chronological Order
 df = pd.concat([df_standard, df_special], ignore_index=True)
@@ -250,7 +243,6 @@ with tab_ranking:
     
     ch1, ch2 = st.columns(2)
     with ch1:
-        # This chart is only displayed in the app, NOT exported to the report
         df_melt = summary_df.melt(id_vars="Paint_Code", value_vars=["Total_Paint_kg", "Total_Solvent_kg"])
         df_melt["variable"] = df_melt["variable"].map({"Total_Paint_kg": "塗料 (Paint)", "Total_Solvent_kg": "稀釋劑 (Solvent)"})
         
@@ -262,10 +254,8 @@ with tab_ranking:
         fig1.update_xaxes(title="Weight (kg)")
         fig1.update_layout(title="Paint vs Solvent Usage", legend_title_text="", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
         st.plotly_chart(fig1, use_container_width=True)
-        # Removed exported_figs["2. Paint vs Solvent (kg)"] = fig1
 
     with ch2:
-        # This chart is only displayed in the app, NOT exported to the report
         sorted_df = summary_df.sort_values("Weighted_Ratio_Percent", ascending=True)
         fig2 = px.bar(
             sorted_df, x="Weighted_Ratio_Percent", y="Paint_Code", orientation='h', text_auto='.2f', 
@@ -276,36 +266,32 @@ with tab_ranking:
         fig2.update_xaxes(title="Ratio (%)")
         fig2.update_layout(title="Weighted Solvent Ratio (%)")
         st.plotly_chart(fig2, use_container_width=True)
-        # Removed exported_figs["3. Weighted Solvent Ratio"] = fig2
 
     st.markdown("---")
     
     # Dual Axis Chart
     fig_dual = go.Figure()
     
-    # Paint (kg) column - Add text to display value
     fig_dual.add_trace(go.Bar(
         x=summary_df["Paint_Code"], 
         y=summary_df["Total_Paint_kg"], 
         name="Paint (kg)", 
         marker_color="#5B8FF9", 
         yaxis="y1",
-        text=summary_df["Total_Paint_kg"].apply(lambda x: f"{x:,.0f}"), # Comma format
+        text=summary_df["Total_Paint_kg"].apply(lambda x: f"{x:,.0f}"), 
         textposition="auto"
     ))
     
-    # Solvent (kg) column - Add text to display value
     fig_dual.add_trace(go.Bar(
         x=summary_df["Paint_Code"], 
         y=summary_df["Total_Solvent_kg"], 
         name="Solvent (kg)", 
         marker_color="#F6BD16", 
         yaxis="y1",
-        text=summary_df["Total_Solvent_kg"].apply(lambda x: f"{x:,.0f}"), # Comma format
+        text=summary_df["Total_Solvent_kg"].apply(lambda x: f"{x:,.0f}"),
         textposition="auto"
     ))
     
-    # Implementation of the Deep Sky Blue visual standard
     fig_dual.add_trace(go.Scatter(
         x=summary_df["Paint_Code"], 
         y=summary_df["Weighted_Ratio_Percent"], 
@@ -338,7 +324,7 @@ with tab_ranking:
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         height=600,
         uniformtext_minsize=8, 
-        uniformtext_mode='hide' # Automatically hide text if the column is too small
+        uniformtext_mode='hide' 
     )
     st.plotly_chart(fig_dual, use_container_width=True)
     exported_figs["4. Dual Axis Usage vs Ratio"] = fig_dual
@@ -415,11 +401,6 @@ with tab_pilot:
         "評估適合優先試用預調漆的色號。"
     )
 
-    # ------------------------------------------------------
-    # Evaluation settings
-    # 添加比例穩定率 is the main stability indicator.
-    # Relative IQR and CV are retained only for engineering reference.
-    # ------------------------------------------------------
     set1, set2, set3 = st.columns(3)
 
     with set1:
@@ -459,9 +440,6 @@ with tab_pilot:
         "穩定率越高，代表歷史添加比例越集中，越適合評估預調漆。"
     )
 
-    # ------------------------------------------------------
-    # Robust helper functions
-    # ------------------------------------------------------
     def safe_cv(series):
         values = pd.to_numeric(series, errors="coerce").dropna()
         if len(values) < 2 or values.mean() <= 0:
@@ -496,9 +474,6 @@ with tab_pilot:
             inclusive="both"
         ).mean()
 
-    # ------------------------------------------------------
-    # Build paint-code evaluation table
-    # ------------------------------------------------------
     pilot_df = (
         filter_df
         .groupby(
@@ -601,9 +576,6 @@ with tab_pilot:
         - pilot_df["After_Viscosity_P25"]
     )
 
-    # ------------------------------------------------------
-    # Score construction
-    # ------------------------------------------------------
     def minmax_score(series, reverse=False):
         values = pd.to_numeric(series, errors="coerce")
         valid = values.dropna()
@@ -638,8 +610,6 @@ with tab_pilot:
         pilot_df["Weighted_Ratio_Percent"]
     )
 
-    # Main stability score: directly use 添加比例穩定率.
-    # Relative IQR and CV remain available only in the engineering detail table.
     pilot_df["Stability_Score"] = (
         pilot_df["Stable_Coverage"]
         .fillna(0)
@@ -651,12 +621,6 @@ with tab_pilot:
         pilot_df["Historical_Records"]
     )
 
-    # Final score:
-    # 30% solvent-use opportunity
-    # 20% paint-use impact
-    # 20% dilution need
-    # 20% robust stability
-    # 10% data support
     pilot_df["Pilot_Score"] = (
         pilot_df["Usage_Score"] * 0.30
         + pilot_df["Paint_Volume_Score"] * 0.20
@@ -726,9 +690,6 @@ with tab_pilot:
         int(top_n_pilot)
     ).copy()
 
-    # ------------------------------------------------------
-    # KPI summary
-    # ------------------------------------------------------
     qualified_count = int(pilot_df["Data_Qualified"].sum())
     priority_count = int(
         (pilot_df["Evaluation_Result"] == "優先試用").sum()
@@ -751,9 +712,6 @@ with tab_pilot:
         "添加比例穩定率20%、歷史資料量10%。"
     )
 
-    # ------------------------------------------------------
-    # Main chart: Pilot ranking
-    # ------------------------------------------------------
     color_map = {
         "優先試用": "#2F6B6D",
         "可進一步評估": "#6F8FAF",
@@ -822,8 +780,6 @@ with tab_pilot:
 
     fig_pilot_score.update_xaxes(
         title="試用優先分數",
-        # Extend the plotting area only for the outside labels.
-        # Tick marks still stop at 100 because Pilot Score is a 0-100 score.
         range=[0, 155],
         tickmode="array",
         tickvals=[0, 20, 40, 60, 80, 100],
@@ -886,17 +842,9 @@ with tab_pilot:
 
     exported_figs["9. Paint Code Pilot Priority Ranking"] = fig_pilot_score
 
-    # ------------------------------------------------------
-    # Detailed evaluation table
-    # ------------------------------------------------------
-
-    # ------------------------------------------------------
     st.markdown("---")
     st.markdown("### 色號試用評估明細")
 
-    # ------------------------------------------------------
-    # Concise management summary table
-    # ------------------------------------------------------
     pilot_output = pilot_df[
         [
             "Pilot_Rank",
@@ -925,7 +873,6 @@ with tab_pilot:
         "Evaluation_Result": "評估結果"
     })
 
-    # NEW: Round numerical columns to 1 decimal place to strictly format DataFrames/HTML/CSV exports
     cols_to_round = ["試用優先分數", "稀釋劑總用量", "加權添加比例", "添加比例穩定率"]
     pilot_output[cols_to_round] = pilot_output[cols_to_round].round(1)
 
@@ -974,9 +921,6 @@ with tab_pilot:
         justify="center"
     )
 
-    # ------------------------------------------------------
-    # Automatic conclusion
-    # ------------------------------------------------------
     st.markdown("---")
     st.markdown("### 評估結論")
 
@@ -1029,7 +973,6 @@ with tab_pilot:
         file_name="試用色號評估表.csv",
         mime="text/csv"
     )
-
 
 # ==========================================
 # 7. EXPORT INTERACTIVE HTML REPORT
