@@ -408,8 +408,580 @@ if filter_df.empty:
 
 
 # =========================================================
-# 9. PAINT CODE FILTER
+# 9. ALL PAINT CODES — SEASONAL VISCOSITY OVERVIEW MATRIX
 # =========================================================
+st.markdown("---")
+st.subheader("🧭 全色號季節黏度總覽")
+st.markdown(
+    "先以矩陣同時檢視多個色號於四季之添加前後黏度，"
+    "再於下方選擇單一色號進行詳細分析。"
+)
+
+# Aggregate all paint codes by the four fixed seasonal periods.
+overview_df = (
+    filter_df.groupby(
+        ["Paint_Code", "Season_Order", "Season"],
+        dropna=False,
+    )
+    .agg(
+        Historical_Records=("Paint_Code", "size"),
+        Historical_Batches=("Batch_ID", "nunique"),
+        Median_Before_Viscosity=("黏度(秒)", "median"),
+        Median_After_Viscosity=("黏度(秒)_1", "median"),
+        Median_Viscosity_Drop=("Delta_V", "median"),
+        Median_Solvent_Ratio=("Solvent_Ratio_Percent", "median"),
+        Median_Temperature=("溫度", "median"),
+        Total_Solvent_kg=("添加重量", "sum"),
+    )
+    .reset_index()
+)
+
+paint_overview_rank = (
+    filter_df.groupby("Paint_Code", dropna=False)
+    .agg(
+        Total_Records=("Paint_Code", "size"),
+        Total_Solvent_kg=("添加重量", "sum"),
+    )
+    .reset_index()
+)
+
+view_col1, view_col2 = st.columns([1, 2])
+
+with view_col1:
+    overview_scope = st.selectbox(
+        "顯示範圍",
+        [
+            "歷史紀錄數 Top 20",
+            "稀釋劑用量 Top 20",
+            "全部色號",
+            "自訂選擇",
+        ],
+        key="season_overview_scope",
+    )
+
+all_overview_codes = (
+    paint_overview_rank["Paint_Code"]
+    .dropna()
+    .astype(str)
+    .tolist()
+)
+
+if overview_scope == "歷史紀錄數 Top 20":
+    default_overview_codes = (
+        paint_overview_rank.sort_values(
+            "Total_Records",
+            ascending=False,
+        )
+        .head(20)["Paint_Code"]
+        .astype(str)
+        .tolist()
+    )
+elif overview_scope == "稀釋劑用量 Top 20":
+    default_overview_codes = (
+        paint_overview_rank.sort_values(
+            "Total_Solvent_kg",
+            ascending=False,
+        )
+        .head(20)["Paint_Code"]
+        .astype(str)
+        .tolist()
+    )
+elif overview_scope == "全部色號":
+    default_overview_codes = all_overview_codes
+else:
+    default_overview_codes = all_overview_codes[:10]
+
+with view_col2:
+    selected_overview_codes = st.multiselect(
+        "選擇要同時比較的色號",
+        options=all_overview_codes,
+        default=default_overview_codes,
+        key="season_overview_codes",
+    )
+
+if selected_overview_codes:
+    matrix_source = overview_df[
+        overview_df["Paint_Code"].isin(selected_overview_codes)
+    ].copy()
+
+    # Keep the displayed code order aligned with the selected ranking/order.
+    code_order = [
+        code
+        for code in default_overview_codes
+        if code in selected_overview_codes
+    ]
+    code_order += [
+        code
+        for code in selected_overview_codes
+        if code not in code_order
+    ]
+
+    season_labels = [
+        "冬季 (12–02月)",
+        "春季 (03–05月)",
+        "夏季 (06–08月)",
+        "秋季 (09–11月)",
+    ]
+
+    before_pivot = matrix_source.pivot_table(
+        index="Paint_Code",
+        columns="Season",
+        values="Median_Before_Viscosity",
+        aggfunc="first",
+    ).reindex(index=code_order, columns=season_labels)
+
+    after_pivot = matrix_source.pivot_table(
+        index="Paint_Code",
+        columns="Season",
+        values="Median_After_Viscosity",
+        aggfunc="first",
+    ).reindex(index=code_order, columns=season_labels)
+
+    drop_pivot = matrix_source.pivot_table(
+        index="Paint_Code",
+        columns="Season",
+        values="Median_Viscosity_Drop",
+        aggfunc="first",
+    ).reindex(index=code_order, columns=season_labels)
+
+    ratio_pivot = matrix_source.pivot_table(
+        index="Paint_Code",
+        columns="Season",
+        values="Median_Solvent_Ratio",
+        aggfunc="first",
+    ).reindex(index=code_order, columns=season_labels)
+
+    temp_pivot = matrix_source.pivot_table(
+        index="Paint_Code",
+        columns="Season",
+        values="Median_Temperature",
+        aggfunc="first",
+    ).reindex(index=code_order, columns=season_labels)
+
+    records_pivot = matrix_source.pivot_table(
+        index="Paint_Code",
+        columns="Season",
+        values="Historical_Records",
+        aggfunc="first",
+    ).reindex(index=code_order, columns=season_labels)
+
+    batches_pivot = matrix_source.pivot_table(
+        index="Paint_Code",
+        columns="Season",
+        values="Historical_Batches",
+        aggfunc="first",
+    ).reindex(index=code_order, columns=season_labels)
+
+    cell_text = []
+    customdata = []
+
+    for code in code_order:
+        text_row = []
+        custom_row = []
+
+        for season_name in season_labels:
+            before_value = before_pivot.loc[code, season_name]
+            after_value = after_pivot.loc[code, season_name]
+            drop_value = drop_pivot.loc[code, season_name]
+            ratio_value = ratio_pivot.loc[code, season_name]
+            temp_value = temp_pivot.loc[code, season_name]
+            records_value = records_pivot.loc[code, season_name]
+            batches_value = batches_pivot.loc[code, season_name]
+
+            if pd.notna(before_value) and pd.notna(after_value):
+                text_row.append(
+                    f"{before_value:.0f} → {after_value:.0f}"
+                )
+            else:
+                text_row.append("—")
+
+            custom_row.append(
+                [
+                    before_value,
+                    after_value,
+                    drop_value,
+                    ratio_value,
+                    temp_value,
+                    records_value,
+                    batches_value,
+                ]
+            )
+
+        cell_text.append(text_row)
+        customdata.append(custom_row)
+
+    z_values = drop_pivot.to_numpy(dtype=float)
+
+    fig_overview = go.Figure(
+        data=go.Heatmap(
+            z=z_values,
+            x=season_labels,
+            y=code_order,
+            text=cell_text,
+            texttemplate="%{text}",
+            textfont=dict(size=12, color="#111827"),
+            customdata=np.array(customdata, dtype=object),
+            colorscale=[
+                [0.00, "#EFF6FF"],
+                [0.35, "#BFDBFE"],
+                [0.70, "#60A5FA"],
+                [1.00, "#1D4ED8"],
+            ],
+            colorbar=dict(
+                title="降黏幅度<br>(秒)",
+                thickness=14,
+                len=0.80,
+                outlinecolor="#64748B",
+                outlinewidth=1,
+            ),
+            xgap=2,
+            ygap=2,
+            hovertemplate=(
+                "<b>%{y}</b><br>"
+                "%{x}<br>"
+                "添加前黏度中位數：%{customdata[0]:.1f} s<br>"
+                "添加後黏度中位數：%{customdata[1]:.1f} s<br>"
+                "降黏幅度中位數：%{customdata[2]:.1f} s<br>"
+                "添加比例中位數：%{customdata[3]:.2f}%<br>"
+                "溫度中位數：%{customdata[4]:.1f} °C<br>"
+                "歷史紀錄數：%{customdata[5]:,.0f}<br>"
+                "歷史批數：%{customdata[6]:,.0f}"
+                "<extra></extra>"
+            ),
+            hoverongaps=False,
+        )
+    )
+
+    fig_overview.update_xaxes(
+        title="季節期間",
+        side="top",
+        showline=True,
+        linecolor="#475569",
+        linewidth=1.5,
+        mirror=True,
+        ticks="outside",
+        ticklen=6,
+        tickfont=dict(size=12),
+    )
+
+    fig_overview.update_yaxes(
+        title="色號",
+        autorange="reversed",
+        showline=True,
+        linecolor="#475569",
+        linewidth=1.5,
+        mirror=True,
+        ticks="outside",
+        ticklen=5,
+        tickfont=dict(size=11),
+    )
+
+    fig_overview.update_layout(
+        title=(
+            "<b>全色號季節添加前後黏度矩陣</b>"
+            "<br><sup>儲存格＝添加前 → 添加後；底色＝降黏幅度</sup>"
+        ),
+        height=max(520, len(code_order) * 42 + 180),
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        margin=dict(l=130, r=80, t=145, b=65),
+        font=dict(
+            family="Arial, Microsoft JhengHei, sans-serif",
+            size=12,
+            color="#334155",
+        ),
+    )
+
+    st.plotly_chart(fig_overview, use_container_width=True)
+
+    st.caption(
+        "每一格顯示該色號於該季節的黏度中位數：添加前 → 添加後；"
+        "底色越深代表典型降黏幅度越大。將游標移至儲存格可查看"
+        "添加比例、溫度、紀錄數及批數。"
+    )
+
+    # =====================================================
+    # OPTIMIZED WIDE TABLE — ONE PAINT CODE PER ROW
+    # =====================================================
+    st.markdown("---")
+    st.subheader("📋 全色號季節比較總表")
+    st.caption(
+        "每個色號僅顯示一列；各季節欄位以「添加前 → 添加後」呈現，"
+        "並搭配添加比例，以利快速橫向比較。"
+    )
+
+    season_short_map = {
+        "冬季 (12–02月)": "冬季",
+        "春季 (03–05月)": "春季",
+        "夏季 (06–08月)": "夏季",
+        "秋季 (09–11月)": "秋季",
+    }
+    season_short_order = ["冬季", "春季", "夏季", "秋季"]
+
+    wide_source = matrix_source.copy()
+    wide_source["Season_Short"] = wide_source["Season"].map(
+        season_short_map
+    )
+    wide_source["Before_After"] = wide_source.apply(
+        lambda row: (
+            f"{row['Median_Before_Viscosity']:.0f} → "
+            f"{row['Median_After_Viscosity']:.0f}"
+        )
+        if pd.notna(row["Median_Before_Viscosity"])
+        and pd.notna(row["Median_After_Viscosity"])
+        else "—",
+        axis=1,
+    )
+
+    before_after_wide = wide_source.pivot_table(
+        index="Paint_Code",
+        columns="Season_Short",
+        values="Before_After",
+        aggfunc="first",
+    ).reindex(index=code_order, columns=season_short_order)
+
+    ratio_wide = wide_source.pivot_table(
+        index="Paint_Code",
+        columns="Season_Short",
+        values="Median_Solvent_Ratio",
+        aggfunc="first",
+    ).reindex(index=code_order, columns=season_short_order)
+
+    before_wide = wide_source.pivot_table(
+        index="Paint_Code",
+        columns="Season_Short",
+        values="Median_Before_Viscosity",
+        aggfunc="first",
+    ).reindex(index=code_order, columns=season_short_order)
+
+    after_wide = wide_source.pivot_table(
+        index="Paint_Code",
+        columns="Season_Short",
+        values="Median_After_Viscosity",
+        aggfunc="first",
+    ).reindex(index=code_order, columns=season_short_order)
+
+    code_totals = (
+        filter_df[
+            filter_df["Paint_Code"].isin(selected_overview_codes)
+        ]
+        .groupby("Paint_Code", dropna=False)
+        .agg(
+            Total_Records=("Paint_Code", "size"),
+            Total_Batches=("Batch_ID", "nunique"),
+            Total_Solvent_kg=("添加重量", "sum"),
+        )
+        .reindex(code_order)
+    )
+
+    wide_display = pd.DataFrame(index=code_order)
+    wide_display.index.name = "色號"
+    wide_display["歷史紀錄數"] = code_totals["Total_Records"]
+    wide_display["歷史批數"] = code_totals["Total_Batches"]
+
+    for season_name in season_short_order:
+        wide_display[f"{season_name} 前→後"] = before_after_wide[
+            season_name
+        ].fillna("—")
+        wide_display[f"{season_name} 添加比"] = ratio_wide[
+            season_name
+        ]
+
+    # Seasonal difference uses the spread of median before-viscosity.
+    wide_display["添加前季節差異"] = (
+        before_wide.max(axis=1, skipna=True)
+        - before_wide.min(axis=1, skipna=True)
+    )
+    wide_display["添加後季節差異"] = (
+        after_wide.max(axis=1, skipna=True)
+        - after_wide.min(axis=1, skipna=True)
+    )
+    wide_display["稀釋劑總用量"] = code_totals["Total_Solvent_kg"]
+
+    available_season_count = before_wide.notna().sum(axis=1)
+
+    def classify_season_difference(row):
+        code = row.name
+        season_count = int(available_season_count.get(code, 0))
+        before_gap = row["添加前季節差異"]
+        after_gap = row["添加後季節差異"]
+
+        if season_count < 2 or pd.isna(before_gap):
+            return "資料不足"
+        if before_gap <= 5 and (pd.isna(after_gap) or after_gap <= 5):
+            return "穩定"
+        if before_gap <= 10 and (pd.isna(after_gap) or after_gap <= 8):
+            return "輕微差異"
+        return "季節差異明顯"
+
+    wide_display["判定"] = wide_display.apply(
+        classify_season_difference,
+        axis=1,
+    )
+    wide_display = wide_display.reset_index()
+
+    table_filter_col1, table_filter_col2, table_filter_col3 = st.columns(
+        [1.1, 1.1, 1.4]
+    )
+
+    with table_filter_col1:
+        table_result_filter = st.selectbox(
+            "判定篩選",
+            [
+                "全部",
+                "季節差異明顯",
+                "輕微差異",
+                "穩定",
+                "資料不足",
+            ],
+            key="season_wide_result_filter",
+        )
+
+    with table_filter_col2:
+        table_sort_mode = st.selectbox(
+            "排序方式",
+            [
+                "依目前選擇順序",
+                "添加前季節差異由大到小",
+                "添加後季節差異由大到小",
+                "歷史紀錄數由多到少",
+                "稀釋劑用量由高到低",
+            ],
+            key="season_wide_sort_mode",
+        )
+
+    with table_filter_col3:
+        table_search_text = st.text_input(
+            "搜尋色號",
+            placeholder="輸入部分色號，例如 13X8",
+            key="season_wide_search",
+        )
+
+    wide_filtered = wide_display.copy()
+
+    if table_result_filter != "全部":
+        wide_filtered = wide_filtered[
+            wide_filtered["判定"] == table_result_filter
+        ]
+
+    if table_search_text.strip():
+        wide_filtered = wide_filtered[
+            wide_filtered["色號"].astype(str).str.contains(
+                table_search_text.strip(),
+                case=False,
+                na=False,
+            )
+        ]
+
+    if table_sort_mode == "添加前季節差異由大到小":
+        wide_filtered = wide_filtered.sort_values(
+            "添加前季節差異",
+            ascending=False,
+            na_position="last",
+        )
+    elif table_sort_mode == "添加後季節差異由大到小":
+        wide_filtered = wide_filtered.sort_values(
+            "添加後季節差異",
+            ascending=False,
+            na_position="last",
+        )
+    elif table_sort_mode == "歷史紀錄數由多到少":
+        wide_filtered = wide_filtered.sort_values(
+            "歷史紀錄數",
+            ascending=False,
+            na_position="last",
+        )
+    elif table_sort_mode == "稀釋劑用量由高到低":
+        wide_filtered = wide_filtered.sort_values(
+            "稀釋劑總用量",
+            ascending=False,
+            na_position="last",
+        )
+    else:
+        wide_filtered["_Order"] = pd.Categorical(
+            wide_filtered["色號"],
+            categories=code_order,
+            ordered=True,
+        )
+        wide_filtered = wide_filtered.sort_values("_Order").drop(
+            columns="_Order"
+        )
+
+    st.info(
+        f"目前顯示 **{len(wide_filtered):,}** 個色號。"
+        "『添加前季節差異』與『添加後季節差異』皆為四季中位數最大值減最小值。"
+    )
+
+    wide_column_config = {
+        "色號": st.column_config.TextColumn("色號", width="medium"),
+        "歷史紀錄數": st.column_config.NumberColumn(
+            "歷史紀錄數", format="%d", width="small"
+        ),
+        "歷史批數": st.column_config.NumberColumn(
+            "歷史批數", format="%d", width="small"
+        ),
+        "冬季 前→後": st.column_config.TextColumn(
+            "冬季 前→後 (s)", width="small"
+        ),
+        "冬季 添加比": st.column_config.NumberColumn(
+            "冬季 添加比 (%)", format="%.1f", width="small"
+        ),
+        "春季 前→後": st.column_config.TextColumn(
+            "春季 前→後 (s)", width="small"
+        ),
+        "春季 添加比": st.column_config.NumberColumn(
+            "春季 添加比 (%)", format="%.1f", width="small"
+        ),
+        "夏季 前→後": st.column_config.TextColumn(
+            "夏季 前→後 (s)", width="small"
+        ),
+        "夏季 添加比": st.column_config.NumberColumn(
+            "夏季 添加比 (%)", format="%.1f", width="small"
+        ),
+        "秋季 前→後": st.column_config.TextColumn(
+            "秋季 前→後 (s)", width="small"
+        ),
+        "秋季 添加比": st.column_config.NumberColumn(
+            "秋季 添加比 (%)", format="%.1f", width="small"
+        ),
+        "添加前季節差異": st.column_config.NumberColumn(
+            "添加前季節差異 (s)", format="%.1f", width="small"
+        ),
+        "添加後季節差異": st.column_config.NumberColumn(
+            "添加後季節差異 (s)", format="%.1f", width="small"
+        ),
+        "稀釋劑總用量": st.column_config.NumberColumn(
+            "稀釋劑總用量 (kg)", format="%.1f", width="small"
+        ),
+        "判定": st.column_config.TextColumn("判定", width="small"),
+    }
+
+    st.dataframe(
+        wide_filtered,
+        column_config=wide_column_config,
+        use_container_width=True,
+        hide_index=True,
+        height=min(760, max(240, len(wide_filtered) * 35 + 38)),
+    )
+
+    wide_csv = wide_filtered.to_csv(index=False).encode("utf-8-sig")
+    st.download_button(
+        label="下載全色號季節橫向比較表 CSV",
+        data=wide_csv,
+        file_name="Seasonal_Viscosity_All_Paint_Codes_Wide.csv",
+        mime="text/csv",
+        key="download_wide_overview_csv",
+    )
+
+else:
+    st.info("請至少選擇一個色號以產生季節黏度總覽矩陣。")
+
+
+# =========================================================
+# 10. PAINT CODE FILTER — DETAILED SINGLE-CODE ANALYSIS
+# =========================================================
+st.markdown("---")
+st.subheader("🔎 單一色號詳細分析")
 paint_code_count_df = (
     filter_df.groupby("Paint_Code")
     .size()
@@ -438,7 +1010,7 @@ if analysis_df.empty:
 
 
 # =========================================================
-# 10. FILTER INFORMATION
+# 11. FILTER INFORMATION
 # =========================================================
 min_date = analysis_df["_Analysis_Date"].min().strftime("%Y-%m-%d")
 max_date = analysis_df["_Analysis_Date"].max().strftime("%Y-%m-%d")
@@ -459,7 +1031,7 @@ st.info(
 
 
 # =========================================================
-# 11. SEASONAL AGGREGATION
+# 12. SEASONAL AGGREGATION
 # =========================================================
 if analysis_mode == "合併各年度比較四季":
     group_cols = ["Season_Order", "Season"]
@@ -509,7 +1081,7 @@ season_summary = season_summary.reset_index(drop=True)
 
 
 # =========================================================
-# 12. KPI SUMMARY
+# 13. KPI SUMMARY
 # =========================================================
 st.markdown("---")
 st.subheader("📌 季節比較摘要")
@@ -558,7 +1130,7 @@ kpi4.metric(
 
 
 # =========================================================
-# 13. CHART 1 — BEFORE VS AFTER DUMBBELL
+# 14. CHART 1 — BEFORE VS AFTER DUMBBELL
 # =========================================================
 st.markdown("---")
 st.subheader("圖1　各季節添加前後黏度比較")
@@ -730,7 +1302,7 @@ st.caption(
 
 
 # =========================================================
-# 14. CHART 2 — SEASONAL TREND
+# 15. CHART 2 — SEASONAL TREND
 #     Label overlap fixed with separate annotations.
 # =========================================================
 st.markdown("---")
@@ -886,7 +1458,7 @@ st.plotly_chart(fig_trend, use_container_width=True)
 
 
 # =========================================================
-# 15. SUMMARY TABLE
+# 16. SUMMARY TABLE
 # =========================================================
 st.markdown("---")
 st.subheader("📋 季節比較明細")
@@ -973,7 +1545,7 @@ st.dataframe(
 
 
 # =========================================================
-# 16. AUTOMATIC COMMENTARY
+# 17. AUTOMATIC COMMENTARY
 # =========================================================
 st.markdown("---")
 st.subheader("📝 自動分析摘要")
@@ -1031,7 +1603,7 @@ else:
 
 
 # =========================================================
-# 17. EXPORT CSV
+# 18. EXPORT CSV
 # =========================================================
 st.markdown("---")
 st.subheader("📥 資料匯出")
@@ -1047,7 +1619,7 @@ st.download_button(
 
 
 # =========================================================
-# 18. EXPORT INTERACTIVE HTML REPORT
+# 19. EXPORT INTERACTIVE HTML REPORT
 # =========================================================
 if st.button("產生互動式季節分析報告 HTML", type="primary"):
     try:
