@@ -395,587 +395,145 @@ with tab_line:
         used_line = line_summary["線別"].iloc[0] if not line_summary.empty else "Unknown"
         st.info(f"ℹ️ Paint code **{comp_code}** is currently only used on line **{used_line}**. Comparison requires data from at least two production lines. (此色號僅在單一產線使用，無法進行比較)")
 
-# ----- TAB 4: PILOT PAINT CODE EVALUATION -----
+# ----- TAB 4: PILOT PAINT CODE EVALUATION (MATRIX APPROACH) -----
 with tab_pilot:
-    st.subheader("4. 試用色號評估 (Pilot Paint Code Evaluation)")
+    st.subheader("4. 試用色號評估矩陣 (Pilot Paint Code Matrix)")
 
     st.markdown(
-        "依據塗料使用量、稀釋劑用量、添加比例穩定性及歷史資料量，"
-        "評估適合優先試用預調漆的色號。"
+        "放棄主觀計分，改用**效益與可行性矩陣 (Cost-Benefit & Feasibility Matrix)** 進行戰略分類。"
+        "透過分析稀釋劑消耗量（效益）與添加比例穩定度（可行性），直觀找出最佳試用目標。"
     )
 
+    # User defines the crosshair (thresholds) for the Matrix
     set1, set2, set3 = st.columns(3)
-
     with set1:
-        min_pilot_records = st.number_input(
-            "最低歷史紀錄數",
-            min_value=5,
-            value=20,
-            step=1,
-            key="pilot_min_records_simple"
-        )
-
+        min_pilot_records = st.number_input("最低歷史紀錄數 (Min Records)", min_value=5, value=20, step=1)
     with set2:
-        stable_coverage_limit = st.number_input(
-            "添加比例穩定率下限",
-            min_value=0.30,
-            max_value=1.00,
-            value=0.70,
-            step=0.05,
-            format="%.2f",
-            key="pilot_stable_coverage_limit_simple"
-        )
-
+        target_vol_limit = st.number_input("高消耗門檻 (Volume Threshold - kg)", min_value=100, value=5000, step=500)
     with set3:
-        top_n_pilot = st.number_input(
-            "顯示色號數",
-            min_value=3,
-            max_value=30,
-            value=10,
-            step=1,
-            key="pilot_top_n_simple"
-        )
+        target_stability_limit = st.number_input("高穩定門檻 (Stability Threshold - %)", min_value=0.30, max_value=1.00, value=0.70, step=0.05, format="%.2f")
 
     STABLE_BAND_PERCENT_POINT = 2.0
 
-    st.caption(
-        "添加比例穩定率＝落在該色號添加比例中位數 ±2 個百分點內的紀錄占比。"
-        "穩定率越高，代表歷史添加比例越集中，越適合評估預調漆。"
-    )
-
+    # Helper functions
     def safe_cv(series):
         values = pd.to_numeric(series, errors="coerce").dropna()
-        if len(values) < 2 or values.mean() <= 0:
-            return np.nan
-        return values.std(ddof=1) / values.mean()
-
-    def relative_iqr(series):
-        values = pd.to_numeric(series, errors="coerce").dropna()
-        if values.empty:
-            return np.nan
-
-        median_value = values.median()
-        if median_value <= 0:
-            return np.nan
-
-        return (
-            values.quantile(0.75) - values.quantile(0.25)
-        ) / median_value
+        return np.nan if len(values) < 2 or values.mean() <= 0 else values.std(ddof=1) / values.mean()
 
     def stable_coverage(series):
         values = pd.to_numeric(series, errors="coerce").dropna()
-        if values.empty:
-            return np.nan
-
+        if values.empty: return np.nan
         median_value = values.median()
-        lower_limit = median_value - STABLE_BAND_PERCENT_POINT
-        upper_limit = median_value + STABLE_BAND_PERCENT_POINT
+        return values.between(median_value - STABLE_BAND_PERCENT_POINT, median_value + STABLE_BAND_PERCENT_POINT, inclusive="both").mean()
 
-        return values.between(
-            lower_limit,
-            upper_limit,
-            inclusive="both"
-        ).mean()
+    # Aggregate Data
+    pilot_df = filter_df.groupby(["Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint_Code"], dropna=False).agg(
+        Historical_Records=("Paint_Code", "size"),
+        Total_Paint_kg=("塗料重量", "sum"),
+        Total_Solvent_kg=("添加重量", "sum"),
+        Median_Ratio_Percent=("Solvent_Ratio_Percent", "median"),
+        Stable_Coverage=("Solvent_Ratio_Percent", stable_coverage),
+        Ratio_CV=("Solvent_Ratio_Percent", safe_cv)
+    ).reset_index()
 
-    pilot_df = (
-        filter_df
-        .groupby(
-            [
-                "Vendor",
-                "Resin",
-                "Position_UI",
-                "Solvent_Type",
-                "Paint_Code"
-            ],
-            dropna=False
-        )
-        .agg(
-            Historical_Records=("Paint_Code", "size"),
-            Historical_Batches=("Batch_ID", "nunique"),
-            Total_Paint_kg=("塗料重量", "sum"),
-            Total_Solvent_kg=("添加重量", "sum"),
-            Median_Ratio_Percent=(
-                "Solvent_Ratio_Percent",
-                "median"
-            ),
-            Ratio_P10=(
-                "Solvent_Ratio_Percent",
-                lambda x: x.quantile(0.10)
-            ),
-            Ratio_P25=(
-                "Solvent_Ratio_Percent",
-                lambda x: x.quantile(0.25)
-            ),
-            Ratio_P75=(
-                "Solvent_Ratio_Percent",
-                lambda x: x.quantile(0.75)
-            ),
-            Ratio_P90=(
-                "Solvent_Ratio_Percent",
-                lambda x: x.quantile(0.90)
-            ),
-            Relative_IQR=(
-                "Solvent_Ratio_Percent",
-                relative_iqr
-            ),
-            Stable_Coverage=(
-                "Solvent_Ratio_Percent",
-                stable_coverage
-            ),
-            Ratio_CV=(
-                "Solvent_Ratio_Percent",
-                safe_cv
-            ),
-            Median_Before_Viscosity=("黏度(秒)", "median"),
-            Before_Viscosity_P25=(
-                "黏度(秒)",
-                lambda x: x.quantile(0.25)
-            ),
-            Before_Viscosity_P75=(
-                "黏度(秒)",
-                lambda x: x.quantile(0.75)
-            ),
-            Median_After_Viscosity=("黏度(秒)_1", "median"),
-            After_Viscosity_P25=(
-                "黏度(秒)_1",
-                lambda x: x.quantile(0.25)
-            ),
-            After_Viscosity_P75=(
-                "黏度(秒)_1",
-                lambda x: x.quantile(0.75)
-            ),
-            Median_Viscosity_Drop=("Delta_V", "median"),
-            Production_Lines=(
-                "線別",
-                lambda x: x[x != "Unknown"].nunique()
-            )
-        )
-        .reset_index()
-    )
+    pilot_df["Weighted_Ratio_Percent"] = np.where(pilot_df["Total_Paint_kg"] > 0, pilot_df["Total_Solvent_kg"] / pilot_df["Total_Paint_kg"] * 100, np.nan)
+    pilot_df = pilot_df[pilot_df["Historical_Records"] >= min_pilot_records].copy()
 
-    pilot_df["Weighted_Ratio_Percent"] = np.where(
-        pilot_df["Total_Paint_kg"] > 0,
-        pilot_df["Total_Solvent_kg"]
-        / pilot_df["Total_Paint_kg"]
-        * 100,
-        np.nan
-    )
-
-    pilot_df["Ratio_IQR"] = (
-        pilot_df["Ratio_P75"] - pilot_df["Ratio_P25"]
-    )
-
-    pilot_df["Ratio_P10_P90_Range"] = (
-        pilot_df["Ratio_P90"] - pilot_df["Ratio_P10"]
-    )
-
-    pilot_df["Before_Viscosity_IQR"] = (
-        pilot_df["Before_Viscosity_P75"]
-        - pilot_df["Before_Viscosity_P25"]
-    )
-
-    pilot_df["After_Viscosity_IQR"] = (
-        pilot_df["After_Viscosity_P75"]
-        - pilot_df["After_Viscosity_P25"]
-    )
-
-    def minmax_score(series, reverse=False):
-        values = pd.to_numeric(series, errors="coerce")
-        valid = values.dropna()
-
-        if valid.empty:
-            score = pd.Series(0.0, index=series.index)
-        elif valid.max() == valid.min():
-            score = pd.Series(100.0, index=series.index)
+    # Matrix Classification Logic
+    def classify_quadrant(row):
+        high_vol = row["Total_Solvent_kg"] >= target_vol_limit
+        high_stability = row["Stable_Coverage"] >= target_stability_limit
+        
+        if high_vol and high_stability:
+            return "優先試用 (Quick Wins)"
+        elif high_vol and not high_stability:
+            return "需先標準化 (Standardize First)"
+        elif not high_vol and high_stability:
+            return "次要評估 (Secondary)"
         else:
-            score = (
-                (values - valid.min())
-                / (valid.max() - valid.min())
-                * 100
-            )
+            return "暫不考慮 (Ignore)"
 
-        score = score.fillna(0)
+    if not pilot_df.empty:
+        pilot_df["Strategy_Quadrant"] = pilot_df.apply(classify_quadrant, axis=1)
 
-        if reverse:
-            score = 100 - score
+        color_map = {
+            "優先試用 (Quick Wins)": "#2F6B6D",
+            "需先標準化 (Standardize First)": "#F6BD16",
+            "次要評估 (Secondary)": "#5B8FF9",
+            "暫不考慮 (Ignore)": "#C9C5BE"
+        }
 
-        return score.clip(0, 100)
-
-    pilot_df["Usage_Score"] = minmax_score(
-        pilot_df["Total_Solvent_kg"]
-    )
-
-    pilot_df["Paint_Volume_Score"] = minmax_score(
-        pilot_df["Total_Paint_kg"]
-    )
-
-    pilot_df["Ratio_Need_Score"] = minmax_score(
-        pilot_df["Weighted_Ratio_Percent"]
-    )
-
-    pilot_df["Stability_Score"] = (
-        pilot_df["Stable_Coverage"]
-        .fillna(0)
-        .clip(0, 1)
-        * 100
-    )
-
-    pilot_df["Data_Support_Score"] = minmax_score(
-        pilot_df["Historical_Records"]
-    )
-
-    pilot_df["Pilot_Score"] = (
-        pilot_df["Usage_Score"] * 0.30
-        + pilot_df["Paint_Volume_Score"] * 0.20
-        + pilot_df["Ratio_Need_Score"] * 0.20
-        + pilot_df["Stability_Score"] * 0.20
-        + pilot_df["Data_Support_Score"] * 0.10
-    )
-
-    pilot_df["Data_Qualified"] = (
-        pilot_df["Historical_Records"] >= min_pilot_records
-    )
-
-    pilot_df["Stability_Qualified"] = (
-        pilot_df["Stable_Coverage"].notna()
-        & (pilot_df["Stable_Coverage"] >= stable_coverage_limit)
-    )
-
-    def classify_stability(value):
-        if pd.isna(value):
-            return "資料不足"
-        if value >= 0.80:
-            return "穩定"
-        if value >= 0.70:
-            return "尚可"
-        return "不穩定"
-
-    pilot_df["Stability_Level"] = (
-        pilot_df["Stable_Coverage"]
-        .apply(classify_stability)
-    )
-
-    def classify_pilot(row):
-        if not row["Data_Qualified"]:
-            return "暫不建議"
-
-        if (
-            row["Pilot_Score"] >= 70
-            and row["Stability_Qualified"]
-        ):
-            return "優先試用"
-
-        if (
-            row["Pilot_Score"] >= 45
-            and row["Stable_Coverage"] >= 0.60
-        ):
-            return "可進一步評估"
-
-        return "暫不建議"
-
-    pilot_df["Evaluation_Result"] = pilot_df.apply(
-        classify_pilot,
-        axis=1
-    )
-
-    pilot_df = pilot_df.sort_values(
-        ["Pilot_Score", "Total_Solvent_kg"],
-        ascending=[False, False]
-    ).reset_index(drop=True)
-
-    pilot_df.insert(
-        0,
-        "Pilot_Rank",
-        np.arange(1, len(pilot_df) + 1)
-    )
-
-    pilot_top_df = pilot_df.head(
-        int(top_n_pilot)
-    ).copy()
-
-    qualified_count = int(pilot_df["Data_Qualified"].sum())
-    priority_count = int(
-        (pilot_df["Evaluation_Result"] == "優先試用").sum()
-    )
-    best_code = (
-        pilot_df.iloc[0]["Paint_Code"]
-        if not pilot_df.empty
-        else "-"
-    )
-
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-
-    kpi1.metric("Evaluated Paint Codes", f"{len(pilot_df):,}")
-    kpi2.metric("Data-Qualified Codes", f"{qualified_count:,}")
-    kpi3.metric("Priority Pilot Codes", f"{priority_count:,}")
-    kpi4.metric("Top Candidate", best_code)
-
-    st.caption(
-        "評分權重：稀釋劑總用量30%、塗料使用量20%、添加比例需求20%、"
-        "添加比例穩定率20%、歷史資料量10%。"
-    )
-
-    color_map = {
-        "優先試用": "#2F6B6D",
-        "可進一步評估": "#6F8FAF",
-        "暫不建議": "#C9C5BE"
-    }
-
-    pilot_chart_df = (
-        pilot_top_df
-        .sort_values("Pilot_Score", ascending=True)
-        .copy()
-    )
-
-    pilot_chart_df["Chart_Label"] = pilot_chart_df.apply(
-        lambda row: (
-            f"{row['Pilot_Score']:.1f}分｜"
-            f"稀釋劑{row['Total_Solvent_kg']:,.0f}kg｜"
-            f"添加{row['Weighted_Ratio_Percent']:.1f}%｜"
-            f"穩定{row['Stable_Coverage']:.0%}"
-        ),
-        axis=1
-    )
-
-    st.markdown("### 圖1 各色號預調漆試用優先順序")
-    st.caption(
-        "依稀釋劑使用量、塗料使用量、添加比例、穩定率及歷史資料量綜合評估。"
-    )
-
-    fig_pilot_score = px.bar(
-        pilot_chart_df,
-        x="Pilot_Score",
-        y="Paint_Code",
-        orientation="h",
-        color="Evaluation_Result",
-        color_discrete_map=color_map,
-        text="Chart_Label",
-        custom_data=[
-            "Total_Solvent_kg",
-            "Total_Paint_kg",
-            "Weighted_Ratio_Percent",
-            "Stable_Coverage",
-            "Stability_Level",
-            "Historical_Records"
-        ],
-        title=(
-            "<b>各色號預調漆試用優先順序</b>"
-            f"<br><sup>分數越高代表越適合優先評估｜{filter_details}</sup>"
-        ),
-        height=max(560, len(pilot_top_df) * 56)
-    )
-
-    fig_pilot_score.update_traces(
-        texttemplate="%{text}",
-        textposition="outside",
-        hovertemplate=(
-            "<b>%{y}</b><br>"
-            "試用優先分數：%{x:.1f}<br>"
-            "稀釋劑總用量：%{customdata[0]:,.1f} kg<br>"
-            "塗料總用量：%{customdata[1]:,.1f} kg<br>"
-            "加權添加比例：%{customdata[2]:.2f}%<br>"
-            "添加比例穩定率：%{customdata[3]:.1%}<br>"
-            "穩定度：%{customdata[4]}<br>"
-            "歷史紀錄數：%{customdata[5]:,.0f}"
-            "<extra></extra>"
+        # Plotly Scatter Matrix
+        fig_matrix = px.scatter(
+            pilot_df,
+            x="Stable_Coverage",
+            y="Total_Solvent_kg",
+            size="Weighted_Ratio_Percent",
+            color="Strategy_Quadrant",
+            color_discrete_map=color_map,
+            hover_name="Paint_Code",
+            text="Paint_Code",
+            custom_data=["Total_Solvent_kg", "Weighted_Ratio_Percent", "Stable_Coverage", "Historical_Records"],
+            title=f"<b>試用色號決策矩陣 (Decision Matrix)</b><br><sup>Bubble size = Dilution Ratio (%) | Filters: {filter_details}</sup>",
+            height=650
         )
-    )
 
-    fig_pilot_score.update_xaxes(
-        title="試用優先分數",
-        range=[0, 155],
-        tickmode="array",
-        tickvals=[0, 20, 40, 60, 80, 100],
-        ticktext=["0", "20", "40", "60", "80", "100"],
-        showline=True,
-        linewidth=1.2,
-        linecolor="#4B5563",
-        mirror=True,
-        showgrid=True,
-        gridcolor="#E5E7EB"
-    )
-
-    fig_pilot_score.update_yaxes(
-        title="",
-        showline=True,
-        linewidth=1.5,
-        linecolor="black",
-        mirror=True
-    )
-
-    fig_pilot_score.update_layout(
-        plot_bgcolor="white",
-        paper_bgcolor="white",
-        margin=dict(l=110, r=80, t=190, b=80),
-        bargap=0.28,
-        font=dict(
-            family="Arial, Microsoft JhengHei, sans-serif",
-            size=12,
-            color="#334155"
-        ),
-        title=dict(
-            x=0.5,
-            xanchor="center",
-            y=0.97,
-            yanchor="top",
-            font=dict(size=21, color="#1F2937")
-        ),
-        legend_title_text="評估結果",
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.16,
-            xanchor="right",
-            x=1,
-            bgcolor="rgba(255,255,255,0)",
-            font=dict(size=11)
-        )
-    )
-
-    st.plotly_chart(fig_pilot_score, use_container_width=True)
-
-    st.info(
-        "圖中數字依序為："
-        "① 試用優先分數；"
-        "② 稀釋劑歷史總用量；"
-        "③ 加權添加比例；"
-        "④ 添加比例穩定率。"
-        "橫軸分數仍為0–100分，100分右側空間僅供顯示完整標籤。"
-    )
-
-    exported_figs["9. Paint Code Pilot Priority Ranking"] = fig_pilot_score
-
-    st.markdown("---")
-    st.markdown("### 色號試用評估明細")
-
-    pilot_output = pilot_df[
-        [
-            "Pilot_Rank",
-            "Paint_Code",
-            "Pilot_Score",
-            "Total_Solvent_kg",
-            "Weighted_Ratio_Percent",
-            "Stable_Coverage",
-            "Historical_Records",
-            "Evaluation_Result"
-        ]
-    ].copy()
-
-    pilot_output["Stable_Coverage"] = (
-        pilot_output["Stable_Coverage"] * 100
-    )
-
-    pilot_output = pilot_output.rename(columns={
-        "Pilot_Rank": "排名",
-        "Paint_Code": "色號",
-        "Pilot_Score": "試用優先分數",
-        "Total_Solvent_kg": "稀釋劑總用量",
-        "Weighted_Ratio_Percent": "加權添加比例",
-        "Stable_Coverage": "添加比例穩定率",
-        "Historical_Records": "歷史紀錄數",
-        "Evaluation_Result": "評估結果"
-    })
-
-    cols_to_round = ["試用優先分數", "稀釋劑總用量", "加權添加比例", "添加比例穩定率"]
-    pilot_output[cols_to_round] = pilot_output[cols_to_round].round(1)
-
-    st.dataframe(
-        pilot_output,
-        column_config={
-            "排名": st.column_config.NumberColumn(
-                "排名",
-                format="%d"
-            ),
-            "試用優先分數": st.column_config.ProgressColumn(
-                "試用優先分數",
-                min_value=0,
-                max_value=100,
-                format="%.1f"
-            ),
-            "稀釋劑總用量": st.column_config.NumberColumn(
-                "稀釋劑總用量 (kg)",
-                format="%.1f"
-            ),
-            "加權添加比例": st.column_config.NumberColumn(
-                "加權添加比例 (%)",
-                format="%.1f"
-            ),
-            "添加比例穩定率": st.column_config.NumberColumn(
-                "添加比例穩定率 (%)",
-                format="%.1f"
-            ),
-            "歷史紀錄數": st.column_config.NumberColumn(
-                "歷史紀錄數",
-                format="%d"
+        fig_matrix.update_traces(
+            textposition='top center',
+            hovertemplate=(
+                "<b>%{hovertext}</b><br>"
+                "──────────────────<br>"
+                "稀釋劑總用量：%{customdata[0]:,.1f} kg<br>"
+                "添加比例穩定度：%{customdata[2]:.1%}<br>"
+                "加權添加比例：%{customdata[1]:.2f}%<br>"
+                "歷史紀錄數：%{customdata[3]:,.0f} 筆<br>"
+                "<extra></extra>"
             )
-        },
-        use_container_width=True,
-        hide_index=True
-    )
+        )
 
-    st.caption(
-        "表中僅保留試用決策所需資訊；工程統計細節仍保留於計算邏輯中。"
-    )
+        # Add Quadrant Crosshairs
+        fig_matrix.add_vline(x=target_stability_limit, line_dash="dash", line_color="red", opacity=0.7)
+        fig_matrix.add_hline(y=target_vol_limit, line_dash="dash", line_color="red", opacity=0.7)
 
-    pilot_table_html = pilot_output.to_html(
-        index=False,
-        border=0,
-        classes="summary-table",
-        justify="center"
-    )
+        # Format Axes
+        fig_matrix.update_xaxes(title="添加比例穩定度 (Stability %)", tickformat=".0%", range=[max(0, pilot_df["Stable_Coverage"].min() - 0.1), 1.05])
+        max_y = pilot_df["Total_Solvent_kg"].max()
+        fig_matrix.update_yaxes(title="稀釋劑消耗量 (Solvent Usage - kg)", range=[- (max_y * 0.05), max_y * 1.1])
 
-    st.markdown("---")
-    st.markdown("### 評估結論")
+        fig_matrix.update_layout(
+            plot_bgcolor="white", paper_bgcolor="white", margin=dict(l=60, r=40, t=100, b=60),
+            legend=dict(title="戰略分類 (Strategy)", orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
+        
+        # Add background quadrant annotations
+        fig_matrix.add_annotation(x=1.02, y=max_y * 1.05, text="<b>Quick Wins</b>", showarrow=False, font=dict(color="#2F6B6D", size=16), xanchor="right")
+        fig_matrix.add_annotation(x=max(0, pilot_df["Stable_Coverage"].min() - 0.05), y=max_y * 1.05, text="<b>Standardize First</b>", showarrow=False, font=dict(color="#F6BD16", size=16), xanchor="left")
 
-    if pilot_df.empty:
-        st.warning("目前篩選條件下無可評估色號。")
+        st.plotly_chart(fig_matrix, use_container_width=True)
+        exported_figs["9. Decision Matrix"] = fig_matrix
+
+        # Output Table
+        st.markdown("---")
+        st.markdown("### 評估結果明細 (Evaluation Details)")
+        
+        out_cols = ["Paint_Code", "Strategy_Quadrant", "Total_Solvent_kg", "Weighted_Ratio_Percent", "Stable_Coverage", "Ratio_CV", "Historical_Records"]
+        display_df = pilot_df[out_cols].sort_values(by=["Strategy_Quadrant", "Total_Solvent_kg"], ascending=[True, False])
+        
+        st.dataframe(
+            display_df,
+            column_config={
+                "Paint_Code": "色號",
+                "Strategy_Quadrant": "戰略分類",
+                "Total_Solvent_kg": st.column_config.NumberColumn("稀釋劑總用量 (kg)", format="%.1f"),
+                "Weighted_Ratio_Percent": st.column_config.NumberColumn("加權添加比例 (%)", format="%.1f"),
+                "Stable_Coverage": st.column_config.NumberColumn("穩定度", format="%.2f"),
+                "Ratio_CV": st.column_config.NumberColumn("CV值", format="%.3f"),
+                "Historical_Records": "紀錄數"
+            },
+            use_container_width=True, hide_index=True
+        )
     else:
-        top_row = pilot_df.iloc[0]
-
-        st.success(
-            f"目前優先候選色號為 **{top_row['Paint_Code']}**，"
-            f"試用優先分數為 **{top_row['Pilot_Score']:.1f} 分**。"
-        )
-
-        st.markdown(
-            f"""
-            - 歷史塗料使用量：**{top_row['Total_Paint_kg']:,.1f} kg**
-            - 歷史稀釋劑使用量：**{top_row['Total_Solvent_kg']:,.1f} kg**
-            - 加權添加比例：**{top_row['Weighted_Ratio_Percent']:.2f}%**
-            - 添加比例中位數：**{top_row['Median_Ratio_Percent']:.2f}%**
-            - 添加比例穩定率：**{top_row['Stable_Coverage']:.1%}**
-            - 添加比例穩定度：**{top_row['Stability_Level']}**
-            - CV（工程參考）：**{top_row['Ratio_CV']:.3f}**
-            - 歷史有效紀錄：**{int(top_row['Historical_Records'])} 筆**
-            - 評估結果：**{top_row['Evaluation_Result']}**
-            """
-        )
-
-        if top_row["Evaluation_Result"] == "優先試用":
-            st.info(
-                "建議優先與供應商確認預調漆出貨黏度範圍，"
-                "並以小批量進行現場試用，驗證進廠後直接使用或"
-                "減少再次添加稀釋劑的可行性。"
-            )
-        elif top_row["Evaluation_Result"] == "可進一步評估":
-            st.info(
-                "建議先確認添加比例變動原因、批次差異及黏度規格，"
-                "待資料穩定後再進行預調漆試用。"
-            )
-        else:
-            st.warning(
-                "目前資料量、使用量或添加比例穩定性尚不足，"
-                "暫不建議直接導入預調漆試用。"
-            )
-
-    pilot_csv = pilot_output.to_csv(index=False).encode("utf-8-sig")
-
-    st.download_button(
-        label="下載試用色號評估表 CSV",
-        data=pilot_csv,
-        file_name="試用色號評估表.csv",
-        mime="text/csv"
-    )
+        st.warning("⚠️ 歷史紀錄數不足，無法產生矩陣分析。(Not enough historical data)")
 
 # ==========================================
 # 7. EXPORT INTERACTIVE HTML REPORT
