@@ -498,12 +498,52 @@ elif overview_scope == "全部色號":
 else:
     default_overview_codes = all_overview_codes[:10]
 
+# Synchronize the paint-code selector whenever the display scope changes.
+# Streamlit keeps multiselect values in session_state, so changing only
+# the `default` argument does not update an already-created widget.
+previous_overview_scope = st.session_state.get(
+    "_previous_season_overview_scope"
+)
+
+scope_changed = previous_overview_scope != overview_scope
+
+if scope_changed:
+    st.session_state["season_overview_codes"] = (
+        default_overview_codes.copy()
+    )
+    st.session_state["_previous_season_overview_scope"] = (
+        overview_scope
+    )
+else:
+    # Remove selections that are no longer available after upper filters change.
+    current_overview_codes = st.session_state.get(
+        "season_overview_codes",
+        default_overview_codes,
+    )
+    valid_current_codes = [
+        code
+        for code in current_overview_codes
+        if code in all_overview_codes
+    ]
+
+    if overview_scope != "自訂選擇":
+        # Top 20 / All modes always follow the calculated ranking exactly.
+        valid_current_codes = default_overview_codes.copy()
+    elif not valid_current_codes:
+        valid_current_codes = default_overview_codes.copy()
+
+    st.session_state["season_overview_codes"] = valid_current_codes
+
 with view_col2:
     selected_overview_codes = st.multiselect(
         "選擇要同時比較的色號",
         options=all_overview_codes,
-        default=default_overview_codes,
         key="season_overview_codes",
+        disabled=(overview_scope != "自訂選擇"),
+        help=(
+            "Top 20／全部色號模式會自動同步；"
+            "選擇「自訂選擇」後可自行增減色號。"
+        ),
     )
 
 if selected_overview_codes:
