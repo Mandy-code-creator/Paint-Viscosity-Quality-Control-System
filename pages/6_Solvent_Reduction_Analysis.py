@@ -396,6 +396,7 @@ with tab_line:
         st.info(f"ℹ️ Paint code **{comp_code}** is currently only used on line **{used_line}**. Comparison requires data from at least two production lines. (此色號僅在單一產線使用，無法進行比較)")
 
 # ----- TAB 4: PILOT PAINT CODE EVALUATION (MATRIX APPROACH) -----
+# ----- TAB 4: PILOT PAINT CODE EVALUATION (MATRIX APPROACH) -----
 with tab_pilot:
     st.subheader("4. 試用色號評估矩陣 (Pilot Paint Code Matrix)")
 
