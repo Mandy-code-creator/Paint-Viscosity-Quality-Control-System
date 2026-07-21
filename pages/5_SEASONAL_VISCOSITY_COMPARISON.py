@@ -589,8 +589,14 @@ if selected_overview_codes:
             batches_value = batches_pivot.loc[code, season_name]
 
             if pd.notna(before_value) and pd.notna(after_value):
+                ratio_text = (
+                    f"{ratio_value:.1f}%"
+                    if pd.notna(ratio_value)
+                    else "—"
+                )
                 text_row.append(
-                    f"{before_value:.0f} → {after_value:.0f}"
+                    f"<b>{before_value:.0f} → {after_value:.0f}</b>"
+                    f"<br>{ratio_text}"
                 )
             else:
                 text_row.append("—")
@@ -679,7 +685,7 @@ if selected_overview_codes:
     fig_overview.update_layout(
         title=(
             "<b>全色號季節添加前後黏度矩陣</b>"
-            "<br><sup>儲存格＝添加前 → 添加後；底色＝降黏幅度</sup>"
+            "<br><sup>第一行＝添加前 → 添加後；第二行＝稀釋劑添加比例；底色＝降黏幅度</sup>"
         ),
         height=max(520, len(code_order) * 42 + 180),
         plot_bgcolor="white",
@@ -695,9 +701,9 @@ if selected_overview_codes:
     st.plotly_chart(fig_overview, use_container_width=True)
 
     st.caption(
-        "每一格顯示該色號於該季節的黏度中位數：添加前 → 添加後；"
-        "底色越深代表典型降黏幅度越大。將游標移至儲存格可查看"
-        "添加比例、溫度、紀錄數及批數。"
+        "每一格第一行顯示添加前 → 添加後黏度中位數，第二行顯示"
+        "稀釋劑添加比例中位數；底色越深代表典型降黏幅度越大。"
+        "將游標移至儲存格可查看溫度、紀錄數及批數。"
     )
 
     # =====================================================
