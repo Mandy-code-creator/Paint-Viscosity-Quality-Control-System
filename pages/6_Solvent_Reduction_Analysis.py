@@ -369,6 +369,67 @@ with tab_detail:
         st.plotly_chart(fig4, use_container_width=True)
         exported_figs["6. Solvent Usage by Line"] = fig4
 
+    # ---------------------------------------------------------
+    # DATA AUDIT TABLE (STABILITY TRACEABILITY)
+    # ---------------------------------------------------------
+    st.markdown("---")
+    st.markdown("### 📊 穩定度檢驗明細 (Stability Audit Table)")
+    st.markdown("*(Historical batch audit table for stability calculation verification)*")
+    
+    # 1. Allow input tolerance for direct audit testing
+    audit_tolerance = st.number_input(
+        "輸入容許誤差範圍 (Input Tolerance Band for Audit - ±%)", 
+        value=2.0, step=0.5, key="audit_tol"
+    )
+    
+    # 2. Calculate safe zones
+    if not detail_df.empty:
+        median_ratio = detail_df["Solvent_Ratio_Percent"].median()
+        lower_bound = median_ratio - audit_tolerance
+        upper_bound = median_ratio + audit_tolerance
+        
+        st.info(
+            f"🎯 **Target (中位數 - Median):** {median_ratio:.2f}% | "
+            f"🛡️ **Safe Zone (安全範圍 - Safe Range):** {lower_bound:.2f}% ~ {upper_bound:.2f}%"
+        )
+        
+        # 3. Create Audit table from raw data
+        audit_df = detail_df[["_Analysis_Date", "Batch_ID", "Bucket_Number", "Solvent_Ratio_Percent"]].copy()
+        
+        # Evaluation function
+        def evaluate_status(val):
+            if pd.isna(val): return "⚠️ N/A"
+            if lower_bound <= val <= upper_bound: return "✅ Pass (達標)"
+            if val < lower_bound: return "❌ Fail (Too Thick)"
+            return "❌ Fail (Too Thin)"
+
+        audit_df["Status (狀態)"] = audit_df["Solvent_Ratio_Percent"].apply(evaluate_status)
+        
+        # 4. Calculate overall results
+        valid_records = audit_df.dropna(subset=["Solvent_Ratio_Percent"])
+        pass_count = (audit_df["Status (狀態)"] == "✅ Pass (達標)").sum()
+        total_count = len(valid_records)
+        actual_stability = (pass_count / total_count * 100) if total_count > 0 else 0
+        
+        st.success(f"📈 **Result (結果):** {pass_count} / {total_count} batches within safe zone ➔ **Stability = {actual_stability:.1f}%**")
+        
+        # Format ratio column for display
+        audit_df["Solvent_Ratio_Percent"] = audit_df["Solvent_Ratio_Percent"].apply(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
+        
+        # Display DataFrame
+        st.dataframe(
+            audit_df, 
+            column_config={
+                "_Analysis_Date": "Analysis Date (分析日期)",
+                "Batch_ID": "Batch ID (塗料批號)",
+                "Bucket_Number": "Bucket (塗料桶號)",
+                "Solvent_Ratio_Percent": "Ratio % (添加比例)",
+                "Status (狀態)": "Status (狀態)"
+            },
+            use_container_width=True, 
+            hide_index=True
+        )
+
 # ----- TAB 3: LINE COMPARISON -----
 with tab_line:
     st.subheader("3. Production Line Comparison")
