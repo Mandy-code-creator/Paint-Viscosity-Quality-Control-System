@@ -804,16 +804,39 @@ with tab_pilot:
         median_value = values.median()
         return float(np.median(np.abs(values - median_value)))
 
-    def ratio_consistency(series):
+    def ratio_consistency_stats(series):
+        """Return the typical ratio, data-driven stable range, and consistency share."""
         values = pd.to_numeric(series, errors="coerce").dropna()
         if len(values) < 5:
-            return np.nan
-        median_value = values.median()
+            return {
+                "median": np.nan,
+                "lower": np.nan,
+                "upper": np.nan,
+                "consistency": np.nan,
+            }
+
+        median_value = float(values.median())
         mad = robust_mad(values)
         tolerance = max(1.0, 1.5 * mad)
         lower = max(0.0, median_value - tolerance)
         upper = median_value + tolerance
-        return values.between(lower, upper, inclusive="both").mean()
+        consistency = values.between(lower, upper, inclusive="both").mean()
+
+        return {
+            "median": median_value,
+            "lower": float(lower),
+            "upper": float(upper),
+            "consistency": float(consistency),
+        }
+
+    def ratio_consistency(series):
+        return ratio_consistency_stats(series)["consistency"]
+
+    def ratio_stable_lower(series):
+        return ratio_consistency_stats(series)["lower"]
+
+    def ratio_stable_upper(series):
+        return ratio_consistency_stats(series)["upper"]
 
     def robust_relative_variation(series):
         values = pd.to_numeric(series, errors="coerce").dropna()
@@ -833,6 +856,8 @@ with tab_pilot:
         Total_Paint_kg=("Base_Paint_Weight_kg", "sum"),
         Total_Solvent_kg=("添加重量", "sum"),
         Median_Ratio_Percent=("Solvent_Ratio_Percent", "median"),
+        Stable_Ratio_Lower=("Solvent_Ratio_Percent", ratio_stable_lower),
+        Stable_Ratio_Upper=("Solvent_Ratio_Percent", ratio_stable_upper),
         Median_Incoming_Viscosity=("黏度(秒)", "median"),
         Median_Required_Viscosity=("黏度(秒)_1", "median"),
         Median_Viscosity_Drop=("Delta_V", "median"),
@@ -856,6 +881,14 @@ with tab_pilot:
         .reset_index(name="Ratio_Trend_Per_10_Records")
     )
     supplier_df = supplier_df.merge(trend_df, on=group_keys, how="left")
+    supplier_df["Stable_Ratio_Range"] = supplier_df.apply(
+        lambda row: (
+            f"{row['Stable_Ratio_Lower']:.2f}–{row['Stable_Ratio_Upper']:.2f}"
+            if pd.notna(row["Stable_Ratio_Lower"]) and pd.notna(row["Stable_Ratio_Upper"])
+            else "Insufficient Data"
+        ),
+        axis=1,
+    )
     supplier_df["Abs_Ratio_Trend_Per_10_Records"] = supplier_df["Ratio_Trend_Per_10_Records"].abs()
     supplier_df["Weighted_Ratio_Percent"] = np.where(
         supplier_df["Total_Paint_kg"] > 0,
@@ -1110,7 +1143,7 @@ with tab_pilot:
         summary_cols = [
             "Paint_Code", "Supplier_Action", "Total_Solvent_kg", "Historical_Batches",
             "Median_Incoming_Viscosity", "Median_Required_Viscosity",
-            "Median_Ratio_Percent", "Ratio_Consistency",
+            "Median_Ratio_Percent", "Stable_Ratio_Range", "Ratio_Consistency",
         ]
         display_df = supplier_df.sort_values(
             ["Action_Order", "Total_Solvent_kg", "Historical_Batches"],
@@ -1128,7 +1161,15 @@ with tab_pilot:
                 "Median_Incoming_Viscosity": st.column_config.NumberColumn("Typical Incoming Viscosity (s)", format="%.1f"),
                 "Median_Required_Viscosity": st.column_config.NumberColumn("Typical Required Viscosity (s)", format="%.1f"),
                 "Median_Ratio_Percent": st.column_config.NumberColumn("Typical Adjustment Ratio (%)", format="%.2f"),
-                "Ratio_Consistency": st.column_config.NumberColumn("Adjustment Consistency (%)", format="%.1f"),
+                "Stable_Ratio_Range": st.column_config.TextColumn(
+                    "Stable Ratio Range (%)",
+                    help="Data-driven range used to calculate Adjustment Consistency. Records inside this range are counted as consistent.",
+                ),
+                "Ratio_Consistency": st.column_config.NumberColumn(
+                    "Adjustment Consistency (%)",
+                    format="%.1f",
+                    help="Percentage of historical records whose solvent ratio falls inside the Stable Ratio Range.",
+                ),
             },
             use_container_width=True,
             hide_index=True,
@@ -1151,7 +1192,8 @@ with tab_pilot:
         with st.expander("View Technical Stability Details"):
             technical_cols = [
                 "Paint_Code", "Stability_Level", "High_Stability_Count", "Stability_Benchmark_Source",
-                "Peer_Code_Count", "Ratio_Consistency", "Ratio_Stability_Level",
+                "Peer_Code_Count", "Median_Ratio_Percent", "Stable_Ratio_Range",
+                "Ratio_Consistency", "Ratio_Stability_Level",
                 "Efficiency_Relative_Variation", "Efficiency_Stability_Level",
                 "Ratio_Trend_Per_10_Records", "Trend_Stability_Level",
                 "Historical_Records", "Historical_Batches",
@@ -1172,7 +1214,16 @@ with tab_pilot:
                     "High_Stability_Count_Display": "High-Stability Checks Passed",
                     "Stability_Benchmark_Source": "Comparison Basis",
                     "Peer_Code_Count": "Comparable Paint Codes",
-                    "Ratio_Consistency": st.column_config.NumberColumn("Ratio Consistency (%)", format="%.1f"),
+                    "Median_Ratio_Percent": st.column_config.NumberColumn("Typical Adjustment Ratio (%)", format="%.2f"),
+                    "Stable_Ratio_Range": st.column_config.TextColumn(
+                        "Stable Ratio Range (%)",
+                        help="Median ratio ± the data-driven tolerance used for the consistency calculation.",
+                    ),
+                    "Ratio_Consistency": st.column_config.NumberColumn(
+                        "Ratio Consistency (%)",
+                        format="%.1f",
+                        help="Share of records located within the Stable Ratio Range.",
+                    ),
                     "Ratio_Stability_Level": "Ratio Stability",
                     "Efficiency_Relative_Variation": st.column_config.NumberColumn("Efficiency Relative Variation", format="%.3f"),
                     "Efficiency_Stability_Level": "Efficiency Stability",
@@ -1248,7 +1299,7 @@ with export_col1:
                     export_table_df = export_table_df[[
                         "Paint_Code", "Supplier_Action", "Total_Solvent_kg", "Historical_Batches",
                         "Median_Incoming_Viscosity", "Median_Required_Viscosity",
-                        "Median_Ratio_Percent", "Ratio_Consistency"
+                        "Median_Ratio_Percent", "Stable_Ratio_Range", "Ratio_Consistency"
                     ]]
                     export_table_df = export_table_df.rename(columns={
                         "Paint_Code": "Paint Code",
@@ -1258,6 +1309,7 @@ with export_col1:
                         "Median_Incoming_Viscosity": "Typical Incoming Viscosity (s)",
                         "Median_Required_Viscosity": "Typical Required Viscosity (s)",
                         "Median_Ratio_Percent": "Typical Adjustment Ratio (%)",
+                        "Stable_Ratio_Range": "Stable Ratio Range (%)",
                         "Ratio_Consistency": "Adjustment Consistency (%)",
                     })
                     table = doc.add_table(rows=1, cols=len(export_table_df.columns))
