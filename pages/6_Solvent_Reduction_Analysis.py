@@ -426,7 +426,7 @@ def create_viscosity_history_png(chart_df):
                             fontsize=7.5, color="#374151",
                             bbox=dict(facecolor="white", edgecolor="none", alpha=0.75, pad=0.5), zorder=4)
 
-        ax.set_xlabel("Historical Record Order", fontsize=11, color="black")
+        ax.set_xlabel("Historical Record", fontsize=11, color="black")
         ax.set_ylabel("Viscosity (s)", fontsize=11, color="black")
         ax.grid(axis="y", color="#E5E7EB", linewidth=0.8, zorder=0)
         ax.tick_params(axis="both", colors="black", labelsize=9)
