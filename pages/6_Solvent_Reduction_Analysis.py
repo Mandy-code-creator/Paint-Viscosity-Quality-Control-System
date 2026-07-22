@@ -825,17 +825,17 @@ with tab_pilot:
 
             jitter_pattern = [0.00, -0.14, 0.14, -0.22, 0.22, -0.30, 0.30]
 
-            def assign_display_x(group):
-                group = group.copy()
-                group["Display_Order_In_X"] = np.arange(len(group))
-                group["Matrix_X"] = [
-                    group["High_Stability_Count"].iloc[0] + jitter_pattern[i % len(jitter_pattern)]
-                    for i in range(len(group))
-                ]
-                return group
-
-            plot_df = plot_df.groupby("High_Stability_Count", group_keys=False).apply(assign_display_x)
-            plot_df = plot_df.reset_index(drop=True)
+            # Avoid groupby.apply() here because Pandas 3.x may exclude
+            # the grouping column from each group.
+            plot_df["Display_Order_In_X"] = (
+                plot_df.groupby("High_Stability_Count").cumcount()
+            )
+            plot_df["Matrix_X"] = (
+                plot_df["High_Stability_Count"].astype(float)
+                + plot_df["Display_Order_In_X"].map(
+                    lambda i: jitter_pattern[int(i) % len(jitter_pattern)]
+                )
+            )
 
             fig_matrix = px.scatter(
                 plot_df,
