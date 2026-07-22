@@ -470,217 +470,299 @@ st.markdown("<br>", unsafe_allow_html=True)
 # 6. TABS & VISUALIZATION
 # ==========================================
 tab_ranking, tab_detail, tab_line, tab_pilot = st.tabs([
-    "1️⃣ Top 10 Paint Code Ranking", 
-    "2️⃣ Paint Code Details", 
+    "1️⃣ Top 10 Paint Code Ranking",
+    "2️⃣ Paint Code History",
     "3️⃣ Line Comparison",
-    "4️⃣ Pilot Paint Code Evaluation"
+    "4️⃣ Supplier Improvement Priority",
 ])
 
 # ----- TAB 1: RANKING -----
 with tab_ranking:
     st.subheader("1. Paint Code Solvent Consumption (Top 10)")
-    
-    full_summary_df = build_summary(filter_df, ["Vendor", "Resin", "Position_UI", "Paint_Code", "Solvent_Type"])
-    summary_df = full_summary_df.sort_values("Total_Solvent_kg", ascending=False).head(10).reset_index(drop=True)
+
+    full_summary_df = build_summary(
+        filter_df,
+        ["Vendor", "Resin", "Position_UI", "Paint_Code", "Solvent_Type"],
+    )
+    summary_df = (
+        full_summary_df
+        .sort_values("Total_Solvent_kg", ascending=False)
+        .head(10)
+        .reset_index(drop=True)
+    )
     summary_df.insert(0, "Rank", np.arange(1, len(summary_df) + 1))
 
-    chart_height = max(450, len(summary_df) * 32)
-    
-    ch1, ch2 = st.columns(2)
-    with ch1:
-        df_melt = summary_df.melt(id_vars="Paint_Code", value_vars=["Total_Paint_kg", "Total_Solvent_kg"])
-        df_melt["variable"] = df_melt["variable"].map({"Total_Paint_kg": "Paint", "Total_Solvent_kg": "Solvent"})
-        
-        fig1 = px.bar(
-            df_melt, x="value", y="Paint_Code", color="variable", barmode="group", orientation='h', 
-            height=chart_height, color_discrete_map={"Paint": "#5B8FF9", "Solvent": "#F6BD16"}
+    if summary_df.empty:
+        st.info("No paint-code summary is available for the selected filters.")
+    else:
+        # One combined chart replaces the previous duplicate usage and ratio charts.
+        fig_dual = go.Figure()
+
+        fig_dual.add_trace(go.Bar(
+            x=summary_df["Paint_Code"],
+            y=summary_df["Total_Paint_kg"],
+            name="Paint (kg)",
+            marker_color="#5B8FF9",
+            yaxis="y1",
+            text=summary_df["Total_Paint_kg"].apply(lambda x: f"{x:,.0f}"),
+            textposition="auto",
+        ))
+
+        fig_dual.add_trace(go.Bar(
+            x=summary_df["Paint_Code"],
+            y=summary_df["Total_Solvent_kg"],
+            name="Solvent (kg)",
+            marker_color="#F6BD16",
+            yaxis="y1",
+            text=summary_df["Total_Solvent_kg"].apply(lambda x: f"{x:,.0f}"),
+            textposition="auto",
+        ))
+
+        fig_dual.add_trace(go.Scatter(
+            x=summary_df["Paint_Code"],
+            y=summary_df["Weighted_Ratio_Percent"],
+            name="Solvent Ratio (%)",
+            mode="lines+markers",
+            line=dict(color="DeepSkyBlue", width=3),
+            marker=dict(size=8),
+            yaxis="y2",
+        ))
+
+        for _, row in summary_df.iterrows():
+            fig_dual.add_annotation(
+                x=row["Paint_Code"],
+                y=row["Weighted_Ratio_Percent"],
+                text=f"<b>{row['Weighted_Ratio_Percent']:.2f}%</b>",
+                xref="x",
+                yref="y2",
+                showarrow=False,
+                yshift=18,
+                font=dict(color="black", size=12),
+                bgcolor="rgba(255,255,255,0.85)",
+                borderpad=2,
+            )
+
+        ratio_max = summary_df["Weighted_Ratio_Percent"].max()
+        ratio_upper = max(5.0, float(ratio_max) * 1.25) if pd.notna(ratio_max) else 5.0
+
+        fig_dual.update_layout(
+            title=(
+                "Paint & Solvent Usage vs. Solvent Ratio"
+                f"<br><sup>Filters Applied: {filter_details}</sup>"
+            ),
+            xaxis=dict(title="Paint Code"),
+            yaxis=dict(title="Weight (kg)", side="left", showgrid=False),
+            yaxis2=dict(
+                title="Solvent Ratio (%)",
+                overlaying="y",
+                side="right",
+                showgrid=False,
+                range=[0, ratio_upper],
+            ),
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1,
+            ),
+            height=600,
+            uniformtext_minsize=8,
+            uniformtext_mode="hide",
+            barmode="group",
         )
-        fig1.update_yaxes(dtick=1, title="", categoryorder="total ascending")
-        fig1.update_xaxes(title="Weight (kg)")
-        fig1.update_layout(title="Paint vs Solvent Usage", legend_title_text="", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-        st.plotly_chart(fig1, use_container_width=True)
+        st.plotly_chart(fig_dual, use_container_width=True)
+        exported_figs["4. Top 10 Usage and Ratio"] = fig_dual
 
-    with ch2:
-        sorted_df = summary_df.sort_values("Weighted_Ratio_Percent", ascending=True)
-        fig2 = px.bar(
-            sorted_df, x="Weighted_Ratio_Percent", y="Paint_Code", orientation='h', text_auto='.2f', 
-            height=chart_height, color_discrete_sequence=["#5B8FF9"]
-        )
-        fig2.update_traces(textposition="outside", cliponaxis=False)
-        fig2.update_yaxes(dtick=1, title="")
-        fig2.update_xaxes(title="Ratio (%)")
-        fig2.update_layout(title="Weighted Solvent Ratio (%)")
-        st.plotly_chart(fig2, use_container_width=True)
-
-    st.markdown("---")
-    
-    # Dual Axis Chart
-    fig_dual = go.Figure()
-    
-    fig_dual.add_trace(go.Bar(
-        x=summary_df["Paint_Code"], 
-        y=summary_df["Total_Paint_kg"], 
-        name="Paint (kg)", 
-        marker_color="#5B8FF9", 
-        yaxis="y1",
-        text=summary_df["Total_Paint_kg"].apply(lambda x: f"{x:,.0f}"), 
-        textposition="auto"
-    ))
-    
-    fig_dual.add_trace(go.Bar(
-        x=summary_df["Paint_Code"], 
-        y=summary_df["Total_Solvent_kg"], 
-        name="Solvent (kg)", 
-        marker_color="#F6BD16", 
-        yaxis="y1",
-        text=summary_df["Total_Solvent_kg"].apply(lambda x: f"{x:,.0f}"),
-        textposition="auto"
-    ))
-    
-    fig_dual.add_trace(go.Scatter(
-        x=summary_df["Paint_Code"], 
-        y=summary_df["Weighted_Ratio_Percent"], 
-        name="Solvent Ratio (%)", 
-        mode="lines+markers", 
-        line=dict(color="DeepSkyBlue", width=3), 
-        marker=dict(size=8), 
-        yaxis="y2"
-    ))
-    
-    for i, row in summary_df.iterrows():
-        fig_dual.add_annotation(
-            x=row["Paint_Code"], y=row["Weighted_Ratio_Percent"],
-            text=f"<b>{row['Weighted_Ratio_Percent']:.2f}%</b>", 
-            xref="x", yref="y2", showarrow=False, yshift=18, 
-            font=dict(color="black", size=12), bgcolor="rgba(255, 255, 255, 0.85)", borderpad=2
-        )
-
-    fig_dual.update_layout(
-        title=f"Paint & Solvent Usage vs. Solvent Ratio<br><sup>Filters Applied: {filter_details}</sup>",
-        xaxis=dict(title="Paint Code"),
-        yaxis=dict(title="Weight (kg)", side="left", showgrid=False),
-        yaxis2=dict(
-            title="Solvent Ratio (%)", 
-            overlaying="y", 
-            side="right", 
-            showgrid=False, 
-            range=[0, summary_df["Weighted_Ratio_Percent"].max() * 1.25]
-        ),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        height=600,
-        uniformtext_minsize=8, 
-        uniformtext_mode='hide' 
-    )
-    st.plotly_chart(fig_dual, use_container_width=True)
-    exported_figs["4. Dual Axis Usage vs Ratio"] = fig_dual
-
-# ----- TAB 2: DETAILS -----
-with tab_detail:
-    st.subheader("2. Paint Code Details")
-    selected_code = st.selectbox("Select Paint Code", summary_df["Paint_Code"].unique())
-    detail_df = filter_df[filter_df["Paint_Code"] == selected_code].copy()
-    detail_title_filter = f"{filter_details} | Paint Code: {selected_code}"
-
-    ch3, ch4 = st.columns(2)
-    with ch3:
-        detail_df = detail_df.reset_index(drop=True)
-        detail_df["Record_Index"] = detail_df.index + 1
-        
-        fig3 = go.Figure()
-        fig3.add_trace(go.Scatter(x=detail_df["Record_Index"], y=detail_df["黏度(秒)"], mode="lines+markers", name="Before Viscosity", marker=dict(color="#5B8FF9", size=8), yaxis="y1"))
-        fig3.add_trace(go.Scatter(x=detail_df["Record_Index"], y=detail_df["黏度(秒)_1"], mode="lines+markers", name="After Viscosity", marker=dict(color="#5AD8A6", size=8), yaxis="y1"))
-        
-        if "溫度" in detail_df.columns and not detail_df["溫度"].isna().all():
-            fig3.add_trace(go.Scatter(x=detail_df["Record_Index"], y=detail_df["溫度"], mode="lines+markers", name="Temperature (°C)", marker=dict(color="#F6BD16", size=8, symbol="diamond"), line=dict(color="#F6BD16", width=2, dash="dot"), yaxis="y2"))
-            chart_title = "Viscosity & Temperature Variation (Before vs After)"
-        else:
-            chart_title = "Viscosity Variation (Before vs After)"
-        
-        fig3.update_layout(
-            title=f"{chart_title}<br><sup>Filters: {detail_title_filter}</sup>",
-            xaxis_title="Record Output Sequence", yaxis=dict(title="Viscosity (s)", side="left"),
-            yaxis2=dict(title="Temperature (°C)", overlaying="y", side="right", showgrid=False),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-        )
-        st.plotly_chart(fig3, use_container_width=True)
-        exported_figs["5. Viscosity & Temperature Variation"] = fig3
-
-    with ch4:
-        line_usage = build_summary(detail_df, ["線別"]).sort_values("Total_Solvent_kg")
-        fig4 = px.bar(line_usage, x="Total_Solvent_kg", y="線別", text="Weighted_Ratio_Percent", orientation='h', title=f"Solvent Usage by Line<br><sup>Filters: {detail_title_filter}</sup>", color_discrete_sequence=["#5B8FF9"])
-        fig4.update_traces(texttemplate='%{text:.2f}%', textposition='outside')
-        fig4.update_yaxes(title="")
-        fig4.update_xaxes(title="Total Solvent (kg)")
-        st.plotly_chart(fig4, use_container_width=True)
-        exported_figs["6. Solvent Usage by Line"] = fig4
-
-    # ---------------------------------------------------------
-    # DATA AUDIT TABLE (CONSISTENCY TRACEABILITY)
-    # ---------------------------------------------------------
-    st.markdown("---")
-    st.markdown("### 📊 Ratio Consistency Audit")
-    st.markdown("The consistency range is derived from the median and MAD instead of a manually fixed ±2% band.")
-
-    def median_absolute_deviation(series):
-        values = pd.to_numeric(series, errors="coerce").dropna()
-        if values.empty:
-            return np.nan
-        median_value = values.median()
-        return float(np.median(np.abs(values - median_value)))
-
-    if not detail_df.empty:
-        ratio_values = detail_df["Solvent_Ratio_Percent"].dropna()
-        median_ratio = ratio_values.median()
-        ratio_mad = median_absolute_deviation(ratio_values)
-        tolerance = max(1.0, 1.5 * ratio_mad) if pd.notna(ratio_mad) else 1.0
-        lower_bound = max(0.0, median_ratio - tolerance)
-        upper_bound = median_ratio + tolerance
-
-        st.info(
-            f"🎯 **Median:** {median_ratio:.2f}% ｜ "
-            f"**MAD:** {ratio_mad:.2f}% ｜ "
-            f"**Consistency Range:** {lower_bound:.2f}% to {upper_bound:.2f}%"
-        )
-
-        audit_cols = ["_Analysis_DateTime", "Batch_ID", "Bucket_Number", "Solvent_Ratio_Percent", "Viscosity_Sensitivity"]
-        audit_df = detail_df[audit_cols].copy()
-
-        def evaluate_consistency(val):
-            if pd.isna(val):
-                return "⚠️ N/A"
-            return "✅ Consistent" if lower_bound <= val <= upper_bound else "⚠️ Outside Range"
-
-        audit_df["Consistency_Status"] = audit_df["Solvent_Ratio_Percent"].apply(evaluate_consistency)
-        valid_records = audit_df.dropna(subset=["Solvent_Ratio_Percent"])
-        consistent_count = (valid_records["Consistency_Status"] == "✅ Consistent").sum()
-        total_count = len(valid_records)
-        ratio_consistency = consistent_count / total_count * 100 if total_count else 0
-
-        st.success(
-            f"📈 **Ratio Consistency:** {consistent_count}/{total_count} records are within the data-driven range "
-            f"➔ **{ratio_consistency:.1f}%**"
-        )
-
-        audit_df["Solvent_Ratio_Percent"] = audit_df["Solvent_Ratio_Percent"].map(
-            lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A"
-        )
-        audit_df["Viscosity_Sensitivity"] = audit_df["Viscosity_Sensitivity"].map(
-            lambda x: f"{x:.2f} s/%" if pd.notna(x) else "N/A"
-        )
+        ranking_display = summary_df[[
+            "Rank",
+            "Paint_Code",
+            "Total_Paint_kg",
+            "Total_Solvent_kg",
+            "Weighted_Ratio_Percent",
+            "Adjustment_Records",
+            "Historical_Batches",
+        ]].rename(columns={
+            "Paint_Code": "Paint Code",
+            "Total_Paint_kg": "Total Paint (kg)",
+            "Total_Solvent_kg": "Total Solvent (kg)",
+            "Weighted_Ratio_Percent": "Solvent Ratio (%)",
+            "Adjustment_Records": "Records",
+            "Historical_Batches": "Batches",
+        })
 
         st.dataframe(
-            audit_df,
-            column_config={
-                "_Analysis_DateTime": "Adjustment Time",
-                "Batch_ID": "Paint Batch ID",
-                "Bucket_Number": "Bucket Number",
-                "Solvent_Ratio_Percent": "Solvent Ratio",
-                "Viscosity_Sensitivity": "Dilution Efficiency",
-                "Consistency_Status": "Consistency Status",
-            },
+            ranking_display.style.format({
+                "Total Paint (kg)": "{:,.2f}",
+                "Total Solvent (kg)": "{:,.2f}",
+                "Solvent Ratio (%)": "{:.2f}",
+            }),
             use_container_width=True,
             hide_index=True,
         )
+
+# ----- TAB 2: PAINT CODE HISTORY -----
+with tab_detail:
+    st.subheader("2. Paint Code History")
+    st.caption(
+        "Review incoming viscosity, adjusted viscosity, and solvent ratio for every historical record of one paint code."
+    )
+
+    # Use every paint code available under the global filters, not only the Top 10 list.
+    detail_code_options = sorted(
+        filter_df["Paint_Code"].dropna().astype(str).unique().tolist()
+    )
+
+    if not detail_code_options:
+        st.info("No paint code is available for the selected global filters.")
+    else:
+        selected_code = st.selectbox(
+            "Select Paint Code",
+            detail_code_options,
+            key="tab2_selected_paint_code",
+        )
+
+        detail_df = filter_df[
+            filter_df["Paint_Code"].astype(str) == str(selected_code)
+        ].copy()
+
+        if detail_df.empty:
+            st.warning("No historical records were found for the selected paint code.")
+        else:
+            sort_cols = [
+                col for col in ["_Analysis_DateTime", "_Source_Order"]
+                if col in detail_df.columns
+            ]
+            if sort_cols:
+                detail_df = detail_df.sort_values(sort_cols, na_position="last")
+
+            detail_df = detail_df.reset_index(drop=True)
+            detail_df["Record_Index"] = np.arange(1, len(detail_df) + 1)
+            detail_title_filter = f"{filter_details} | Paint Code: {selected_code}"
+
+            typical_before = detail_df["黏度(秒)"].median()
+            typical_after = detail_df["黏度(秒)_1"].median()
+            typical_ratio = detail_df["Solvent_Ratio_Percent"].median()
+
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Historical Records", f"{len(detail_df):,}")
+            m2.metric(
+                "Typical Incoming Viscosity",
+                f"{typical_before:.2f} s" if pd.notna(typical_before) else "N/A",
+            )
+            m3.metric(
+                "Typical Adjusted Viscosity",
+                f"{typical_after:.2f} s" if pd.notna(typical_after) else "N/A",
+            )
+            m4.metric(
+                "Typical Solvent Ratio",
+                f"{typical_ratio:.2f}%" if pd.notna(typical_ratio) else "N/A",
+            )
+
+            # One chart only: before viscosity, after viscosity, and solvent ratio.
+            fig3 = go.Figure()
+            fig3.add_trace(go.Scatter(
+                x=detail_df["Record_Index"],
+                y=detail_df["黏度(秒)"],
+                mode="lines+markers",
+                name="Before Viscosity (s)",
+                line=dict(width=2),
+                marker=dict(size=7),
+                yaxis="y1",
+            ))
+            fig3.add_trace(go.Scatter(
+                x=detail_df["Record_Index"],
+                y=detail_df["黏度(秒)_1"],
+                mode="lines+markers",
+                name="After Viscosity (s)",
+                line=dict(width=2),
+                marker=dict(size=7),
+                yaxis="y1",
+            ))
+            fig3.add_trace(go.Scatter(
+                x=detail_df["Record_Index"],
+                y=detail_df["Solvent_Ratio_Percent"],
+                mode="lines+markers",
+                name="Solvent Ratio (%)",
+                line=dict(width=2, dash="dash"),
+                marker=dict(size=7, symbol="square"),
+                yaxis="y2",
+            ))
+
+            ratio_series_max = detail_df["Solvent_Ratio_Percent"].max()
+            ratio_axis_max = (
+                max(5.0, float(ratio_series_max) * 1.20)
+                if pd.notna(ratio_series_max)
+                else 5.0
+            )
+
+            fig3.update_layout(
+                title=(
+                    "Before/After Viscosity and Solvent Ratio by Record"
+                    f"<br><sup>Filters: {detail_title_filter}</sup>"
+                ),
+                xaxis=dict(title="Historical Record Order", dtick=1),
+                yaxis=dict(title="Viscosity (s)", side="left", showgrid=True),
+                yaxis2=dict(
+                    title="Solvent Ratio (%)",
+                    overlaying="y",
+                    side="right",
+                    showgrid=False,
+                    range=[0, ratio_axis_max],
+                ),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1,
+                ),
+                height=600,
+                hovermode="x unified",
+            )
+            st.plotly_chart(fig3, use_container_width=True)
+            exported_figs["5. Paint Code History"] = fig3
+
+            detail_columns = [
+                col for col in [
+                    "Record_Index",
+                    "_Analysis_DateTime",
+                    "Batch_ID",
+                    "Bucket_Number",
+                    "線別",
+                    "黏度(秒)",
+                    "黏度(秒)_1",
+                    "Base_Paint_Weight_kg",
+                    "添加重量",
+                    "Solvent_Ratio_Percent",
+                ]
+                if col in detail_df.columns
+            ]
+            detail_table = detail_df[detail_columns].copy().rename(columns={
+                "Record_Index": "Record",
+                "_Analysis_DateTime": "Adjustment Time",
+                "Batch_ID": "Paint Batch",
+                "Bucket_Number": "Bucket Number",
+                "線別": "Production Line",
+                "黏度(秒)": "Before Viscosity (s)",
+                "黏度(秒)_1": "After Viscosity (s)",
+                "Base_Paint_Weight_kg": "Base Paint Weight (kg)",
+                "添加重量": "Solvent Added (kg)",
+                "Solvent_Ratio_Percent": "Solvent Ratio (%)",
+            })
+
+            with st.expander("View Historical Records"):
+                st.dataframe(
+                    detail_table.style.format({
+                        "Before Viscosity (s)": "{:.2f}",
+                        "After Viscosity (s)": "{:.2f}",
+                        "Base Paint Weight (kg)": "{:,.2f}",
+                        "Solvent Added (kg)": "{:,.2f}",
+                        "Solvent Ratio (%)": "{:.2f}",
+                    }),
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
 # ----- TAB 3: LINE COMPARISON -----
 with tab_line:
