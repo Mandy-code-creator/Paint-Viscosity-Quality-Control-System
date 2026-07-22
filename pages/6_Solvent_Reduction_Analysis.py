@@ -174,17 +174,35 @@ def build_summary(source_df, group_cols):
 
 
 def apply_professional_layout(fig, title_text=None, subtitle_text=None, height=None):
-    """Apply a cleaner business-style Plotly layout with black text."""
+    """Apply a clean business-style Plotly layout with black text."""
+    annotations = list(fig.layout.annotations) if fig.layout.annotations else []
+
     if title_text is not None:
-        title_html = f"<b>{title_text}</b>"
-        if subtitle_text:
-            title_html += f"<br><sup>{subtitle_text}</sup>"
         fig.update_layout(
             title=dict(
-                text=title_html,
+                text=f"<b>{title_text}</b>",
                 x=0.0,
                 xanchor="left",
+                y=0.985,
+                yanchor="top",
                 font=dict(size=22, color="#000000"),
+                pad=dict(t=0, b=0),
+            )
+        )
+
+    if subtitle_text:
+        annotations.append(
+            dict(
+                x=0.0,
+                y=1.105,
+                xref="paper",
+                yref="paper",
+                text=subtitle_text,
+                showarrow=False,
+                xanchor="left",
+                yanchor="bottom",
+                align="left",
+                font=dict(size=13, color="#000000"),
             )
         )
 
@@ -193,18 +211,19 @@ def apply_professional_layout(fig, title_text=None, subtitle_text=None, height=N
         paper_bgcolor="white",
         plot_bgcolor="white",
         font=dict(color="#000000", size=13),
+        annotations=annotations,
         hoverlabel=dict(
             bgcolor="white",
             font=dict(color="#000000", size=12),
             bordercolor="#D1D5DB",
         ),
         legend=dict(
-            bgcolor="rgba(255,255,255,0.85)",
+            bgcolor="rgba(255,255,255,0.95)",
             bordercolor="rgba(0,0,0,0)",
             font=dict(color="#000000", size=12),
             title=dict(font=dict(color="#000000", size=12)),
         ),
-        margin=dict(l=70, r=40, t=110, b=70),
+        margin=dict(l=85, r=45, t=175, b=85),
     )
     if height is not None:
         fig.update_layout(height=height)
@@ -213,10 +232,10 @@ def apply_professional_layout(fig, title_text=None, subtitle_text=None, height=N
         showline=True,
         linewidth=1.2,
         linecolor="#111827",
-        mirror=False,
+        mirror=True,
         ticks="outside",
         tickfont=dict(color="#000000", size=12),
-        title_font=dict(color="#000000", size=14),
+        title=dict(font=dict(color="#000000", size=14)),
         gridcolor="#E5E7EB",
         zeroline=False,
     )
@@ -224,10 +243,10 @@ def apply_professional_layout(fig, title_text=None, subtitle_text=None, height=N
         showline=True,
         linewidth=1.2,
         linecolor="#111827",
-        mirror=False,
+        mirror=True,
         ticks="outside",
         tickfont=dict(color="#000000", size=12),
-        title_font=dict(color="#000000", size=14),
+        title=dict(font=dict(color="#000000", size=14)),
         gridcolor="#E5E7EB",
         zerolinecolor="#D1D5DB",
     )
@@ -317,9 +336,16 @@ def create_decision_matrix_png(plot_df, target_opportunity_limit):
         ax.set_xlim(-0.45, 3.45)
         ax.set_ylim(-max_y * 0.05, max_y * 1.15)
 
-    ax.set_title("Pilot Paint Code Decision Matrix", fontsize=16, fontweight="bold", color="black", pad=18)
-    ax.text(0.0, 1.02, "X-axis = Number of High-Stability Indicators (0-3); Y-axis = Estimated Solvent Reduction Opportunity; Bubble Size = Total Solvent Usage",
-            transform=ax.transAxes, fontsize=10.5, color="black", ha="left", va="bottom")
+    fig.suptitle(
+        "Pilot Paint Code Decision Matrix",
+        x=0.08, y=0.985, ha="left", va="top",
+        fontsize=16, fontweight="bold", color="black"
+    )
+    fig.text(
+        0.08, 0.94,
+        "X-axis = High-Stability Indicator Count (0-3); Y-axis = Estimated Solvent Reduction Opportunity; Bubble Size = Total Solvent Usage",
+        fontsize=10.5, color="black", ha="left", va="top"
+    )
     ax.set_xlabel("Number of High-Stability Indicators (0-3)", fontsize=11.5, color="black")
     ax.set_ylabel("Estimated Solvent Reduction Opportunity (kg)", fontsize=11.5, color="black")
     ax.set_xticks([0, 1, 2, 3])
@@ -337,14 +363,16 @@ def create_decision_matrix_png(plot_df, target_opportunity_limit):
     if handles:
         by_label = dict(zip(labels, handles))
         leg = ax.legend(
-            by_label.values(), by_label.keys(), ncol=2, loc="upper left", bbox_to_anchor=(0, 1.0),
-            frameon=False, fontsize=9.5
+            by_label.values(), by_label.keys(), ncol=4,
+            loc="upper left", bbox_to_anchor=(0, 1.09),
+            frameon=False, fontsize=9.5,
+            handletextpad=0.5, columnspacing=1.2
         )
         for txt in leg.get_texts():
             txt.set_color("black")
 
     fig.patch.set_facecolor("white")
-    fig.tight_layout()
+    fig.subplots_adjust(left=0.10, right=0.98, bottom=0.12, top=0.78)
     buf = io.BytesIO()
     fig.savefig(buf, format="png", bbox_inches="tight", facecolor="white", dpi=220)
     plt.close(fig)
@@ -1010,10 +1038,15 @@ with tab_pilot:
             )
 
             fig_matrix.update_xaxes(
-                title="High-Stability Indicator Count (0–3)",
+                title=dict(
+                    text="High-Stability Indicator Count (0–3)",
+                    font=dict(color="#000000", size=14),
+                    standoff=18,
+                ),
                 tickmode="array",
                 tickvals=[0, 1, 2, 3],
                 ticktext=["0", "1", "2", "3"],
+                tickfont=dict(color="#000000", size=12),
                 range=[-0.45, 3.45],
                 mirror=True,
                 showline=True,
@@ -1022,7 +1055,12 @@ with tab_pilot:
             )
             max_y = max(float(plot_df["Estimated_Reduction_kg"].max()), 1.0)
             fig_matrix.update_yaxes(
-                title="Estimated Solvent Reduction Opportunity (kg)",
+                title=dict(
+                    text="Estimated Solvent Reduction Opportunity (kg)",
+                    font=dict(color="#000000", size=14),
+                    standoff=18,
+                ),
+                tickfont=dict(color="#000000", size=12),
                 range=[-max_y * 0.05, max_y * 1.15],
                 mirror=True,
                 showline=True,
@@ -1031,14 +1069,15 @@ with tab_pilot:
             )
             fig_matrix.update_layout(
                 legend=dict(
-                    title="Strategy",
+                    title=None,
                     orientation="h",
                     yanchor="bottom",
-                    y=1.08,
+                    y=1.015,
                     xanchor="left",
                     x=0.0,
                     font=dict(color="#000000", size=12),
-                    title_font=dict(color="#000000", size=12),
+                    itemclick="toggle",
+                    itemdoubleclick="toggleothers",
                 )
             )
 
