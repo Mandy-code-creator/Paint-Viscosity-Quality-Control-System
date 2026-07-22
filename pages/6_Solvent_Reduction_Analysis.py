@@ -4,6 +4,7 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import matplotlib.pyplot as plt
+from matplotlib.transforms import blended_transform_factory
 import io
 
 # ==========================================
@@ -329,13 +330,15 @@ def create_supplier_priority_png(plot_df, target_solvent_limit):
             2.55, max_y * 1.055, "Strong Evidence Zone", fontsize=10, color="black", ha="left", va="bottom",
             bbox=dict(facecolor="white", edgecolor="#DC2626", linewidth=0.8, pad=2),
         )
-        # Place the threshold note at the left side so it does not cover bubbles or paint-code labels.
+        # Put the threshold note outside the right chart frame so it cannot cover bubbles or labels.
+        threshold_transform = blended_transform_factory(ax.transAxes, ax.transData)
         ax.text(
-            -0.40, target_solvent_limit + max_y * 0.018,
+            1.015, target_solvent_limit,
             f"Threshold: {target_solvent_limit:,.0f} kg",
-            fontsize=9.5, color="black", ha="left", va="bottom",
+            transform=threshold_transform,
+            fontsize=9.5, color="black", ha="left", va="center",
             bbox=dict(facecolor="white", edgecolor="#DC2626", linewidth=0.8, pad=2),
-            zorder=5,
+            clip_on=False, zorder=5,
         )
         ax.set_xlim(-0.45, 3.45)
         ax.set_ylim(-max_y * 0.05, max_y * 1.15)
@@ -366,16 +369,20 @@ def create_supplier_priority_png(plot_df, target_solvent_limit):
     if handles:
         by_label = dict(zip(labels, handles))
         leg = ax.legend(
-            by_label.values(), by_label.keys(), ncol=4,
-            loc="upper left", bbox_to_anchor=(0, 1.16),
-            frameon=False, fontsize=9.5,
-            handletextpad=0.5, columnspacing=1.2,
+            by_label.values(), by_label.keys(), ncol=1,
+            loc="upper left", bbox_to_anchor=(1.01, 1.00),
+            frameon=True, fontsize=9.5,
+            handletextpad=0.6, labelspacing=0.9,
+            borderaxespad=0.0,
         )
+        leg.get_frame().set_facecolor("white")
+        leg.get_frame().set_edgecolor("#D1D5DB")
+        leg.get_frame().set_linewidth(0.8)
         for txt in leg.get_texts():
             txt.set_color("black")
 
     fig.patch.set_facecolor("white")
-    fig.subplots_adjust(left=0.10, right=0.98, bottom=0.12, top=0.72)
+    fig.subplots_adjust(left=0.10, right=0.77, bottom=0.16, top=0.72)
     buf = io.BytesIO()
     fig.savefig(buf, format="png", bbox_inches="tight", facecolor="white", dpi=220)
     plt.close(fig)
@@ -1193,10 +1200,17 @@ with tab_pilot:
                     x=0.01, xanchor="left", y=0.98, yanchor="top",
                     font=dict(size=20, color="#000000"),
                 ),
-                margin=dict(l=80, r=45, t=170, b=80),
+                margin=dict(l=80, r=255, t=170, b=90),
                 legend=dict(
-                    title_text="", orientation="h", yanchor="bottom", y=1.01,
-                    xanchor="left", x=0.0, font=dict(color="#000000", size=12),
+                    title_text="Action Category",
+                    orientation="v",
+                    yanchor="top", y=1.00,
+                    xanchor="left", x=1.015,
+                    font=dict(color="#000000", size=12),
+                    title_font=dict(color="#000000", size=12),
+                    bgcolor="rgba(255,255,255,0.98)",
+                    bordercolor="#D1D5DB",
+                    borderwidth=1,
                 ),
             )
             fig_matrix.add_vline(x=2.5, line_dash="dash", line_color="#D62728", line_width=1.6, opacity=0.85)
@@ -1206,11 +1220,11 @@ with tab_pilot:
                 font=dict(size=12, color="#000000"), bgcolor="rgba(255,255,255,0.95)",
                 bordercolor="#D62728", borderwidth=1, borderpad=3,
             )
-            # Anchor the threshold note to the left edge to prevent overlap with x=3 bubbles and labels.
+            # Put the threshold note outside the right chart frame so it never covers data labels.
             fig_matrix.add_annotation(
-                x=0.01, xref="paper", y=target_solvent_limit, yref="y",
+                x=1.015, xref="paper", y=target_solvent_limit, yref="y",
                 text=f"Threshold: {target_solvent_limit:,.0f} kg",
-                showarrow=False, xanchor="left", yanchor="bottom",
+                showarrow=False, xanchor="left", yanchor="middle",
                 font=dict(size=11, color="#000000"), bgcolor="rgba(255,255,255,0.97)",
                 bordercolor="#D62728", borderwidth=1, borderpad=3,
             )
