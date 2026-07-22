@@ -194,7 +194,7 @@ def apply_professional_layout(fig, title_text=None, subtitle_text=None, height=N
         annotations.append(
             dict(
                 x=0.0,
-                y=1.105,
+                y=1.205,
                 xref="paper",
                 yref="paper",
                 text=subtitle_text,
@@ -223,7 +223,7 @@ def apply_professional_layout(fig, title_text=None, subtitle_text=None, height=N
             font=dict(color="#000000", size=12),
             title=dict(font=dict(color="#000000", size=12)),
         ),
-        margin=dict(l=85, r=45, t=175, b=85),
+        margin=dict(l=90, r=50, t=235, b=90),
     )
     if height is not None:
         fig.update_layout(height=height)
@@ -364,7 +364,7 @@ def create_decision_matrix_png(plot_df, target_opportunity_limit):
         by_label = dict(zip(labels, handles))
         leg = ax.legend(
             by_label.values(), by_label.keys(), ncol=4,
-            loc="upper left", bbox_to_anchor=(0, 1.09),
+            loc="upper left", bbox_to_anchor=(0, 1.16),
             frameon=False, fontsize=9.5,
             handletextpad=0.5, columnspacing=1.2
         )
@@ -372,7 +372,7 @@ def create_decision_matrix_png(plot_df, target_opportunity_limit):
             txt.set_color("black")
 
     fig.patch.set_facecolor("white")
-    fig.subplots_adjust(left=0.10, right=0.98, bottom=0.12, top=0.78)
+    fig.subplots_adjust(left=0.10, right=0.98, bottom=0.12, top=0.72)
     buf = io.BytesIO()
     fig.savefig(buf, format="png", bbox_inches="tight", facecolor="white", dpi=220)
     plt.close(fig)
@@ -1068,17 +1068,34 @@ with tab_pilot:
                 linewidth=1.2,
             )
             fig_matrix.update_layout(
+                height=790,
+                margin=dict(l=90, r=50, t=235, b=90),
                 legend=dict(
                     title=None,
                     orientation="h",
                     yanchor="bottom",
-                    y=1.015,
+                    y=1.085,
                     xanchor="left",
                     x=0.0,
                     font=dict(color="#000000", size=12),
+                    bgcolor="rgba(255,255,255,0)",
+                    borderwidth=0,
+                    traceorder="normal",
                     itemclick="toggle",
                     itemdoubleclick="toggleothers",
                 )
+            )
+
+            # Final axis styling: keep all axis text solid black.
+            fig_matrix.update_xaxes(
+                title_font=dict(color="#000000", size=14),
+                tickfont=dict(color="#000000", size=12),
+                color="#000000",
+            )
+            fig_matrix.update_yaxes(
+                title_font=dict(color="#000000", size=14),
+                tickfont=dict(color="#000000", size=12),
+                color="#000000",
             )
 
             fig_matrix.add_vline(
@@ -1220,7 +1237,18 @@ with tab_pilot:
                     "Overall P33": global_thresholds[metric]["P33"],
                     "Overall P67": global_thresholds[metric]["P67"],
                 })
-            st.dataframe(pd.DataFrame(threshold_rows), use_container_width=True, hide_index=True)
+            threshold_df = pd.DataFrame(threshold_rows)
+            st.dataframe(
+                threshold_df,
+                column_config={
+                    "Indicator": st.column_config.TextColumn("Indicator"),
+                    "Direction": st.column_config.TextColumn("Direction"),
+                    "Overall P33": st.column_config.NumberColumn("Overall P33", format="%.2f"),
+                    "Overall P67": st.column_config.NumberColumn("Overall P67", format="%.2f"),
+                },
+                use_container_width=True,
+                hide_index=True,
+            )
     else:
         display_df = pd.DataFrame()
         st.warning("⚠️ Insufficient historical records to generate the matrix analysis.")
