@@ -812,26 +812,41 @@ with tab_pilot:
             fig_matrix.add_hline(
                 y=target_opportunity_limit, line_dash="dash", line_color="red", opacity=0.7
             )
-            fig_matrix.update_xaxes(
-                title="高穩定指標數 (0–3)",
-                tickmode="array",
-                tickvals=[0, 1, 2, 3],
-                range=[-0.3, 3.3],
+            # Thêm khung bao và chỉnh MÀU ĐEN cho chữ ở trục X
+        fig_matrix.update_xaxes(
+            title="添加比例變異數 (Ratio CV) ➔ Lower is Better", 
+            title_font=dict(color='black', size=14), # <-- Chữ tiêu đề trục màu đen
+            tickfont=dict(color='black', size=12),   # <-- Số trên trục màu đen
+            autorange="reversed",
+            showline=True, linewidth=1, linecolor='black', mirror=True
+        )
+        
+        # Thêm khung bao và chỉnh MÀU ĐEN cho chữ ở trục Y
+        max_y = pilot_df["Total_Solvent_kg"].max()
+        fig_matrix.update_yaxes(
+            title="稀釋劑消耗量 (Solvent Usage - kg)", 
+            title_font=dict(color='black', size=14), # <-- Chữ tiêu đề trục màu đen
+            tickfont=dict(color='black', size=12),   # <-- Số trên trục màu đen
+            range=[- (max_y * 0.05), max_y * 1.1],
+            showline=True, linewidth=1, linecolor='black', mirror=True
+        )
+
+        # Xử lý Legend bị đè và ép toàn bộ font thành màu đen
+        fig_matrix.update_layout(
+            font=dict(color='black'), # <-- Ép màu đen mặc định cho toàn bộ biểu đồ
+            plot_bgcolor="white", paper_bgcolor="white", 
+            margin=dict(l=60, r=40, t=160, b=60), # <-- Tăng t=160 để có đủ chỗ cho Title 2 dòng
+            legend=dict(
+                title="戰略分類 (Strategy):", 
+                orientation="h", 
+                yanchor="bottom", 
+                y=1.15, # <-- Đẩy Legend lên cao hẳn để né Subtitle
+                xanchor="right", 
+                x=1,
+                font=dict(color='black'),
+                title_font=dict(color='black')
             )
-            max_y = max(float(plot_df["Estimated_Reduction_kg"].max()), 1.0)
-            fig_matrix.update_yaxes(
-                title="預估稀釋劑減量機會 (kg)",
-                range=[-max_y * 0.05, max_y * 1.12],
-            )
-            fig_matrix.update_layout(
-                plot_bgcolor="white",
-                paper_bgcolor="white",
-                margin=dict(l=60, r=40, t=110, b=60),
-                legend=dict(
-                    title="策略分類", orientation="h", yanchor="bottom", y=1.02,
-                    xanchor="right", x=1
-                ),
-            )
+        )
             st.plotly_chart(fig_matrix, use_container_width=True)
             exported_figs["9. Decision Matrix"] = fig_matrix
         else:
