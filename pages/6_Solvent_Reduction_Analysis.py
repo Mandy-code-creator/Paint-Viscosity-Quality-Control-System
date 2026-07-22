@@ -688,28 +688,88 @@ with tab_detail:
 # ----- TAB 3: LINE COMPARISON -----
 with tab_line:
     st.subheader("3. Production Line Comparison")
-    comp_code = st.selectbox("Select Paint Code for Line Comparison", summary_df["Paint_Code"].unique(), key="line_comp")
-    comp_df = filter_df[filter_df["Paint_Code"] == comp_code]
-    line_summary = build_summary(comp_df, ["線別"]).sort_values("線別")
 
-    if len(line_summary) >= 2:
+    # Only show paint codes that have valid records on at least two production lines
+    # within the current global filter selection.
+    comparable_code_summary = (
+        filter_df.loc[filter_df["線別"] != "Unknown"]
+        .groupby("Paint_Code", dropna=False)
+        .agg(
+            Production_Line_Count=("線別", "nunique"),
+            Comparison_Records=("Paint_Code", "size"),
+            Total_Solvent_kg=("添加重量", "sum"),
+        )
+        .reset_index()
+    )
+
+    comparable_code_summary = comparable_code_summary[
+        comparable_code_summary["Production_Line_Count"] >= 2
+    ].sort_values(
+        ["Production_Line_Count", "Comparison_Records", "Total_Solvent_kg", "Paint_Code"],
+        ascending=[False, False, False, True],
+    )
+
+    comparable_codes = comparable_code_summary["Paint_Code"].tolist()
+
+    if not comparable_codes:
+        st.info(
+            "No paint code is currently used on at least two production lines "
+            "within the selected global filters."
+        )
+    else:
+        st.caption(
+            f"Only paint codes used on at least two production lines are listed "
+            f"({len(comparable_codes):,} comparable codes)."
+        )
+
+        comp_code = st.selectbox(
+            "Select Paint Code for Line Comparison",
+            comparable_codes,
+            key="line_comp",
+        )
+
+        comp_df = filter_df[
+            (filter_df["Paint_Code"] == comp_code)
+            & (filter_df["線別"] != "Unknown")
+        ].copy()
+        line_summary = build_summary(comp_df, ["線別"]).sort_values("線別")
+
         ch5, ch6 = st.columns(2)
         with ch5:
             fig5 = go.Figure()
-            for i, row in line_summary.iterrows():
-                fig5.add_trace(go.Scatter(x=[row["Median_After_Viscosity"], row["Median_Before_Viscosity"]], y=[row["線別"], row["線別"]], mode="lines+markers", marker=dict(size=12), name=row["線別"]))
-            fig5.update_layout(title="Viscosity Drop (Before vs After)", xaxis_title="Viscosity (s)", yaxis_title="")
+            for _, row in line_summary.iterrows():
+                fig5.add_trace(
+                    go.Scatter(
+                        x=[row["Median_After_Viscosity"], row["Median_Before_Viscosity"]],
+                        y=[row["線別"], row["線別"]],
+                        mode="lines+markers",
+                        marker=dict(size=12),
+                        name=row["線別"],
+                    )
+                )
+            fig5.update_layout(
+                title="Viscosity Drop (Before vs After)",
+                xaxis_title="Viscosity (s)",
+                yaxis_title="",
+            )
             st.plotly_chart(fig5, use_container_width=True)
             exported_figs["7. Line Comparison - Viscosity Drop"] = fig5
 
         with ch6:
-            fig6 = px.bar(line_summary.sort_values("Weighted_Ratio_Percent"), x="Weighted_Ratio_Percent", y="線別", orientation='h', text_auto='.2f', title="Weighted Solvent Ratio", color_discrete_sequence=["#5AD8A6"])
+            fig6 = px.bar(
+                line_summary.sort_values("Weighted_Ratio_Percent"),
+                x="Weighted_Ratio_Percent",
+                y="線別",
+                orientation="h",
+                text_auto=".2f",
+                title="Weighted Solvent Ratio",
+                color_discrete_sequence=["#2563EB"],
+            )
+            fig6.update_traces(texttemplate="%{x:.2f}%", textposition="outside")
+            fig6.update_xaxes(title="Weighted Solvent Ratio (%)")
             fig6.update_yaxes(title="")
             st.plotly_chart(fig6, use_container_width=True)
             exported_figs["8. Line Comparison - Solvent Ratio"] = fig6
-    else:
-        used_line = line_summary["線別"].iloc[0] if not line_summary.empty else "Unknown"
-        st.info(f"ℹ️ Paint code **{comp_code}** is currently only used on line **{used_line}**. Comparison requires data from at least two production lines.")
 
 # ----- TAB 4: PILOT PAINT CODE EVALUATION -----
 with tab_pilot:
