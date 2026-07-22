@@ -577,8 +577,10 @@ with tab_pilot:
             height=650
         )
 
+        # Cập nhật màu chữ thành đen đậm và rõ hơn
         fig_matrix.update_traces(
             textposition='top center',
+            textfont=dict(color='black', size=12), # <-- Thêm màu đen cho label trên data points
             hovertemplate=(
                 "<b>%{hovertext}</b><br>"
                 "──────────────────<br>"
@@ -589,6 +591,40 @@ with tab_pilot:
                 "<extra></extra>"
             )
         )
+
+        # Add Quadrant Crosshairs
+        fig_matrix.add_vline(x=target_cv_limit, line_dash="dash", line_color="red", opacity=0.7)
+        fig_matrix.add_hline(y=target_vol_limit, line_dash="dash", line_color="red", opacity=0.7)
+
+        # Thêm khung bao màu đen cho trục X (showline, mirror)
+        fig_matrix.update_xaxes(
+            title="添加比例變異數 (Ratio CV) ➔ Lower is Better", 
+            autorange="reversed",
+            showline=True, linewidth=1, linecolor='black', mirror=True # <-- Tạo viền dưới và trên
+        )
+        
+        # Thêm khung bao màu đen cho trục Y (showline, mirror)
+        max_y = pilot_df["Total_Solvent_kg"].max()
+        fig_matrix.update_yaxes(
+            title="稀釋劑消耗量 (Solvent Usage - kg)", 
+            range=[- (max_y * 0.05), max_y * 1.1],
+            showline=True, linewidth=1, linecolor='black', mirror=True # <-- Tạo viền trái và phải
+        )
+
+        # Tăng margin lề trên (t=140) để chữ không bị đè, chỉnh tọa độ Legend
+        fig_matrix.update_layout(
+            plot_bgcolor="white", paper_bgcolor="white", 
+            margin=dict(l=60, r=40, t=140, b=60), # <-- t=140 tăng khoảng trống phía trên
+            legend=dict(
+                title="戰略分類 (Strategy)", 
+                orientation="h", 
+                yanchor="bottom", 
+                y=1.08, # <-- Đẩy Legend lên cao một chút để tách khỏi Title
+                xanchor="right", 
+                x=1
+            )
+        )
+        
 
         # Add Quadrant Crosshairs
         fig_matrix.add_vline(x=target_cv_limit, line_dash="dash", line_color="red", opacity=0.7)
