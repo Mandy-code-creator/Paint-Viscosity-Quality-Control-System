@@ -259,6 +259,159 @@ def apply_professional_layout(fig, title_text=None, subtitle_text=None, height=N
     return fig
 
 
+def create_top10_usage_ratio_png(summary_df, filter_details):
+    """Create the Top 10 paint/solvent usage and weighted ratio chart for Word export."""
+    fig, ax1 = plt.subplots(figsize=(11.2, 6.3), dpi=180)
+
+    if summary_df is None or summary_df.empty:
+        ax1.text(0.5, 0.5, "No data available", ha="center", va="center", fontsize=12, color="black")
+        ax1.set_axis_off()
+    else:
+        chart_df = summary_df.copy().reset_index(drop=True)
+        x = np.arange(len(chart_df))
+        bar_width = 0.36
+
+        paint_bars = ax1.bar(
+            x - bar_width / 2,
+            chart_df["Total_Paint_kg"],
+            width=bar_width,
+            label="Paint (kg)",
+            color="#5B8FF9",
+            edgecolor="white",
+            linewidth=0.8,
+            zorder=3,
+        )
+        solvent_bars = ax1.bar(
+            x + bar_width / 2,
+            chart_df["Total_Solvent_kg"],
+            width=bar_width,
+            label="Solvent (kg)",
+            color="#F6BD16",
+            edgecolor="white",
+            linewidth=0.8,
+            zorder=3,
+        )
+
+        ax2 = ax1.twinx()
+        ax2.plot(
+            x,
+            chart_df["Weighted_Ratio_Percent"],
+            marker="o",
+            markersize=6,
+            linewidth=2.4,
+            color="#10A9E2",
+            label="Solvent Ratio (%)",
+            zorder=4,
+        )
+
+        max_weight = max(float(chart_df[["Total_Paint_kg", "Total_Solvent_kg"]].max().max()), 1.0)
+        max_ratio = max(float(chart_df["Weighted_Ratio_Percent"].max()), 1.0)
+        ax1.set_ylim(0, max_weight * 1.18)
+        ax2.set_ylim(0, max(5.0, max_ratio * 1.30))
+
+        for bar in paint_bars:
+            value = bar.get_height()
+            ax1.text(
+                bar.get_x() + bar.get_width() / 2,
+                value + max_weight * 0.012,
+                f"{value:,.0f}",
+                ha="center",
+                va="bottom",
+                fontsize=8.5,
+                rotation=90 if value > max_weight * 0.72 else 0,
+                color="black",
+            )
+
+        for bar in solvent_bars:
+            value = bar.get_height()
+            ax1.text(
+                bar.get_x() + bar.get_width() / 2,
+                value + max_weight * 0.012,
+                f"{value:,.0f}",
+                ha="center",
+                va="bottom",
+                fontsize=8.5,
+                color="black",
+            )
+
+        for i, ratio in enumerate(chart_df["Weighted_Ratio_Percent"]):
+            ax2.annotate(
+                f"{ratio:.2f}%",
+                xy=(x[i], ratio),
+                xytext=(0, 10),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                fontsize=9,
+                fontweight="bold",
+                color="black",
+                bbox=dict(boxstyle="round,pad=0.18", facecolor="white", edgecolor="none", alpha=0.88),
+            )
+
+        ax1.set_xticks(x)
+        ax1.set_xticklabels(chart_df["Paint_Code"].astype(str), fontsize=9.5, color="black")
+        ax1.set_xlabel("Paint Code", fontsize=11, color="black", labelpad=10)
+        ax1.set_ylabel("Weight (kg)", fontsize=11, color="black")
+        ax2.set_ylabel("Solvent Ratio (%)", fontsize=11, color="black")
+
+        ax1.grid(axis="y", color="#E5E7EB", linewidth=0.8, zorder=1)
+        ax1.tick_params(axis="both", colors="black", labelsize=9.5)
+        ax2.tick_params(axis="y", colors="black", labelsize=9.5)
+        ax1.set_facecolor("white")
+
+        for spine in ax1.spines.values():
+            spine.set_visible(True)
+            spine.set_color("#111827")
+            spine.set_linewidth(1.0)
+        ax2.spines["right"].set_color("#111827")
+        ax2.spines["right"].set_linewidth(1.0)
+        ax2.spines["top"].set_visible(False)
+        ax2.spines["left"].set_visible(False)
+        ax2.spines["bottom"].set_visible(False)
+
+        handles1, labels1 = ax1.get_legend_handles_labels()
+        handles2, labels2 = ax2.get_legend_handles_labels()
+        legend = ax1.legend(
+            handles1 + handles2,
+            labels1 + labels2,
+            loc="upper center",
+            bbox_to_anchor=(0.5, 1.12),
+            ncol=3,
+            frameon=False,
+            fontsize=9.5,
+        )
+        for txt in legend.get_texts():
+            txt.set_color("black")
+
+    fig.suptitle(
+        "Figure 1. Paint & Solvent Usage vs. Solvent Ratio",
+        x=0.07,
+        y=0.985,
+        ha="left",
+        va="top",
+        fontsize=15,
+        fontweight="bold",
+        color="black",
+    )
+    fig.text(
+        0.07,
+        0.945,
+        f"Filters Applied: {filter_details}",
+        fontsize=9.5,
+        color="black",
+        ha="left",
+        va="top",
+    )
+    fig.patch.set_facecolor("white")
+    fig.subplots_adjust(left=0.08, right=0.92, bottom=0.16, top=0.78)
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight", facecolor="white", dpi=220)
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
 def create_supplier_priority_png(plot_df, target_solvent_limit):
     """Create a Word-exportable supplier priority matrix with Matplotlib (no Kaleido)."""
     fig, ax = plt.subplots(figsize=(10.5, 6.5), dpi=180)
@@ -1417,13 +1570,29 @@ with export_col1:
                 p.add_run(f"Filters Applied: {filter_details}\n")
                 p.add_run("Note: Charts in this report are exported with Matplotlib. Kaleido is not used.")
 
+                if 'summary_df' in locals() and not summary_df.empty:
+                    doc.add_heading("1. Overall Solvent Usage", level=1)
+                    top10_chart_buffer = create_top10_usage_ratio_png(summary_df, filter_details)
+                    picture_p = doc.add_paragraph()
+                    picture_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    picture_p.add_run().add_picture(top10_chart_buffer, width=Inches(10.2))
+                    caption = doc.add_paragraph(
+                        "Figure 1. Comparison of paint usage, solvent adjustment, and weighted solvent ratio for the Top 10 paint codes."
+                    )
+                    caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    caption.runs[0].italic = True
+                    caption.runs[0].font.size = Pt(9)
+                else:
+                    doc.add_paragraph("No Top 10 usage data is available for export.")
+
                 if 'matrix_export_plot_df' in locals() and not matrix_export_plot_df.empty:
-                    doc.add_heading("1. Supplier Priority Matrix", level=1)
+                    doc.add_page_break()
+                    doc.add_heading("2. Supplier Priority Matrix", level=1)
                     chart_buffer = create_supplier_priority_png(matrix_export_plot_df, target_solvent_limit)
                     picture_p = doc.add_paragraph()
                     picture_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     picture_p.add_run().add_picture(chart_buffer, width=Inches(9.8))
-                    caption = doc.add_paragraph("Figure 1. Supplier priority matrix for incoming-viscosity improvement.")
+                    caption = doc.add_paragraph("Figure 2. Supplier priority matrix for incoming-viscosity improvement.")
                     caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     caption.runs[0].italic = True
                     caption.runs[0].font.size = Pt(9)
@@ -1432,7 +1601,7 @@ with export_col1:
 
                 if 'display_df' in locals() and not display_df.empty:
                     doc.add_page_break()
-                    doc.add_heading("2. Supplier Decision Summary", level=1)
+                    doc.add_heading("3. Supplier Decision Summary", level=1)
                     doc.add_paragraph(
                         "Decision focus: Recommended Action → Total Solvent Adjustment → "
                         "Incoming/Required Viscosity → Stable Ratio Range → Adjustment Consistency."
