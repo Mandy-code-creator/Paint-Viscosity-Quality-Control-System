@@ -383,27 +383,10 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
         for txt in legend.get_texts():
             txt.set_color("black")
 
-    fig.suptitle(
-        "Figure 1. Paint & Solvent Usage vs. Solvent Ratio",
-        x=0.07,
-        y=0.985,
-        ha="left",
-        va="top",
-        fontsize=15,
-        fontweight="bold",
-        color="black",
-    )
-    fig.text(
-        0.07,
-        0.945,
-        f"Filters Applied: {filter_details}",
-        fontsize=9.5,
-        color="black",
-        ha="left",
-        va="top",
-    )
+    # Keep the exported chart image clean: the figure title and filter details
+    # are written as separate Word paragraphs, not embedded inside the PNG.
     fig.patch.set_facecolor("white")
-    fig.subplots_adjust(left=0.08, right=0.92, bottom=0.16, top=0.78)
+    fig.subplots_adjust(left=0.08, right=0.92, bottom=0.16, top=0.88)
 
     buf = io.BytesIO()
     fig.savefig(buf, format="png", bbox_inches="tight", facecolor="white", dpi=220)
@@ -1572,16 +1555,29 @@ with export_col1:
 
                 if 'summary_df' in locals() and not summary_df.empty:
                     doc.add_heading("1. Overall Solvent Usage", level=1)
+
+                    figure_title = doc.add_paragraph()
+                    figure_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    figure_title_run = figure_title.add_run(
+                        "Figure 1. Paint & Solvent Usage vs. Solvent Ratio"
+                    )
+                    figure_title_run.bold = True
+                    figure_title_run.font.size = Pt(11)
+
+                    figure_filter = doc.add_paragraph()
+                    figure_filter.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    figure_filter_run = figure_filter.add_run(
+                        f"Filters Applied: {filter_details}"
+                    )
+                    figure_filter_run.italic = True
+                    figure_filter_run.font.size = Pt(8.5)
+
                     top10_chart_buffer = create_top10_usage_ratio_png(summary_df, filter_details)
                     picture_p = doc.add_paragraph()
                     picture_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    picture_p.paragraph_format.space_before = Pt(2)
+                    picture_p.paragraph_format.space_after = Pt(2)
                     picture_p.add_run().add_picture(top10_chart_buffer, width=Inches(10.2))
-                    caption = doc.add_paragraph(
-                        "Figure 1. Comparison of paint usage, solvent adjustment, and weighted solvent ratio for the Top 10 paint codes."
-                    )
-                    caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    caption.runs[0].italic = True
-                    caption.runs[0].font.size = Pt(9)
                 else:
                     doc.add_paragraph("No Top 10 usage data is available for export.")
 
