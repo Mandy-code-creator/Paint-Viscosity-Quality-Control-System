@@ -190,12 +190,12 @@ st.subheader("🗂️ 塗料階層總覽 (Hierarchical Overview)")
 st.markdown("Hierarchy: **Vendor ➔ Resin ➔ Position ➔ Solvent Type ➔ Paint Code**. Box size represents total solvent usage (kg).")
 
 # Prepare Treemap data
-tree_df = filter_df.groupby(["Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint Code"]).agg(
+# Prepare Treemap data
+tree_df = filter_df.groupby(["Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint_Code"]).agg(
     添加重量=("添加重量", "sum"),
     Delta_V=("Delta_V", "median"), 
     Solvent_Ratio_Percent=("Solvent_Ratio_Percent", "median")
-).reset_index(names=["Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint_Code"])
-tree_df = tree_df[tree_df["添加重量"] > 0]
+).reset_index() # Bỏ 'names=...' đi vì tên cột gốc đã chính xác
 
 fig_tree = px.treemap(
     tree_df,
