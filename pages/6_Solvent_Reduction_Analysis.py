@@ -807,10 +807,10 @@ with tab_pilot:
         pilot_df["Strategy_Quadrant"] = pilot_df.apply(classify_quadrant, axis=1)
 
         color_map = {
-            "優先試用 (Quick Wins)": "#2F6B6D",
-            "需先標準化 (Standardize First)": "#F6BD16",
-            "次要評估 (Secondary)": "#5B8FF9",
-            "暫不考慮 (Ignore)": "#C9C5BE",
+            "優先試用 (Quick Wins)": "#0033A0",               # Xanh dương đậm (Dark Blue)
+            "需先標準化 (Standardize First)": "#FF8C00",      # Cam (Orange)
+            "次要評估 (Secondary)": "#7B9EFA",               # Xanh nhạt
+            "暫不考慮 (Ignore)": "#C9C5BE",                  # Xám
         }
 
         # X-axis shows the number of indicators classified as high stability (0–3).
@@ -891,29 +891,44 @@ with tab_pilot:
             )
 
             fig_matrix.update_xaxes(
-                title="高穩定指標數 (0–3)",
-                tickmode="array",
-                tickvals=[0, 1, 2, 3],
-                ticktext=["0", "1", "2", "3"],
-                range=[-0.45, 3.45],
+            title="高穩定指標數 (0–3)",
+            tickmode="array",
+            tickvals=[0, 1, 2, 3],
+            range=[-0.3, 3.3],
+            title_font=dict(color='black', size=14),
+            tickfont=dict(color='black', size=12),
+            showline=True, linewidth=1, linecolor='black', mirror=True # mirror=True tạo khung viền đối diện
+        )
+        
+        max_y = max(float(plot_df["Estimated_Reduction_kg"].max()), 1.0)
+        fig_matrix.update_yaxes(
+            title="預估稀釋劑減量機會 (kg)",
+            range=[-max_y * 0.05, max_y * 1.12],
+            title_font=dict(color='black', size=14),
+            tickfont=dict(color='black', size=12),
+            showline=True, linewidth=1, linecolor='black', mirror=True # mirror=True tạo khung viền đối diện
+        )
+        
+        # 3. Chống ghi đè Title/Legend và ép toàn cục font màu đen
+        fig_matrix.update_layout(
+            font=dict(color='black'), # Ép toàn bộ font mặc định thành màu đen
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            margin=dict(l=60, r=40, t=140, b=60), # Tăng lề trên (t=140) để nới rộng không gian
+            title=dict(
+                text="<b>試用色號決策矩陣</b><br><sup>X軸＝三項指標中屬高穩定的項目數；氣泡大小＝稀釋劑總用量</sup>",
+                font=dict(color='black', size=18)
+            ),
+            legend=dict(
+                title="策略分類", 
+                orientation="h", 
+                yanchor="bottom", 
+                y=1.08, # Đẩy Legend lên vị trí y=1.08 để hoàn toàn tách biệt khỏi Title
+                xanchor="right", 
+                x=1,
+                font=dict(color='black')
             )
-            max_y = max(float(plot_df["Estimated_Reduction_kg"].max()), 1.0)
-            fig_matrix.update_yaxes(
-                title="預估稀釋劑減量機會 (kg)",
-                range=[-max_y * 0.05, max_y * 1.15],
-            )
-            fig_matrix.update_layout(
-                legend=dict(
-                    title="策略分類",
-                    orientation="h",
-                    yanchor="bottom",
-                    y=1.05,
-                    xanchor="left",
-                    x=0.0,
-                    font=dict(color="#000000", size=12),
-                    title_font=dict(color="#000000", size=12),
-                )
-            )
+        )
 
             fig_matrix.add_vline(
                 x=2.5, line_dash="dash", line_color="#D62728", line_width=1.6, opacity=0.85
