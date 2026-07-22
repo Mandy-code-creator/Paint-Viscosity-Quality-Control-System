@@ -52,98 +52,57 @@ for col in num_cols:
     df[col] = pd.to_numeric(df.get(col, np.nan), errors="coerce")
 
 # ---------------------------------------------------------
-# WEIGHT LOGIC
-# Source column 塗料重量 is the total weight after solvent addition.
-# Preserve the source value and calculate the original paint weight separately.
+# Deduct solvent weight from total mixture to get base paint
 # ---------------------------------------------------------
-df["Mixture_Weight_kg"] = df["塗料重量"]
-df["Base_Paint_Weight_kg"] = df["Mixture_Weight_kg"] - df["添加重量"]
+df["塗料重量"] = df["塗料重量"] - df["添加重量"]
 
 df["Delta_V"] = df["黏度(秒)"] - df["黏度(秒)_1"]
-df["Solvent_Ratio_Percent"] = np.where(
-    df["Base_Paint_Weight_kg"] > 0,
-    df["添加重量"] / df["Base_Paint_Weight_kg"] * 100,
-    np.nan,
-)
-df["Viscosity_Sensitivity"] = np.where(
-    df["Solvent_Ratio_Percent"] > 0,
-    df["Delta_V"] / df["Solvent_Ratio_Percent"],
-    np.nan,
-)
+df["Solvent_Ratio_Percent"] = np.where(df["塗料重量"] > 0, df["添加重量"] / df["塗料重量"] * 100, np.nan)
+df["Viscosity_Sensitivity"] = np.where(df["Solvent_Ratio_Percent"] > 0, df["Delta_V"] / df["Solvent_Ratio_Percent"], np.nan)
 
-# Strict validation after reconstructing the original paint weight
-df = df[
-    (df["Base_Paint_Weight_kg"] > 0)
-    & (df["添加重量"] > 0)
-    & (df["黏度(秒)"] > 0)
-    & (df["黏度(秒)_1"] > 0)
-    & (df["Delta_V"] > 0)
-].copy()
+# Strict filter ensuring base paint weight is greater than 0 after deduction
+df = df[(df["塗料重量"]>0) & (df["添加重量"]>0) & (df["黏度(秒)"]>0) & (df["黏度(秒)_1"]>0) & (df["Delta_V"]>0)].copy()
 
 if df.empty:
     st.warning("⚠️ No valid dilution records remain after data cleaning.")
     st.stop()
 
 # ==========================================
-# 2.1 TIME PARSING & RECORD SELECTION LOGIC
+# 2.1 TIME PARSING & DEDUPLICATION LOGIC
 # ==========================================
 date_col = next((c for c in ["攪拌日期", "調整日期", "生產日期", "Date"] if c in df.columns), None)
-time_col = next((c for c in ["攪拌時間(迄)", "攪拌時間", "Time"] if c in df.columns), None)
+time_col = next((c for c in ["攪拌時間", "攪拌時間(迄)", "Time"] if c in df.columns), None)
 
+sort_cols = ["Batch_ID", "Bucket_Number"]
 if date_col:
-    date_part = pd.to_datetime(df[date_col], errors="coerce")
-    df["_Analysis_Date"] = date_part
+    df["_Analysis_Date"] = pd.to_datetime(df[date_col], errors="coerce")
+    sort_cols.append("_Analysis_Date")
 else:
-    date_part = pd.Series(pd.NaT, index=df.index)
     df["_Analysis_Date"] = pd.NaT
 
 if time_col:
-    time_text = (
-        df[time_col]
-        .fillna("")
-        .astype(str)
-        .str.replace(r"\.0$", "", regex=True)
-        .str.replace(":", "", regex=False)
-        .str.zfill(4)
-    )
-    valid_time = time_text.str.fullmatch(r"\d{4}")
-    hours = pd.to_numeric(time_text.str[:2], errors="coerce")
-    minutes = pd.to_numeric(time_text.str[2:4], errors="coerce")
-    valid_time &= hours.between(0, 23) & minutes.between(0, 59)
-    time_delta = pd.to_timedelta(
-        np.where(valid_time, hours * 60 + minutes, np.nan), unit="m"
-    )
-    df["_Analysis_DateTime"] = date_part.dt.normalize() + time_delta
-else:
-    df["_Analysis_DateTime"] = date_part
+    sort_cols.append(time_col)
 
-# Preserve source row order as a final tie-breaker when timestamps are missing/equal.
-df["_Source_Order"] = np.arange(len(df))
-df = df.sort_values(
-    ["Batch_ID", "Bucket_Number", "_Analysis_DateTime", "_Source_Order"],
-    ascending=True,
-    na_position="first",
-)
+# Sort entire dataset chronologically
+df = df.sort_values(by=sort_cols, ascending=True)
 
-# PS30213X8: every row is an independent adjustment and must be retained.
-# Other paint codes: repeated rows for the same batch + bucket are cumulative
-# adjustments, therefore only the final chronological record is representative.
-special_paint_codes = {"PS30213X8"}
+# Identify special paint codes
+special_paint_codes = ["PS30213X8"]
 is_special_paint = df["Paint_Code"].isin(special_paint_codes)
 
-df_standard = (
-    df.loc[~is_special_paint]
-    .drop_duplicates(subset=["Batch_ID", "Bucket_Number"], keep="last")
-    .copy()
+# Process Standard Paint Codes (Apply deduplication)
+df_standard = df[~is_special_paint].copy()
+df_standard = df_standard.drop_duplicates(
+    subset=["Batch_ID", "Bucket_Number"], 
+    keep="last"
 )
-df_special = df.loc[is_special_paint].copy()
 
+# Process Special Paint Codes (NO deduplication, keep all records for PS30213X8)
+df_special = df[is_special_paint].copy()
+
+# Merge and Restore Chronological Order
 df = pd.concat([df_standard, df_special], ignore_index=True)
-df = df.sort_values(
-    ["_Analysis_DateTime", "Batch_ID", "Bucket_Number", "_Source_Order"],
-    ascending=True,
-    na_position="last",
-).reset_index(drop=True)
+df = df.sort_values(by=["Batch_ID", "Bucket_Number", "_Analysis_Date"])
 
 # ==========================================
 # 3. CORE LOGIC HELPER
@@ -154,9 +113,9 @@ def build_summary(source_df, group_cols):
     agg_dict = {
         "Adjustment_Records": ("Paint_Code", "size"),
         "Historical_Batches": ("Batch_ID", "nunique"),
-        "Total_Paint_kg": ("Base_Paint_Weight_kg", "sum"),
+        "Total_Paint_kg": ("塗料重量", "sum"),
         "Total_Solvent_kg": ("添加重量", "sum"),
-        "Median_Paint_kg": ("Base_Paint_Weight_kg", "median"),
+        "Median_Paint_kg": ("塗料重量", "median"),
         "Median_Solvent_kg": ("添加重量", "median"),
         "Median_Ratio_Percent": ("Solvent_Ratio_Percent", "median"),
         "Median_Before_Viscosity": ("黏度(秒)", "median"),
@@ -231,11 +190,11 @@ st.subheader("🗂️ 塗料階層總覽 (Hierarchical Overview)")
 st.markdown("Hierarchy: **Vendor ➔ Resin ➔ Position ➔ Solvent Type ➔ Paint Code**. Box size represents total solvent usage (kg).")
 
 # Prepare Treemap data
-tree_df = filter_df.groupby(["Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint_Code"]).agg(
+tree_df = filter_df.groupby(["Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint Code"]).agg(
     添加重量=("添加重量", "sum"),
     Delta_V=("Delta_V", "median"), 
     Solvent_Ratio_Percent=("Solvent_Ratio_Percent", "median")
-).reset_index()
+).reset_index(names=["Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint_Code"])
 tree_df = tree_df[tree_df["添加重量"] > 0]
 
 fig_tree = px.treemap(
@@ -249,7 +208,6 @@ fig_tree = px.treemap(
     height=700
 )
 
-# Update Labels and Tooltips
 fig_tree.update_traces(
     texttemplate="<b>%{label}</b><br>%{value:,.0f} kg",
     hovertemplate="<b>%{label}</b><br>Solvent Usage: %{value:,.1f} kg<br>Visc Drop: ~%{customdata[0]:.1f} s<br>Solvent Added: ~%{customdata[1]:.1f}%",
@@ -368,6 +326,26 @@ with tab_ranking:
     )
     st.plotly_chart(fig_dual, use_container_width=True)
     exported_figs["4. Dual Axis Usage vs Ratio"] = fig_dual
+    
+    # ---------------------------------------------------------
+    # ISSUE 5 FIX: Viscosity Sensitivity / Dilution Efficiency
+    # ---------------------------------------------------------
+    st.markdown("---")
+    st.subheader("💡 稀釋效率分析 (Dilution Efficiency - Bottom 10)")
+    st.markdown("*(Lower efficiency means more solvent is wasted to achieve the same viscosity drop)*")
+    
+    eff_df = full_summary_df[full_summary_df["Median_Dilution_Efficiency"] > 0].sort_values("Median_Dilution_Efficiency", ascending=True).head(10)
+    
+    if not eff_df.empty:
+        fig_eff = px.bar(
+            eff_df, x="Median_Dilution_Efficiency", y="Paint_Code", orientation='h',
+            text_auto='.2f', title="Top 10 Lowest Dilution Efficiency (Worst Performers)",
+            color_discrete_sequence=["#FF7F50"], height=450
+        )
+        fig_eff.update_yaxes(title="", dtick=1)
+        fig_eff.update_xaxes(title="Efficiency (Viscosity Drop sec / % Solvent Added)")
+        st.plotly_chart(fig_eff, use_container_width=True)
+        exported_figs["4b. Dilution Efficiency"] = fig_eff
 
 # ----- TAB 2: DETAILS -----
 with tab_detail:
@@ -410,78 +388,73 @@ with tab_detail:
         exported_figs["6. Solvent Usage by Line"] = fig4
 
     # ---------------------------------------------------------
-    # DATA AUDIT TABLE (CONSISTENCY TRACEABILITY)
+    # DATA AUDIT TABLE (STABILITY TRACEABILITY)
     # ---------------------------------------------------------
     st.markdown("---")
-    st.markdown("### 📊 添加比例一致性明細 (Ratio Consistency Audit)")
-    st.markdown("以中位數與 MAD 建立資料驅動範圍，不再使用人工設定的固定 ±2%。")
-
-    def median_absolute_deviation(series):
-        values = pd.to_numeric(series, errors="coerce").dropna()
-        if values.empty:
-            return np.nan
-        median_value = values.median()
-        return float(np.median(np.abs(values - median_value)))
-
+    st.markdown("### 📊 穩定度檢驗明細 (Stability Audit Table)")
+    st.markdown("*(Historical batch audit table for stability calculation verification)*")
+    
+    audit_tolerance = st.number_input(
+        "輸入容許誤差範圍 (Input Tolerance Band for Audit - ±%)", 
+        value=2.0, step=0.5, key="audit_tol"
+    )
+    
     if not detail_df.empty:
-        ratio_values = detail_df["Solvent_Ratio_Percent"].dropna()
-        median_ratio = ratio_values.median()
-        ratio_mad = median_absolute_deviation(ratio_values)
-        tolerance = max(1.0, 1.5 * ratio_mad) if pd.notna(ratio_mad) else 1.0
-        lower_bound = max(0.0, median_ratio - tolerance)
-        upper_bound = median_ratio + tolerance
-
+        median_ratio = detail_df["Solvent_Ratio_Percent"].median()
+        lower_bound = median_ratio - audit_tolerance
+        upper_bound = median_ratio + audit_tolerance
+        
         st.info(
-            f"🎯 **Median:** {median_ratio:.2f}% ｜ "
-            f"**MAD:** {ratio_mad:.2f}% ｜ "
-            f"**一致範圍:** {lower_bound:.2f}%～{upper_bound:.2f}%"
+            f"🎯 **Target (中位數 - Median):** {median_ratio:.2f}% | "
+            f"🛡️ **Safe Zone (安全範圍 - Safe Range):** {lower_bound:.2f}% ~ {upper_bound:.2f}%"
         )
+        
+        audit_df = detail_df[["_Analysis_Date", "Batch_ID", "Bucket_Number", "Solvent_Ratio_Percent"]].copy()
+        
+        # ISSUE 4 FIX: Corrected Semantic Meaning of Labels
+        def evaluate_status(val):
+            if pd.isna(val): return "⚠️ N/A"
+            if lower_bound <= val <= upper_bound: return "✅ Pass (達標)"
+            if val < lower_bound: return "❌ Fail (Base Paint Too Thin)"
+            return "❌ Fail (Base Paint Too Thick)"
 
-        audit_cols = ["_Analysis_DateTime", "Batch_ID", "Bucket_Number", "Solvent_Ratio_Percent", "Viscosity_Sensitivity"]
-        audit_df = detail_df[audit_cols].copy()
-
-        def evaluate_consistency(val):
-            if pd.isna(val):
-                return "⚠️ N/A"
-            return "✅ 一致" if lower_bound <= val <= upper_bound else "⚠️ 偏離"
-
-        audit_df["Consistency_Status"] = audit_df["Solvent_Ratio_Percent"].apply(evaluate_consistency)
+        audit_df["Status (狀態)"] = audit_df["Solvent_Ratio_Percent"].apply(evaluate_status)
+        
         valid_records = audit_df.dropna(subset=["Solvent_Ratio_Percent"])
-        consistent_count = (valid_records["Consistency_Status"] == "✅ 一致").sum()
+        pass_count = (audit_df["Status (狀態)"] == "✅ Pass (達標)").sum()
         total_count = len(valid_records)
-        ratio_consistency = consistent_count / total_count * 100 if total_count else 0
-
-        st.success(
-            f"📈 **添加比例一致率:** {consistent_count}/{total_count} 筆位於資料驅動範圍內 "
-            f"➔ **{ratio_consistency:.1f}%**"
-        )
-
-        audit_df["Solvent_Ratio_Percent"] = audit_df["Solvent_Ratio_Percent"].map(
-            lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A"
-        )
-        audit_df["Viscosity_Sensitivity"] = audit_df["Viscosity_Sensitivity"].map(
-            lambda x: f"{x:.2f} s/%" if pd.notna(x) else "N/A"
-        )
-
+        actual_stability = (pass_count / total_count * 100) if total_count > 0 else 0
+        
+        st.success(f"📈 **Result (結果):** {pass_count} / {total_count} batches within safe zone ➔ **Stability = {actual_stability:.1f}%**")
+        
+        audit_df["Solvent_Ratio_Percent"] = audit_df["Solvent_Ratio_Percent"].apply(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
+        
         st.dataframe(
-            audit_df,
+            audit_df, 
             column_config={
-                "_Analysis_DateTime": "調整時間",
-                "Batch_ID": "塗料批號",
-                "Bucket_Number": "塗料桶號",
-                "Solvent_Ratio_Percent": "稀釋劑添加比例",
-                "Viscosity_Sensitivity": "降黏效率",
-                "Consistency_Status": "一致性判定",
+                "_Analysis_Date": "Analysis Date (分析日期)",
+                "Batch_ID": "Batch ID (塗料批號)",
+                "Bucket_Number": "Bucket (塗料桶號)",
+                "Solvent_Ratio_Percent": "Ratio % (添加比例)",
+                "Status (狀態)": "Status (狀態)"
             },
-            use_container_width=True,
-            hide_index=True,
+            use_container_width=True, 
+            hide_index=True
         )
 
 # ----- TAB 3: LINE COMPARISON -----
 with tab_line:
     st.subheader("3. Production Line Comparison")
     comp_code = st.selectbox("Select Paint Code for Line Comparison", summary_df["Paint_Code"].unique(), key="line_comp")
-    comp_df = filter_df[filter_df["Paint_Code"] == comp_code]
+    
+    # ISSUE 6 FIX: Retrieve Data globally for the selected paint code to bypass the 'selected_lines' filter
+    base_line_df = df.copy()
+    if selected_vendor != "All": base_line_df = base_line_df[base_line_df["Vendor"] == selected_vendor]
+    if selected_resin != "All": base_line_df = base_line_df[base_line_df["Resin"] == selected_resin]
+    if selected_position != "All": base_line_df = base_line_df[base_line_df["Position_UI"] == selected_position]
+    if selected_solvent != "All": base_line_df = base_line_df[base_line_df["Solvent_Type"] == selected_solvent]
+    
+    comp_df = base_line_df[base_line_df["Paint_Code"] == comp_code]
     line_summary = build_summary(comp_df, ["線別"]).sort_values("線別")
 
     if len(line_summary) >= 2:
@@ -497,146 +470,82 @@ with tab_line:
         with ch6:
             fig6 = px.bar(line_summary.sort_values("Weighted_Ratio_Percent"), x="Weighted_Ratio_Percent", y="線別", orientation='h', text_auto='.2f', title="Weighted Solvent Ratio", color_discrete_sequence=["#5AD8A6"])
             fig6.update_yaxes(title="")
+            fig6.update_xaxes(title="Weighted Solvent Ratio (%)")
             st.plotly_chart(fig6, use_container_width=True)
             exported_figs["8. Line Comparison - Solvent Ratio"] = fig6
     else:
         used_line = line_summary["線別"].iloc[0] if not line_summary.empty else "Unknown"
-        st.info(f"ℹ️ Paint code **{comp_code}** is currently only used on line **{used_line}**. Comparison requires data from at least two production lines. (此色號僅在單一產線使用，無法進行比較)")
+        st.info(f"ℹ️ Paint code **{comp_code}** is currently only used on a single line (**{used_line}**) across the entire historical dataset. Comparison requires data from at least two production lines.")
 
-# ----- TAB 4: PILOT PAINT CODE EVALUATION -----
+# ----- TAB 4: PILOT PAINT CODE EVALUATION (MATRIX APPROACH) -----
 with tab_pilot:
     st.subheader("4. 試用色號評估矩陣 (Pilot Paint Code Matrix)")
+
     st.markdown(
-        "以預估減量機會及製程穩定度找出最適合先進行減量試用的色號。"
-        "穩定度同時考量添加比例一致性、降黏效率變異及時間趨勢。"
+        "透過分析稀釋劑消耗量（效益）與添加比例變異數 CV（穩定度），直觀找出最佳試用目標。<br>"
+        "*(Utilizing a Cost-Benefit & Stability CV Matrix to identify the best candidates for pilot testing.)*",
+        unsafe_allow_html=True
     )
 
+    # ISSUE 3 FIX: Changed Inputs to use CV instead of coverage percentage
     set1, set2, set3 = st.columns(3)
     with set1:
-        min_pilot_records = st.number_input("最低歷史紀錄數", min_value=5, value=20, step=1)
+        min_pilot_records = st.number_input("最低歷史紀錄數 (Min Records)", min_value=5, value=20, step=1)
     with set2:
-        target_opportunity_limit = st.number_input(
-            "高減量機會門檻 (kg)", min_value=0.0, value=500.0, step=100.0
-        )
+        target_vol_limit = st.number_input("高消耗門檻 (Volume Threshold - kg)", min_value=100, value=5000, step=500)
     with set3:
-        target_stability_limit = st.number_input(
-            "高穩定門檻 (分)", min_value=0, max_value=100, value=80, step=5
+        target_cv_limit = st.number_input(
+            "高穩定門檻 (Max CV Limit)", 
+            min_value=0.01, max_value=1.00, value=0.15, step=0.05, format="%.2f",
+            help="Lower CV means higher stability. Paints with CV below this limit are considered stable."
         )
 
-    def robust_mad(series):
+    # Helper functions
+    def safe_cv(series):
         values = pd.to_numeric(series, errors="coerce").dropna()
-        if values.empty:
+        if len(values) < 2:
             return np.nan
-        median_value = values.median()
-        return float(np.median(np.abs(values - median_value)))
-
-    def ratio_consistency(series):
-        values = pd.to_numeric(series, errors="coerce").dropna()
-        if len(values) < 5:
+            
+        # IQR Outlier Filter Logic
+        Q1 = values.quantile(0.25)
+        Q3 = values.quantile(0.75)
+        IQR = Q3 - Q1
+        
+        lower_bound = Q1 - 1.5 * IQR
+        upper_bound = Q3 + 1.5 * IQR
+        
+        filtered_values = values[(values >= lower_bound) & (values <= upper_bound)]
+        
+        if len(filtered_values) < 2 or filtered_values.mean() <= 0:
             return np.nan
-        median_value = values.median()
-        mad = robust_mad(values)
-        tolerance = max(1.0, 1.5 * mad)
-        return values.between(median_value - tolerance, median_value + tolerance, inclusive="both").mean()
+            
+        return filtered_values.std(ddof=1) / filtered_values.mean()
 
-    def robust_relative_variation(series):
-        values = pd.to_numeric(series, errors="coerce").dropna()
-        if len(values) < 5:
-            return np.nan
-        median_value = values.median()
-        if median_value <= 0:
-            return np.nan
-        return robust_mad(values) / median_value
-
-    group_keys = ["Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint_Code"]
-    peer_keys = ["Vendor", "Resin", "Position_UI", "Solvent_Type"]
-
-    pilot_df = filter_df.groupby(group_keys, dropna=False).agg(
+    # Aggregate Data
+    pilot_df = filter_df.groupby(["Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint_Code"], dropna=False).agg(
         Historical_Records=("Paint_Code", "size"),
-        Historical_Batches=("Batch_ID", "nunique"),
-        Total_Paint_kg=("Base_Paint_Weight_kg", "sum"),
+        Total_Paint_kg=("塗料重量", "sum"),
         Total_Solvent_kg=("添加重量", "sum"),
         Median_Ratio_Percent=("Solvent_Ratio_Percent", "median"),
-        Ratio_Consistency=("Solvent_Ratio_Percent", ratio_consistency),
-        Ratio_Robust_Variation=("Solvent_Ratio_Percent", robust_relative_variation),
-        Median_Efficiency=("Viscosity_Sensitivity", "median"),
-        Efficiency_Relative_Variation=("Viscosity_Sensitivity", robust_relative_variation),
+        Ratio_CV=("Solvent_Ratio_Percent", safe_cv)
     ).reset_index()
 
-    # Calculate time trend per 10 records so groups with different record counts are comparable.
-    def trend_per_10_records(group):
-        temp = group.dropna(subset=["Solvent_Ratio_Percent"]).sort_values(
-            ["_Analysis_DateTime", "_Source_Order"], na_position="last"
-        )
-        if len(temp) < 5:
-            return np.nan
-        x = np.arange(len(temp), dtype=float)
-        y = temp["Solvent_Ratio_Percent"].to_numpy(dtype=float)
-        return float(np.polyfit(x, y, 1)[0] * 10)
-
-    trend_df = (
-        filter_df.groupby(group_keys, dropna=False)
-        .apply(trend_per_10_records)
-        .reset_index(name="Ratio_Trend_Per_10_Records")
-    )
-    pilot_df = pilot_df.merge(trend_df, on=group_keys, how="left")
-
-    pilot_df["Weighted_Ratio_Percent"] = np.where(
-        pilot_df["Total_Paint_kg"] > 0,
-        pilot_df["Total_Solvent_kg"] / pilot_df["Total_Paint_kg"] * 100,
-        np.nan,
-    )
-
-    # Peer benchmark: 25th percentile of paint-code weighted ratios under the same
-    # vendor/resin/position/solvent condition. This represents a conservative,
-    # historically achieved reference rather than an arbitrary target.
-    eligible_for_benchmark = pilot_df[pilot_df["Historical_Records"] >= min_pilot_records].copy()
-    benchmark_df = (
-        eligible_for_benchmark.groupby(peer_keys, dropna=False)["Weighted_Ratio_Percent"]
-        .quantile(0.25)
-        .reset_index(name="Benchmark_Ratio_Percent")
-    )
-    pilot_df = pilot_df.merge(benchmark_df, on=peer_keys, how="left")
-    pilot_df["Estimated_Reduction_kg"] = (
-        pilot_df["Total_Solvent_kg"]
-        - pilot_df["Total_Paint_kg"] * pilot_df["Benchmark_Ratio_Percent"] / 100
-    ).clip(lower=0)
-
-    pilot_df["Efficiency_Stability"] = (
-        1 - pilot_df["Efficiency_Relative_Variation"]
-    ).clip(lower=0, upper=1)
-    pilot_df["Trend_Stability"] = (
-        1 - pilot_df["Ratio_Trend_Per_10_Records"].abs() / 2.0
-    ).clip(lower=0, upper=1)
-
-    pilot_df["Stability_Score"] = (
-        pilot_df["Ratio_Consistency"].fillna(0) * 0.50
-        + pilot_df["Efficiency_Stability"].fillna(0) * 0.30
-        + pilot_df["Trend_Stability"].fillna(0) * 0.20
-    ) * 100
-
-    def stability_level(score):
-        if pd.isna(score):
-            return "資料不足"
-        if score >= 80:
-            return "穩定"
-        if score >= 65:
-            return "尚可"
-        return "不穩定"
-
-    pilot_df["Stability_Level"] = pilot_df["Stability_Score"].apply(stability_level)
+    pilot_df["Weighted_Ratio_Percent"] = np.where(pilot_df["Total_Paint_kg"] > 0, pilot_df["Total_Solvent_kg"] / pilot_df["Total_Paint_kg"] * 100, np.nan)
     pilot_df = pilot_df[pilot_df["Historical_Records"] >= min_pilot_records].copy()
 
+    # ISSUE 3 FIX: Matrix Classification Logic updated for CV
     def classify_quadrant(row):
-        high_opportunity = row["Estimated_Reduction_kg"] >= target_opportunity_limit
-        high_stability = row["Stability_Score"] >= target_stability_limit
-        if high_opportunity and high_stability:
+        high_vol = row["Total_Solvent_kg"] >= target_vol_limit
+        high_stability = pd.notna(row["Ratio_CV"]) and row["Ratio_CV"] <= target_cv_limit
+        
+        if high_vol and high_stability:
             return "優先試用 (Quick Wins)"
-        if high_opportunity and not high_stability:
+        elif high_vol and not high_stability:
             return "需先標準化 (Standardize First)"
-        if not high_opportunity and high_stability:
+        elif not high_vol and high_stability:
             return "次要評估 (Secondary)"
-        return "暫不考慮 (Ignore)"
+        else:
+            return "暫不考慮 (Ignore)"
 
     if not pilot_df.empty:
         pilot_df["Strategy_Quadrant"] = pilot_df.apply(classify_quadrant, axis=1)
@@ -645,119 +554,88 @@ with tab_pilot:
             "優先試用 (Quick Wins)": "#2F6B6D",
             "需先標準化 (Standardize First)": "#F6BD16",
             "次要評估 (Secondary)": "#5B8FF9",
-            "暫不考慮 (Ignore)": "#C9C5BE",
+            "暫不考慮 (Ignore)": "#C9C5BE"
         }
 
-        pilot_df["Display_Label"] = np.where(
-            pilot_df["Estimated_Reduction_kg"] >= target_opportunity_limit,
-            pilot_df["Paint_Code"],
-            "",
+        pilot_df["Display_Label"] = pilot_df.apply(
+            lambda x: x["Paint_Code"] if x["Total_Solvent_kg"] >= target_vol_limit else "", 
+            axis=1
         )
 
+        # Plotly Scatter Matrix
         fig_matrix = px.scatter(
             pilot_df,
-            x="Stability_Score",
-            y="Estimated_Reduction_kg",
-            size="Total_Solvent_kg",
+            x="Ratio_CV",
+            y="Total_Solvent_kg",
+            size="Weighted_Ratio_Percent",
             color="Strategy_Quadrant",
             color_discrete_map=color_map,
             hover_name="Paint_Code",
             text="Display_Label",
-            custom_data=[
-                "Total_Solvent_kg",
-                "Weighted_Ratio_Percent",
-                "Benchmark_Ratio_Percent",
-                "Estimated_Reduction_kg",
-                "Ratio_Consistency",
-                "Efficiency_Relative_Variation",
-                "Ratio_Trend_Per_10_Records",
-                "Historical_Records",
-            ],
-            title=(
-                "<b>試用色號決策矩陣</b><br>"
-                "<sup>氣泡大小＝稀釋劑總用量；Y軸＝相較同條件歷史基準的預估減量機會</sup>"
-            ),
-            height=680,
+            custom_data=["Total_Solvent_kg", "Weighted_Ratio_Percent", "Historical_Records", "Ratio_CV"],
+            title=f"<b>試用色號決策矩陣 (Decision Matrix)</b><br><sup>Bubble size = Dilution Ratio (%) | Filters: {filter_details}</sup>",
+            height=650
         )
+
         fig_matrix.update_traces(
-            textposition="top center",
+            textposition='top center',
             hovertemplate=(
-                "<b>%{hovertext}</b><br>──────────────────<br>"
-                "製程穩定度: %{x:.1f} 分<br>"
-                "預估減量機會: %{customdata[3]:,.1f} kg<br>"
-                "稀釋劑總用量: %{customdata[0]:,.1f} kg<br>"
-                "目前加權比例: %{customdata[1]:.2f}%<br>"
-                "同條件基準比例: %{customdata[2]:.2f}%<br>"
-                "添加比例一致率: %{customdata[4]:.1%}<br>"
-                "降黏效率相對變異: %{customdata[5]:.3f}<br>"
-                "每10筆比例趨勢: %{customdata[6]:+.2f} 個百分點<br>"
-                "歷史紀錄數: %{customdata[7]:,.0f} 筆<extra></extra>"
-            ),
+                "<b>%{hovertext}</b><br>"
+                "──────────────────<br>"
+                "稀釋劑總用量 (Solvent): %{customdata[0]:,.1f} kg<br>"
+                "CV值 (Filtered CV): %{customdata[3]:.3f}<br>"
+                "加權添加比例 (Ratio): %{customdata[1]:.2f}%<br>"
+                "歷史紀錄數 (Records): %{customdata[2]:,.0f} 筆<br>"
+                "<extra></extra>"
+            )
         )
-        fig_matrix.add_vline(x=target_stability_limit, line_dash="dash", line_color="red", opacity=0.7)
-        fig_matrix.add_hline(y=target_opportunity_limit, line_dash="dash", line_color="red", opacity=0.7)
-        fig_matrix.update_xaxes(title="製程穩定度評分 (0–100)", range=[0, 105])
-        max_y = max(float(pilot_df["Estimated_Reduction_kg"].max()), 1.0)
-        fig_matrix.update_yaxes(title="預估稀釋劑減量機會 (kg)", range=[-max_y * 0.05, max_y * 1.12])
+
+        # Add Quadrant Crosshairs
+        fig_matrix.add_vline(x=target_cv_limit, line_dash="dash", line_color="red", opacity=0.7)
+        fig_matrix.add_hline(y=target_vol_limit, line_dash="dash", line_color="red", opacity=0.7)
+
+        # ISSUE 3 FIX: Autorange is reversed so lower CV (high stability) goes to the right side
+        fig_matrix.update_xaxes(title="添加比例變異數 (Ratio CV) ➔ Lower is Better", autorange="reversed")
+        
+        max_y = pilot_df["Total_Solvent_kg"].max()
+        fig_matrix.update_yaxes(title="稀釋劑消耗量 (Solvent Usage - kg)", range=[- (max_y * 0.05), max_y * 1.1])
+
         fig_matrix.update_layout(
-            plot_bgcolor="white",
-            paper_bgcolor="white",
-            margin=dict(l=60, r=40, t=110, b=60),
-            legend=dict(title="策略分類", orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            plot_bgcolor="white", paper_bgcolor="white", margin=dict(l=60, r=40, t=100, b=60),
+            legend=dict(title="戰略分類 (Strategy)", orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
+        
+        # Add background quadrant annotations
+        # Position X needs careful handling due to reversed axis
+        min_cv = pilot_df["Ratio_CV"].min() if not pilot_df.empty else 0.0
+        max_cv = pilot_df["Ratio_CV"].max() if not pilot_df.empty else 1.0
+        fig_matrix.add_annotation(x=max(0, min_cv - 0.05), y=max_y * 1.05, text="<b>Quick Wins</b>", showarrow=False, font=dict(color="#2F6B6D", size=16), xanchor="right")
+        fig_matrix.add_annotation(x=max_cv * 1.05, y=max_y * 1.05, text="<b>Standardize First</b>", showarrow=False, font=dict(color="#F6BD16", size=16), xanchor="left")
+
         st.plotly_chart(fig_matrix, use_container_width=True)
         exported_figs["9. Decision Matrix"] = fig_matrix
 
+        # Output Table
         st.markdown("---")
-        st.markdown("### 評估結果明細")
-        out_cols = [
-            "Paint_Code", "Strategy_Quadrant", "Stability_Score", "Stability_Level",
-            "Estimated_Reduction_kg", "Total_Solvent_kg", "Weighted_Ratio_Percent",
-            "Benchmark_Ratio_Percent", "Ratio_Consistency",
-            "Efficiency_Relative_Variation", "Ratio_Trend_Per_10_Records",
-            "Historical_Records", "Historical_Batches",
-        ]
-        display_df = pilot_df[out_cols].sort_values(
-            ["Strategy_Quadrant", "Estimated_Reduction_kg"], ascending=[True, False]
-        )
-        display_df["Ratio_Consistency_Percent"] = display_df["Ratio_Consistency"] * 100
-        display_df = display_df.drop(columns=["Ratio_Consistency"]).rename(
-            columns={"Ratio_Consistency_Percent": "Ratio_Consistency"}
-        )
+        st.markdown("### 評估結果明細 (Evaluation Details)")
+        
+        out_cols = ["Paint_Code", "Strategy_Quadrant", "Total_Solvent_kg", "Weighted_Ratio_Percent", "Ratio_CV", "Historical_Records"]
+        display_df = pilot_df[out_cols].sort_values(by=["Strategy_Quadrant", "Total_Solvent_kg"], ascending=[True, False])
+        
         st.dataframe(
             display_df,
             column_config={
-                "Paint_Code": "色號",
-                "Strategy_Quadrant": "策略分類",
-                "Stability_Score": st.column_config.NumberColumn("製程穩定度", format="%.1f"),
-                "Stability_Level": "穩定判定",
-                "Estimated_Reduction_kg": st.column_config.NumberColumn("預估減量機會 (kg)", format="%.1f"),
-                "Total_Solvent_kg": st.column_config.NumberColumn("稀釋劑總用量 (kg)", format="%.1f"),
-                "Weighted_Ratio_Percent": st.column_config.NumberColumn("目前加權比例 (%)", format="%.2f"),
-                "Benchmark_Ratio_Percent": st.column_config.NumberColumn("同條件基準比例 (%)", format="%.2f"),
-                "Ratio_Consistency": st.column_config.NumberColumn("添加比例一致率 (%)", format="%.1f"),
-                "Efficiency_Relative_Variation": st.column_config.NumberColumn("降黏效率相對變異", format="%.3f"),
-                "Ratio_Trend_Per_10_Records": st.column_config.NumberColumn("每10筆比例趨勢", format="%+.2f"),
-                "Historical_Records": "紀錄數",
-                "Historical_Batches": "歷史批數",
+                "Paint_Code": "色號 (Paint Code)",
+                "Strategy_Quadrant": "戰略分類 (Strategy)",
+                "Total_Solvent_kg": st.column_config.NumberColumn("稀釋劑總用量 (Solvent - kg)", format="%.1f"),
+                "Weighted_Ratio_Percent": st.column_config.NumberColumn("加權添加比例 (Ratio - %)", format="%.1f"),
+                "Ratio_CV": st.column_config.NumberColumn("CV值 (Filtered CV)", format="%.3f"),
+                "Historical_Records": "紀錄數 (Records)"
             },
-            use_container_width=True,
-            hide_index=True,
+            use_container_width=True, hide_index=True
         )
-
-        quick_wins = display_df[display_df["Strategy_Quadrant"] == "優先試用 (Quick Wins)"]
-        if not quick_wins.empty:
-            top_code = quick_wins.iloc[0]
-            st.success(
-                f"✅ 建議優先試用：{top_code['Paint_Code']}；"
-                f"穩定度 {top_code['Stability_Score']:.1f} 分，"
-                f"預估減量機會約 {top_code['Estimated_Reduction_kg']:.1f} kg。"
-            )
-        else:
-            st.info("目前沒有同時達到高減量機會與高穩定度門檻的色號。")
     else:
-        display_df = pd.DataFrame()
-        st.warning("⚠️ 歷史紀錄數不足，無法產生矩陣分析。")
+        st.warning("⚠️ 歷史紀錄數不足，無法產生矩陣分析。(Not enough historical data to generate matrix)")
 
 # ==========================================
 # 7. EXPORT INTERACTIVE HTML REPORT
@@ -770,7 +648,6 @@ st.info("💡 The report is exported as an interactive HTML file to preserve exa
 if st.button("📥 Generate & Download Report", type="primary"):
     with st.spinner("⏳ Generating HTML report..."):
         try:
-            # FIX: Create HTML table from DataFrame before injecting it into the template
             pilot_table_html = display_df.to_html(index=False, classes="summary-table") if 'display_df' in locals() else "<p>No data available.</p>"
             
             html_content = f"""
