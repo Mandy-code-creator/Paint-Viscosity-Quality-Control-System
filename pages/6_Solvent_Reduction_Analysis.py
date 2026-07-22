@@ -755,8 +755,9 @@ with tab_ranking:
 with tab_detail:
     st.subheader("2. Paint Code History")
     st.caption(
-        "Review incoming viscosity, adjusted viscosity, solvent ratio, and temperature "
-        "for every historical record of one paint code."
+        "Each record is one independent viscosity-adjustment event. "
+        "The upper chart shows the before-to-after viscosity change; "
+        "the lower chart shows the corresponding solvent ratio and temperature."
     )
 
     # Use every paint code available under the global filters, not only the Top 10 list.
@@ -767,10 +768,19 @@ with tab_detail:
     if not detail_code_options:
         st.info("No paint code is available for the selected global filters.")
     else:
-        selected_code = st.selectbox(
+        select_col, range_col = st.columns([2.2, 1.0])
+        selected_code = select_col.selectbox(
             "Select Paint Code",
             detail_code_options,
             key="tab2_selected_paint_code",
+        )
+        record_window = range_col.selectbox(
+            "Records Displayed",
+            ["Latest 30", "Latest 50", "Latest 100", "All Records"],
+            index=1,
+            key="tab2_record_window",
+            help="Limit the number of visible records to keep the charts readable. "
+                 "All records remain available in the detail table.",
         )
 
         detail_df = filter_df[
@@ -791,6 +801,7 @@ with tab_detail:
             detail_df["Record_Index"] = np.arange(1, len(detail_df) + 1)
             detail_title_filter = f"{filter_details} | Paint Code: {selected_code}"
 
+            # KPI values always use the complete historical data for the selected paint code.
             typical_before = detail_df["黏度(秒)"].median()
             typical_after = detail_df["黏度(秒)_1"].median()
             typical_ratio = detail_df["Solvent_Ratio_Percent"].median()
@@ -815,98 +826,117 @@ with tab_detail:
                 f"{typical_temperature:.2f} °C" if pd.notna(typical_temperature) else "N/A",
             )
 
-            # One chart: before viscosity, after viscosity, solvent ratio, and temperature.
-            fig3 = go.Figure()
-            fig3.add_trace(go.Scatter(
-                x=detail_df["Record_Index"],
-                y=detail_df["黏度(秒)"],
-                mode="lines+markers",
-                name="Before Viscosity (s)",
-                line=dict(width=2),
-                marker=dict(size=7),
-                yaxis="y1",
-            ))
-            fig3.add_trace(go.Scatter(
-                x=detail_df["Record_Index"],
-                y=detail_df["黏度(秒)_1"],
-                mode="lines+markers",
-                name="After Viscosity (s)",
-                line=dict(width=2),
-                marker=dict(size=7),
-                yaxis="y1",
-            ))
-            fig3.add_trace(go.Scatter(
-                x=detail_df["Record_Index"],
-                y=detail_df["Solvent_Ratio_Percent"],
-                mode="lines+markers",
-                name="Solvent Ratio (%)",
-                line=dict(width=2, dash="dash"),
-                marker=dict(size=7, symbol="square"),
-                yaxis="y2",
-            ))
+            # Limit only the chart view. The table below still contains all records.
+            window_map = {
+                "Latest 30": 30,
+                "Latest 50": 50,
+                "Latest 100": 100,
+                "All Records": None,
+            }
+            visible_n = window_map[record_window]
+            chart_df = detail_df.tail(visible_n).copy() if visible_n else detail_df.copy()
+            chart_df = chart_df.reset_index(drop=True)
 
-            if detail_df["溫度"].notna().any():
-                fig3.add_trace(go.Scatter(
-                    x=detail_df["Record_Index"],
-                    y=detail_df["溫度"],
-                    mode="lines+markers",
-                    name="Temperature (°C)",
-                    line=dict(width=2, dash="dot"),
-                    marker=dict(size=7, symbol="diamond"),
-                    yaxis="y3",
-                ))
-
-            ratio_series_max = detail_df["Solvent_Ratio_Percent"].max()
-            ratio_axis_max = (
-                max(5.0, float(ratio_series_max) * 1.20)
-                if pd.notna(ratio_series_max)
-                else 5.0
+            # Keep the original historical record number even when only the latest records are shown.
+            first_record = int(chart_df["Record_Index"].min())
+            last_record = int(chart_df["Record_Index"].max())
+            chart_range_text = (
+                f"Records {first_record}–{last_record} of {len(detail_df)}"
+                if len(chart_df) < len(detail_df)
+                else f"All {len(detail_df)} records"
             )
 
-            temperature_values = pd.to_numeric(detail_df["溫度"], errors="coerce").dropna()
-            if not temperature_values.empty:
-                temperature_min = float(temperature_values.min())
-                temperature_max = float(temperature_values.max())
-                temperature_padding = max(1.0, (temperature_max - temperature_min) * 0.15)
-                temperature_range = [
-                    temperature_min - temperature_padding,
-                    temperature_max + temperature_padding,
-                ]
-            else:
-                temperature_range = None
+            # =========================================================
+            # CHART 1 — DUMBBELL: BEFORE → AFTER VISCOSITY
+            # =========================================================
+            segment_x, segment_y = [], []
+            for _, row in chart_df.iterrows():
+                segment_x.extend([row["Record_Index"], row["Record_Index"], None])
+                segment_y.extend([row["黏度(秒)_1"], row["黏度(秒)"], None])
 
-            fig3.update_layout(
-                title=(
-                    "Before/After Viscosity, Solvent Ratio and Temperature by Record"
-                    f"<br><sup>Filters: {detail_title_filter}</sup>"
+            fig_viscosity = go.Figure()
+            fig_viscosity.add_trace(go.Scatter(
+                x=segment_x,
+                y=segment_y,
+                mode="lines",
+                name="Viscosity Drop",
+                line=dict(color="#B8C2CC", width=1.5),
+                hoverinfo="skip",
+            ))
+            fig_viscosity.add_trace(go.Scatter(
+                x=chart_df["Record_Index"],
+                y=chart_df["黏度(秒)"],
+                mode="markers",
+                name="Before Viscosity (s)",
+                marker=dict(size=8, color="#0B67C2", line=dict(width=0.8, color="white")),
+                customdata=np.column_stack([
+                    chart_df["黏度(秒)_1"],
+                    chart_df["Delta_V"],
+                    chart_df["Solvent_Ratio_Percent"],
+                    chart_df["溫度"],
+                ]),
+                hovertemplate=(
+                    "<b>Record %{x}</b><br>"
+                    "Before Viscosity: %{y:.1f} s<br>"
+                    "After Viscosity: %{customdata[0]:.1f} s<br>"
+                    "Viscosity Drop: %{customdata[1]:.1f} s<br>"
+                    "Solvent Ratio: %{customdata[2]:.2f}%<br>"
+                    "Temperature: %{customdata[3]:.1f} °C"
+                    "<extra></extra>"
                 ),
+            ))
+            fig_viscosity.add_trace(go.Scatter(
+                x=chart_df["Record_Index"],
+                y=chart_df["黏度(秒)_1"],
+                mode="markers",
+                name="After Viscosity (s)",
+                marker=dict(size=8, color="#74BDF2", line=dict(width=0.8, color="white")),
+                hovertemplate=(
+                    "<b>Record %{x}</b><br>"
+                    "After Viscosity: %{y:.1f} s"
+                    "<extra></extra>"
+                ),
+            ))
+
+            # Show viscosity-drop labels only when the chart is not crowded.
+            if len(chart_df) <= 30:
+                label_y = (chart_df["黏度(秒)"] + chart_df["黏度(秒)_1"]) / 2
+                fig_viscosity.add_trace(go.Scatter(
+                    x=chart_df["Record_Index"],
+                    y=label_y,
+                    mode="text",
+                    text=chart_df["Delta_V"].map(lambda v: f"{v:.0f}" if pd.notna(v) else ""),
+                    textfont=dict(size=9, color="#374151"),
+                    name="Viscosity Drop (s)",
+                    showlegend=False,
+                    hoverinfo="skip",
+                ))
+
+            fig_viscosity.update_layout(
+                title=(
+                    "<b>Viscosity Adjustment by Historical Record</b>"
+                    f"<br><sup>{detail_title_filter} | {chart_range_text}</sup>"
+                ),
+                template="plotly_white",
+                height=460,
+                margin=dict(l=75, r=35, t=105, b=55),
                 xaxis=dict(
                     title="Historical Record Order",
-                    dtick=1,
-                    domain=[0.0, 0.86],
+                    tickmode="linear" if len(chart_df) <= 30 else "auto",
+                    dtick=1 if len(chart_df) <= 30 else None,
+                    showgrid=False,
+                    showline=True,
+                    linecolor="#111827",
+                    linewidth=1,
+                    mirror=True,
                 ),
                 yaxis=dict(
                     title="Viscosity (s)",
-                    side="left",
-                    showgrid=True,
-                ),
-                yaxis2=dict(
-                    title="Solvent Ratio (%)",
-                    overlaying="y",
-                    side="right",
-                    anchor="free",
-                    position=0.90,
-                    showgrid=False,
-                    range=[0, ratio_axis_max],
-                ),
-                yaxis3=dict(
-                    title="Temperature (°C)",
-                    overlaying="y",
-                    side="right",
-                    anchor="free",
-                    position=1.0,
-                    showgrid=False,
-                    range=temperature_range,
+                    gridcolor="#E5E7EB",
+                    showline=True,
+                    linecolor="#111827",
+                    linewidth=1,
+                    mirror=True,
                 ),
                 legend=dict(
                     orientation="h",
@@ -915,12 +945,121 @@ with tab_detail:
                     xanchor="right",
                     x=1,
                 ),
-                margin=dict(l=80, r=165, t=120, b=90),
-                height=620,
+                hovermode="closest",
+            )
+            st.plotly_chart(fig_viscosity, use_container_width=True)
+            exported_figs["5A. Viscosity Adjustment History"] = fig_viscosity
+
+            # =========================================================
+            # CHART 2 — SOLVENT RATIO BARS + TEMPERATURE LINE
+            # =========================================================
+            fig_condition = go.Figure()
+            fig_condition.add_trace(go.Bar(
+                x=chart_df["Record_Index"],
+                y=chart_df["Solvent_Ratio_Percent"],
+                name="Solvent Ratio (%)",
+                marker_color="#F87171",
+                opacity=0.78,
+                yaxis="y1",
+                customdata=np.column_stack([
+                    chart_df["添加重量"],
+                    chart_df["Base_Paint_Weight_kg"],
+                ]),
+                hovertemplate=(
+                    "<b>Record %{x}</b><br>"
+                    "Solvent Ratio: %{y:.2f}%<br>"
+                    "Solvent Added: %{customdata[0]:.1f} kg<br>"
+                    "Base Paint: %{customdata[1]:.1f} kg"
+                    "<extra></extra>"
+                ),
+            ))
+
+            if chart_df["溫度"].notna().any():
+                fig_condition.add_trace(go.Scatter(
+                    x=chart_df["Record_Index"],
+                    y=chart_df["溫度"],
+                    mode="lines+markers",
+                    name="Temperature (°C)",
+                    line=dict(color="#7E22CE", width=2),
+                    marker=dict(size=6, color="#7E22CE", line=dict(width=0.7, color="white")),
+                    yaxis="y2",
+                    connectgaps=False,
+                    hovertemplate=(
+                        "<b>Record %{x}</b><br>"
+                        "Temperature: %{y:.1f} °C"
+                        "<extra></extra>"
+                    ),
+                ))
+
+            ratio_max = pd.to_numeric(chart_df["Solvent_Ratio_Percent"], errors="coerce").max()
+            ratio_upper = max(5.0, float(ratio_max) * 1.18) if pd.notna(ratio_max) else 5.0
+
+            temp_values = pd.to_numeric(chart_df["溫度"], errors="coerce").dropna()
+            if not temp_values.empty:
+                temp_min = float(temp_values.min())
+                temp_max = float(temp_values.max())
+                temp_pad = max(1.0, (temp_max - temp_min) * 0.15)
+                temp_range = [temp_min - temp_pad, temp_max + temp_pad]
+            else:
+                temp_range = None
+
+            fig_condition.update_layout(
+                title=(
+                    "<b>Solvent Ratio and Temperature by Historical Record</b>"
+                    f"<br><sup>{chart_range_text}</sup>"
+                ),
+                template="plotly_white",
+                height=380,
+                margin=dict(l=75, r=85, t=95, b=55),
+                barmode="overlay",
+                xaxis=dict(
+                    title="Historical Record Order",
+                    tickmode="linear" if len(chart_df) <= 30 else "auto",
+                    dtick=1 if len(chart_df) <= 30 else None,
+                    showgrid=False,
+                    showline=True,
+                    linecolor="#111827",
+                    linewidth=1,
+                    mirror=True,
+                ),
+                yaxis=dict(
+                    title="Solvent Ratio (%)",
+                    range=[0, ratio_upper],
+                    gridcolor="#FEE2E2",
+                    showline=True,
+                    linecolor="#F87171",
+                    linewidth=1,
+                    tickfont=dict(color="#DC2626"),
+                    title_font=dict(color="#DC2626"),
+                ),
+                yaxis2=dict(
+                    title="Temperature (°C)",
+                    overlaying="y",
+                    side="right",
+                    range=temp_range,
+                    showgrid=False,
+                    showline=True,
+                    linecolor="#7E22CE",
+                    linewidth=1,
+                    tickfont=dict(color="#7E22CE"),
+                    title_font=dict(color="#7E22CE"),
+                ),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1,
+                ),
                 hovermode="x unified",
             )
-            st.plotly_chart(fig3, use_container_width=True)
-            exported_figs["5. Paint Code History"] = fig3
+            st.plotly_chart(fig_condition, use_container_width=True)
+            exported_figs["5B. Solvent Ratio and Temperature"] = fig_condition
+
+            st.caption(
+                "Note: Each record represents one independent viscosity-adjustment event. "
+                "The vertical segment in the upper chart represents the viscosity drop (Before − After)."
+            )
 
             detail_columns = [
                 col for col in [
@@ -931,6 +1070,7 @@ with tab_detail:
                     "線別",
                     "黏度(秒)",
                     "黏度(秒)_1",
+                    "Delta_V",
                     "溫度",
                     "Base_Paint_Weight_kg",
                     "添加重量",
@@ -946,6 +1086,7 @@ with tab_detail:
                 "線別": "Production Line",
                 "黏度(秒)": "Before Viscosity (s)",
                 "黏度(秒)_1": "After Viscosity (s)",
+                "Delta_V": "Viscosity Drop (s)",
                 "溫度": "Temperature (°C)",
                 "Base_Paint_Weight_kg": "Base Paint Weight (kg)",
                 "添加重量": "Solvent Added (kg)",
@@ -957,6 +1098,7 @@ with tab_detail:
                     detail_table.style.format({
                         "Before Viscosity (s)": "{:.2f}",
                         "After Viscosity (s)": "{:.2f}",
+                        "Viscosity Drop (s)": "{:.2f}",
                         "Temperature (°C)": "{:.2f}",
                         "Base Paint Weight (kg)": "{:,.2f}",
                         "Solvent Added (kg)": "{:,.2f}",
