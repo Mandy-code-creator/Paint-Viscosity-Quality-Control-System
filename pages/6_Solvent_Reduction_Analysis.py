@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-import matplotlib.pyplot as plt
 import io
 
 # ==========================================
@@ -171,179 +170,6 @@ def build_summary(source_df, group_cols):
     summary = source_df.groupby(group_cols, dropna=False).agg(**agg_dict).reset_index()
     summary["Weighted_Ratio_Percent"] = np.where(summary["Total_Paint_kg"] > 0, summary["Total_Solvent_kg"] / summary["Total_Paint_kg"] * 100, np.nan)
     return summary
-
-
-def apply_professional_layout(fig, title_text=None, subtitle_text=None, height=None):
-    """Apply a cleaner business-style Plotly layout with black text."""
-    if title_text is not None:
-        title_html = f"<b>{title_text}</b>"
-        if subtitle_text:
-            title_html += f"<br><sup>{subtitle_text}</sup>"
-        fig.update_layout(
-            title=dict(
-                text=title_html,
-                x=0.0,
-                xanchor="left",
-                font=dict(size=22, color="#000000"),
-            )
-        )
-
-    fig.update_layout(
-        template="plotly_white",
-        paper_bgcolor="white",
-        plot_bgcolor="white",
-        font=dict(color="#000000", size=13),
-        hoverlabel=dict(
-            bgcolor="white",
-            font=dict(color="#000000", size=12),
-            bordercolor="#D1D5DB",
-        ),
-        legend=dict(
-            bgcolor="rgba(255,255,255,0.85)",
-            bordercolor="rgba(0,0,0,0)",
-            font=dict(color="#000000", size=12),
-            title=dict(font=dict(color="#000000", size=12)),
-        ),
-        margin=dict(l=70, r=40, t=110, b=70),
-    )
-    if height is not None:
-        fig.update_layout(height=height)
-
-    fig.update_xaxes(
-        showline=True,
-        linewidth=1.2,
-        linecolor="#111827",
-        mirror=False,
-        ticks="outside",
-        tickfont=dict(color="#000000", size=12),
-        title_font=dict(color="#000000", size=14),
-        gridcolor="#E5E7EB",
-        zeroline=False,
-    )
-    fig.update_yaxes(
-        showline=True,
-        linewidth=1.2,
-        linecolor="#111827",
-        mirror=False,
-        ticks="outside",
-        tickfont=dict(color="#000000", size=12),
-        title_font=dict(color="#000000", size=14),
-        gridcolor="#E5E7EB",
-        zerolinecolor="#D1D5DB",
-    )
-    return fig
-
-
-def create_decision_matrix_png(plot_df, target_opportunity_limit):
-    """Create a Word-exportable decision matrix chart using Matplotlib (no Kaleido)."""
-    fig, ax = plt.subplots(figsize=(10.5, 6.5), dpi=180)
-
-    export_colors = {
-        "優先試用 (Quick Wins)": "#1D4ED8",
-        "次要評估 (Secondary)": "#60A5FA",
-        "需先標準化 (Standardize First)": "#F97316",
-        "暫不考慮 (Ignore)": "#FDBA74",
-    }
-
-    if plot_df.empty:
-        ax.text(0.5, 0.5, "No data available", ha="center", va="center", fontsize=12, color="black")
-    else:
-        max_solvent = max(float(plot_df["Total_Solvent_kg"].max()), 1.0)
-        sizes = 30 + (plot_df["Total_Solvent_kg"] / max_solvent) * 650
-
-        for strategy, subdf in plot_df.groupby("Strategy_Quadrant"):
-            ax.scatter(
-                subdf["Matrix_X"],
-                subdf["Estimated_Reduction_kg"],
-                s=sizes.loc[subdf.index],
-                c=export_colors.get(strategy, "#9CA3AF"),
-                edgecolors="white",
-                linewidths=1.0,
-                alpha=0.85,
-                label=strategy,
-                zorder=3,
-            )
-
-        max_y = max(float(plot_df["Estimated_Reduction_kg"].max()), 1.0)
-        ax.axvline(2.5, color="#DC2626", linestyle=(0, (4, 4)), linewidth=1.2, zorder=2)
-        ax.axhline(target_opportunity_limit, color="#DC2626", linestyle=(0, (4, 4)), linewidth=1.2, zorder=2)
-
-        important = plot_df.copy()
-        important["Label_Priority"] = 0
-        important.loc[important["Strategy_Quadrant"] == "優先試用 (Quick Wins)", "Label_Priority"] = 4
-        important.loc[important["Strategy_Quadrant"] == "需先標準化 (Standardize First)", "Label_Priority"] = 3
-        important.loc[important["Estimated_Reduction_kg"] >= target_opportunity_limit * 1.8, "Label_Priority"] = np.maximum(
-            important.loc[important["Estimated_Reduction_kg"] >= target_opportunity_limit * 1.8, "Label_Priority"], 2
-        )
-        important.loc[important["High_Stability_Count"] == 3, "Label_Priority"] = np.maximum(
-            important.loc[important["High_Stability_Count"] == 3, "Label_Priority"], 1
-        )
-        important = important[important["Label_Priority"] > 0].sort_values(
-            ["Label_Priority", "Estimated_Reduction_kg", "Total_Solvent_kg"], ascending=[False, False, False]
-        )
-        important["Label_Rank_In_X"] = important.groupby("High_Stability_Count").cumcount()
-        important = important[important["Label_Rank_In_X"] < 3].head(12)
-
-        x_offsets = [0.00, -0.12, 0.12]
-        y_offsets = [180, 320, 460]
-        for _, row in important.iterrows():
-            rank = int(row["Label_Rank_In_X"]) % 3
-            ax.annotate(
-                row["Paint_Code"],
-                xy=(row["Matrix_X"], row["Estimated_Reduction_kg"]),
-                xytext=(row["Matrix_X"] + x_offsets[rank], row["Estimated_Reduction_kg"] + y_offsets[rank]),
-                textcoords="data",
-                fontsize=9,
-                color="black",
-                ha="center",
-                va="bottom",
-                bbox=dict(boxstyle="round,pad=0.20", facecolor="white", edgecolor="#9CA3AF", linewidth=0.8),
-                arrowprops=dict(arrowstyle="-", color="#9CA3AF", lw=0.8),
-                zorder=4,
-            )
-
-        ax.text(2.55, max_y * 1.06, "高穩定區", fontsize=10, color="black", ha="left", va="bottom",
-                bbox=dict(facecolor="white", edgecolor="#DC2626", linewidth=0.8, pad=2))
-        ax.text(3.35, target_opportunity_limit + max_y * 0.015, f"高減量機會門檻：{target_opportunity_limit:,.0f} kg",
-                fontsize=10, color="black", ha="right", va="bottom",
-                bbox=dict(facecolor="white", edgecolor="#DC2626", linewidth=0.8, pad=2))
-
-        ax.set_xlim(-0.45, 3.45)
-        ax.set_ylim(-max_y * 0.05, max_y * 1.15)
-
-    ax.set_title("試用色號決策矩陣", fontsize=16, fontweight="bold", color="black", pad=18)
-    ax.text(0.0, 1.02, "X軸＝高穩定指標數（0–3）；Y軸＝預估稀釋劑減量機會；氣泡大小＝稀釋劑總用量",
-            transform=ax.transAxes, fontsize=10.5, color="black", ha="left", va="bottom")
-    ax.set_xlabel("高穩定指標數 (0–3)", fontsize=11.5, color="black")
-    ax.set_ylabel("預估稀釋劑減量機會 (kg)", fontsize=11.5, color="black")
-    ax.set_xticks([0, 1, 2, 3])
-    ax.tick_params(axis="both", colors="black", labelsize=10)
-    ax.grid(axis="y", color="#E5E7EB", linewidth=0.8)
-    ax.set_facecolor("white")
-
-    # Four-sided professional frame
-    for spine in ax.spines.values():
-        spine.set_visible(True)
-        spine.set_color("#111827")
-        spine.set_linewidth(1.2)
-
-    handles, labels = ax.get_legend_handles_labels()
-    if handles:
-        by_label = dict(zip(labels, handles))
-        leg = ax.legend(
-            by_label.values(), by_label.keys(), ncol=2, loc="upper left", bbox_to_anchor=(0, 1.0),
-            frameon=False, fontsize=9.5
-        )
-        for txt in leg.get_texts():
-            txt.set_color("black")
-
-    fig.patch.set_facecolor("white")
-    fig.tight_layout()
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", bbox_inches="tight", facecolor="white", dpi=220)
-    plt.close(fig)
-    buf.seek(0)
-    return buf
 
 # ==========================================
 # 4. GLOBAL FILTERS
@@ -920,47 +746,31 @@ with tab_pilot:
         pilot_df["Strategy_Quadrant"] = pilot_df.apply(classify_quadrant, axis=1)
 
         color_map = {
-            "優先試用 (Quick Wins)": "#1D4ED8",
-            "需先標準化 (Standardize First)": "#F97316",
-            "次要評估 (Secondary)": "#60A5FA",
-            "暫不考慮 (Ignore)": "#FDBA74",
+            "優先試用 (Quick Wins)": "#0033A0",
+            "需先標準化 (Standardize First)": "#FF8C00",
+            "次要評估 (Secondary)": "#7B9EFA",
+            "暫不考慮 (Ignore)": "#C9C5BE",
         }
 
-        # X-axis shows the number of indicators classified as high stability (0–3).
-        # Use slight horizontal jitter only for display, so bubbles and labels do not stack.
+        pilot_df["Display_Label"] = np.where(
+            pilot_df["Estimated_Reduction_kg"] >= target_opportunity_limit,
+            pilot_df["Paint_Code"],
+            "",
+        )
+
         plot_df = pilot_df.dropna(subset=["High_Stability_Count"]).copy()
 
         if not plot_df.empty:
-            plot_df = plot_df.sort_values(
-                ["High_Stability_Count", "Estimated_Reduction_kg", "Total_Solvent_kg"],
-                ascending=[True, False, False],
-            ).reset_index(drop=True)
-
-            jitter_pattern = [0.00, -0.14, 0.14, -0.22, 0.22, -0.30, 0.30]
-
-            # Avoid groupby.apply() here because Pandas 3.x may exclude
-            # the grouping column from each group.
-            plot_df["Display_Order_In_X"] = (
-                plot_df.groupby("High_Stability_Count").cumcount()
-            )
-            plot_df["Matrix_X"] = (
-                plot_df["High_Stability_Count"].astype(float)
-                + plot_df["Display_Order_In_X"].map(
-                    lambda i: jitter_pattern[int(i) % len(jitter_pattern)]
-                )
-            )
-
             fig_matrix = px.scatter(
                 plot_df,
-                x="Matrix_X",
+                x="High_Stability_Count",
                 y="Estimated_Reduction_kg",
                 size="Total_Solvent_kg",
-                size_max=38,
                 color="Strategy_Quadrant",
                 color_discrete_map=color_map,
                 hover_name="Paint_Code",
+                text="Display_Label",
                 custom_data=[
-                    "High_Stability_Count",
                     "Total_Solvent_kg",
                     "Weighted_Ratio_Percent",
                     "Benchmark_Ratio_Percent",
@@ -974,136 +784,72 @@ with tab_pilot:
                     "Historical_Records",
                     "Stability_Benchmark_Source",
                 ],
-                title=None,
-                height=720,
             )
-
+            
             fig_matrix.update_traces(
-                mode="markers",
-                marker=dict(opacity=0.82, line=dict(width=1.3, color="white")),
+                textposition="top center",
                 hovertemplate=(
                     "<b>%{hovertext}</b><br>──────────────────<br>"
-                    "高穩定指標數: %{customdata[0]:.0f}/3<br>"
-                    "預估減量機會: %{customdata[4]:,.1f} kg<br>"
-                    "稀釋劑總用量: %{customdata[1]:,.1f} kg<br>"
-                    "目前加權比例: %{customdata[2]:.2f}%<br>"
-                    "同條件基準比例: %{customdata[3]:.2f}%<br>"
-                    "添加比例一致率: %{customdata[5]:.1%}（%{customdata[6]}）<br>"
-                    "降黏效率相對變異: %{customdata[7]:.3f}（%{customdata[8]}）<br>"
-                    "每10筆比例趨勢: %{customdata[9]:+.2f} 個百分點（%{customdata[10]}）<br>"
-                    "歷史紀錄數: %{customdata[11]:,.0f} 筆<br>"
-                    "比較基準: %{customdata[12]}<extra></extra>"
+                    "高穩定指標數: %{x:.0f}/3<br>"
+                    "預估減量機會: %{customdata[3]:,.1f} kg<br>"
+                    "稀釋劑總用量: %{customdata[0]:,.1f} kg<br>"
+                    "目前加權比例: %{customdata[1]:.2f}%<br>"
+                    "同條件基準比例: %{customdata[2]:.2f}%<br>"
+                    "添加比例一致率: %{customdata[4]:.1%}（%{customdata[5]}）<br>"
+                    "降黏效率相對變異: %{customdata[6]:.3f}（%{customdata[7]}）<br>"
+                    "每10筆比例趨勢: %{customdata[8]:+.2f} 個百分點（%{customdata[9]}）<br>"
+                    "歷史紀錄數: %{customdata[10]:,.0f} 筆<br>"
+                    "比較基準: %{customdata[11]}<extra></extra>"
                 ),
             )
-
-            apply_professional_layout(
-                fig_matrix,
-                title_text="試用色號決策矩陣",
-                subtitle_text="X軸＝高穩定指標數（0–3）；Y軸＝預估稀釋劑減量機會；氣泡大小＝稀釋劑總用量",
-                height=720,
+            
+            fig_matrix.add_vline(x=2.5, line_dash="dash", line_color="red", opacity=0.7)
+            fig_matrix.add_hline(
+                y=target_opportunity_limit, line_dash="dash", line_color="red", opacity=0.7
             )
-
+            
             fig_matrix.update_xaxes(
                 title="高穩定指標數 (0–3)",
                 tickmode="array",
                 tickvals=[0, 1, 2, 3],
-                ticktext=["0", "1", "2", "3"],
-                range=[-0.45, 3.45],
-                mirror=True,
-                showline=True,
-                linecolor="#111827",
-                linewidth=1.2,
+                range=[-0.3, 3.3],
+                title_font=dict(color='black', size=14),
+                tickfont=dict(color='black', size=12),
+                showline=True, linewidth=1, linecolor='black', mirror=True
             )
+            
             max_y = max(float(plot_df["Estimated_Reduction_kg"].max()), 1.0)
             fig_matrix.update_yaxes(
                 title="預估稀釋劑減量機會 (kg)",
-                range=[-max_y * 0.05, max_y * 1.15],
-                mirror=True,
-                showline=True,
-                linecolor="#111827",
-                linewidth=1.2,
+                range=[-max_y * 0.05, max_y * 1.12],
+                title_font=dict(color='black', size=14),
+                tickfont=dict(color='black', size=12),
+                showline=True, linewidth=1, linecolor='black', mirror=True
             )
+            
             fig_matrix.update_layout(
+                font=dict(color='black'), 
+                plot_bgcolor="white",
+                paper_bgcolor="white",
+                margin=dict(l=60, r=40, t=140, b=60), 
+                title=dict(
+                    text="<b>試用色號決策矩陣</b><br><sup>X軸＝三項指標中屬高穩定的項目數；氣泡大小＝稀釋劑總用量</sup>",
+                    font=dict(color='black', size=18)
+                ),
                 legend=dict(
-                    title="策略分類",
-                    orientation="h",
-                    yanchor="bottom",
-                    y=1.08,
-                    xanchor="left",
-                    x=0.0,
-                    font=dict(color="#000000", size=12),
-                    title_font=dict(color="#000000", size=12),
+                    title="策略分類", 
+                    orientation="h", 
+                    yanchor="bottom", 
+                    y=1.08, 
+                    xanchor="right", 
+                    x=1,
+                    font=dict(color='black')
                 )
             )
-
-            fig_matrix.add_vline(
-                x=2.5, line_dash="dash", line_color="#D62728", line_width=1.6, opacity=0.85
-            )
-            fig_matrix.add_hline(
-                y=target_opportunity_limit, line_dash="dash", line_color="#D62728",
-                line_width=1.6, opacity=0.85
-            )
-            fig_matrix.add_annotation(
-                x=2.52, y=max_y * 1.08, text="高穩定區", showarrow=False,
-                font=dict(size=12, color="#000000"), bgcolor="rgba(255,255,255,0.9)",
-                bordercolor="#D62728", borderwidth=1, borderpad=3
-            )
-            fig_matrix.add_annotation(
-                x=3.36, y=target_opportunity_limit,
-                text=f"高減量機會門檻：{target_opportunity_limit:,.0f} kg",
-                showarrow=False, xanchor="right", yanchor="bottom",
-                font=dict(size=12, color="#000000"), bgcolor="rgba(255,255,255,0.9)",
-                bordercolor="#D62728", borderwidth=1, borderpad=3
-            )
-
-            # Label only the most important points and stagger annotations to avoid overlap.
-            plot_df["Label_Priority"] = 0
-            plot_df.loc[plot_df["Strategy_Quadrant"] == "優先試用 (Quick Wins)", "Label_Priority"] = 4
-            plot_df.loc[plot_df["Strategy_Quadrant"] == "需先標準化 (Standardize First)", "Label_Priority"] = 3
-            plot_df.loc[plot_df["Estimated_Reduction_kg"] >= target_opportunity_limit * 1.8, "Label_Priority"] = np.maximum(
-                plot_df.loc[plot_df["Estimated_Reduction_kg"] >= target_opportunity_limit * 1.8, "Label_Priority"],
-                2,
-            )
-            plot_df.loc[plot_df["High_Stability_Count"] == 3, "Label_Priority"] = np.maximum(
-                plot_df.loc[plot_df["High_Stability_Count"] == 3, "Label_Priority"],
-                1,
-            )
-
-            label_df = plot_df[plot_df["Label_Priority"] > 0].copy()
-            if not label_df.empty:
-                label_df = label_df.sort_values(
-                    ["Label_Priority", "Estimated_Reduction_kg", "Total_Solvent_kg"],
-                    ascending=[False, False, False],
-                )
-                label_df["Label_Rank_In_X"] = label_df.groupby("High_Stability_Count").cumcount()
-                label_df = label_df[label_df["Label_Rank_In_X"] < 3].head(12)
-
-                x_shift_pattern = [0, -32, 32]
-                y_shift_pattern = [-24, -42, -60]
-
-                for _, row in label_df.iterrows():
-                    rank_in_x = int(row["Label_Rank_In_X"])
-                    fig_matrix.add_annotation(
-                        x=float(row["Matrix_X"]),
-                        y=float(row["Estimated_Reduction_kg"]),
-                        text=str(row["Paint_Code"]),
-                        showarrow=True,
-                        arrowhead=0,
-                        arrowcolor="rgba(0,0,0,0.35)",
-                        arrowwidth=1,
-                        ax=x_shift_pattern[rank_in_x % len(x_shift_pattern)],
-                        ay=y_shift_pattern[rank_in_x % len(y_shift_pattern)],
-                        font=dict(size=12, color="#000000"),
-                        bgcolor="rgba(255,255,255,0.96)",
-                        bordercolor="rgba(0,0,0,0.25)",
-                        borderwidth=1,
-                        borderpad=3,
-                        align="center",
-                    )
-
-            matrix_export_plot_df = plot_df.copy()
+            
             st.plotly_chart(fig_matrix, use_container_width=True)
             exported_figs["9. Decision Matrix"] = fig_matrix
+            
         else:
             st.warning("⚠️ 穩定指標資料不足，無法繪製決策矩陣。")
 
@@ -1186,136 +932,79 @@ with tab_pilot:
 st.markdown("---")
 st.subheader("📄 Export Report")
 
-export_col1, export_col2 = st.columns(2)
+st.info("💡 The report is exported as an interactive HTML file to preserve exact chart dimensions and functionality. (報告將匯出為互動式 HTML 檔案)")
 
-with export_col1:
-    st.info("💡 匯出 Word 報告會使用 Matplotlib 產生圖檔，不使用 Kaleido。")
-    if HAS_DOCX and st.button("📥 Generate & Download Word Report", type="primary"):
-        with st.spinner("⏳ Generating Word report..."):
-            try:
-                doc = Document()
-                doc.add_heading("各色號稀釋劑使用分析與評估", level=0)
-                p = doc.add_paragraph()
-                p.add_run(f"分析日期：{pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                p.add_run(f"篩選條件：{filter_details}\n")
-                p.add_run("說明：本報告圖表以 Matplotlib 匯出，不使用 Kaleido。")
+if st.button("📥 Generate & Download Report", type="primary"):
+    with st.spinner("⏳ Generating HTML report..."):
+        try:
+            pilot_table_html = display_df.to_html(index=False, classes="summary-table") if 'display_df' in locals() else "<p>No data available.</p>"
+            
+            html_content = f"""
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <title>各色號稀釋劑使用分析與評估(Solvent Reduction Opportunity Report)</title>
+                <style>
+                    body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 40px; background-color: #f0f2f6; }}
+                    h1 {{ color: #1f77b4; text-align: center; font-size: 32px; }}
+                    h2 {{ color: #2c3e50; border-bottom: 2px solid #bdc3c7; padding-bottom: 8px; margin-top: 50px; font-size: 20px; }}
+                    .info-box {{ background-color: #ffffff; padding: 20px; border-radius: 10px; margin-bottom: 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-left: 5px solid #1f77b4; }}
+                    .info-box p {{ margin: 8px 0; font-size: 16px; color: #333; }}
+                    .chart-container {{ background-color: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 30px; width: 100%; overflow: hidden; }}
+                    .table-container {{ background-color: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 30px; overflow-x: auto; }}
+                    .summary-table {{ width: 100%; border-collapse: collapse; font-size: 14px; }}
+                    .summary-table th {{ background-color: #2F6B6D; color: white; padding: 10px 8px; border: 1px solid #d9e1e8; text-align: center; }}
+                    .summary-table td {{ padding: 9px 8px; border: 1px solid #d9e1e8; text-align: center; }}
+                    .summary-table tr:nth-child(even) {{ background-color: #f7f9fb; }}
+                </style>
+            </head>
+            <body>
+                <h1>📊各色號稀釋劑使用分析與評估 </h1>
+                <div class="info-box">
+                    <p><strong>🕒 分析日期 (Analysis Date):</strong> {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                    <p><strong>🔍 篩選條件 (Filters Applied):</strong> {filter_details}</p>
+                </div>
+            """
 
-                if 'matrix_export_plot_df' in locals() and not matrix_export_plot_df.empty:
-                    doc.add_heading("1. 試用色號決策矩陣", level=1)
-                    chart_buffer = create_decision_matrix_png(matrix_export_plot_df, target_opportunity_limit)
-                    doc.add_picture(chart_buffer, width=Inches(6.8))
-                else:
-                    doc.add_paragraph("無可匯出的決策矩陣資料。")
-
-                if 'display_df' in locals() and not display_df.empty:
-                    doc.add_heading("2. 評估結果摘要表", level=1)
-                    export_table_df = display_df.copy().head(15)
-                    export_table_df = export_table_df[[
-                        "Paint_Code", "Strategy_Quadrant", "Stability_Level",
-                        "Estimated_Reduction_kg", "Total_Solvent_kg",
-                        "Weighted_Ratio_Percent", "Benchmark_Ratio_Percent",
-                        "Historical_Records"
-                    ]]
-                    export_table_df = export_table_df.rename(columns={
-                        "Paint_Code": "色號",
-                        "Strategy_Quadrant": "策略分類",
-                        "Stability_Level": "穩定判定",
-                        "Estimated_Reduction_kg": "預估減量機會(kg)",
-                        "Total_Solvent_kg": "稀釋劑總用量(kg)",
-                        "Weighted_Ratio_Percent": "目前加權比例(%)",
-                        "Benchmark_Ratio_Percent": "同條件基準比例(%)",
-                        "Historical_Records": "紀錄數",
-                    })
-                    table = doc.add_table(rows=1, cols=len(export_table_df.columns))
-                    table.style = "Table Grid"
-                    hdr_cells = table.rows[0].cells
-                    for j, col in enumerate(export_table_df.columns):
-                        hdr_cells[j].text = str(col)
-                    for _, row in export_table_df.iterrows():
-                        cells = table.add_row().cells
-                        for j, col in enumerate(export_table_df.columns):
-                            val = row[col]
-                            if isinstance(val, float):
-                                if "比例" in str(col):
-                                    cells[j].text = f"{val:.2f}"
-                                else:
-                                    cells[j].text = f"{val:.1f}"
-                            else:
-                                cells[j].text = str(val)
-
-                word_buffer = io.BytesIO()
-                doc.save(word_buffer)
-                word_buffer.seek(0)
-                st.download_button(
-                    label="💾 Download Word Report (.docx)",
-                    data=word_buffer,
-                    file_name=f"Solvent_Report_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            for i, (fig_title, fig) in enumerate(exported_figs.items()):
+                inc_js = 'cdn' if i == 0 else False
+                
+                fig_html = fig.to_html(
+                    full_html=False, 
+                    include_plotlyjs=inc_js, 
+                    default_width="100%", 
+                    default_height="600px"
                 )
-                st.success("✅ Word report generated successfully!")
-            except Exception as e:
-                st.error(f"❌ Error generating Word report: {e}")
-    elif not HAS_DOCX:
-        st.warning("python-docx 未安裝，無法匯出 Word 報告。")
-
-with export_col2:
-    st.info("💡 如需保留互動功能，也可同時匯出 HTML 報告。")
-    if st.button("📥 Generate & Download HTML Report"):
-        with st.spinner("⏳ Generating HTML report..."):
-            try:
-                pilot_table_html = display_df.to_html(index=False, classes="summary-table") if 'display_df' in locals() else "<p>No data available.</p>"
-                html_content = f"""
-                <html>
-                <head>
-                    <meta charset="utf-8">
-                    <title>各色號稀釋劑使用分析與評估(Solvent Reduction Opportunity Report)</title>
-                    <style>
-                        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 40px; background-color: #f0f2f6; }}
-                        h1 {{ color: #1f77b4; text-align: center; font-size: 32px; }}
-                        h2 {{ color: #2c3e50; border-bottom: 2px solid #bdc3c7; padding-bottom: 8px; margin-top: 50px; font-size: 20px; }}
-                        .info-box {{ background-color: #ffffff; padding: 20px; border-radius: 10px; margin-bottom: 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-left: 5px solid #1f77b4; }}
-                        .info-box p {{ margin: 8px 0; font-size: 16px; color: #333; }}
-                        .chart-container {{ background-color: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 30px; width: 100%; overflow: hidden; }}
-                        .table-container {{ background-color: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 30px; overflow-x: auto; }}
-                        .summary-table {{ width: 100%; border-collapse: collapse; font-size: 14px; }}
-                        .summary-table th {{ background-color: #2F6B6D; color: white; padding: 10px 8px; border: 1px solid #d9e1e8; text-align: center; }}
-                        .summary-table td {{ padding: 9px 8px; border: 1px solid #d9e1e8; text-align: center; }}
-                        .summary-table tr:nth-child(even) {{ background-color: #f7f9fb; }}
-                    </style>
-                </head>
-                <body>
-                    <h1>📊各色號稀釋劑使用分析與評估 </h1>
-                    <div class="info-box">
-                        <p><strong>🕒 分析日期 (Analysis Date):</strong> {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-                        <p><strong>🔍 篩選條件 (Filters Applied):</strong> {filter_details}</p>
-                    </div>
-                """
-                for i, (fig_title, fig) in enumerate(exported_figs.items()):
-                    inc_js = 'cdn' if i == 0 else False
-                    fig_html = fig.to_html(full_html=False, include_plotlyjs=inc_js, default_width="100%", default_height="600px")
-                    html_content += f"""
-                    <h2>{fig_title}</h2>
-                    <div class="chart-container">
-                        {fig_html}
-                    </div>
-                    """
+                
                 html_content += f"""
-                    <h2>試用色號評估摘要表</h2>
-                    <div class="table-container">
-                        {pilot_table_html}
-                    </div>
+                <h2>{fig_title}</h2>
+                <div class="chart-container">
+                    {fig_html}
+                </div>
                 """
-                html_content += """
-                </body>
-                </html>
-                """
-                html_buffer = io.BytesIO(html_content.encode('utf-8'))
-                st.download_button(
-                    label="💾 Download Interactive Report (.html)",
-                    data=html_buffer,
-                    file_name=f"Solvent_Report_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.html",
-                    mime="text/html"
-                )
-                st.success("✅ HTML report generated successfully!")
-            except Exception as e:
-                st.error(f"❌ Error generating HTML report: {e}")
+
+            html_content += f"""
+                <h2>試用色號評估摘要表</h2>
+                <div class="table-container">
+                    {pilot_table_html}
+                </div>
+            """
+
+            html_content += """
+            </body>
+            </html>
+            """
+
+            html_buffer = io.BytesIO(html_content.encode('utf-8'))
+            
+            st.success("✅ Report generated successfully!")
+            
+            st.download_button(
+                label="💾 Download Interactive Report (.html)",
+                data=html_buffer,
+                file_name=f"Solvent_Report_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.html",
+                mime="text/html"
+            )
+
+        except Exception as e:
+            st.error(f"❌ Error generating report: {e}")
