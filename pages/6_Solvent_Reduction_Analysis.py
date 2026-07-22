@@ -755,7 +755,8 @@ with tab_ranking:
 with tab_detail:
     st.subheader("2. Paint Code History")
     st.caption(
-        "Review incoming viscosity, adjusted viscosity, and solvent ratio for every historical record of one paint code."
+        "Review incoming viscosity, adjusted viscosity, solvent ratio, and temperature "
+        "for every historical record of one paint code."
     )
 
     # Use every paint code available under the global filters, not only the Top 10 list.
@@ -793,8 +794,9 @@ with tab_detail:
             typical_before = detail_df["黏度(秒)"].median()
             typical_after = detail_df["黏度(秒)_1"].median()
             typical_ratio = detail_df["Solvent_Ratio_Percent"].median()
+            typical_temperature = detail_df["溫度"].median()
 
-            m1, m2, m3, m4 = st.columns(4)
+            m1, m2, m3, m4, m5 = st.columns(5)
             m1.metric("Historical Records", f"{len(detail_df):,}")
             m2.metric(
                 "Typical Incoming Viscosity",
@@ -808,8 +810,12 @@ with tab_detail:
                 "Typical Solvent Ratio",
                 f"{typical_ratio:.2f}%" if pd.notna(typical_ratio) else "N/A",
             )
+            m5.metric(
+                "Typical Temperature",
+                f"{typical_temperature:.2f} °C" if pd.notna(typical_temperature) else "N/A",
+            )
 
-            # One chart only: before viscosity, after viscosity, and solvent ratio.
+            # One chart: before viscosity, after viscosity, solvent ratio, and temperature.
             fig3 = go.Figure()
             fig3.add_trace(go.Scatter(
                 x=detail_df["Record_Index"],
@@ -839,6 +845,17 @@ with tab_detail:
                 yaxis="y2",
             ))
 
+            if detail_df["溫度"].notna().any():
+                fig3.add_trace(go.Scatter(
+                    x=detail_df["Record_Index"],
+                    y=detail_df["溫度"],
+                    mode="lines+markers",
+                    name="Temperature (°C)",
+                    line=dict(width=2, dash="dot"),
+                    marker=dict(size=7, symbol="diamond"),
+                    yaxis="y3",
+                ))
+
             ratio_series_max = detail_df["Solvent_Ratio_Percent"].max()
             ratio_axis_max = (
                 max(5.0, float(ratio_series_max) * 1.20)
@@ -846,19 +863,50 @@ with tab_detail:
                 else 5.0
             )
 
+            temperature_values = pd.to_numeric(detail_df["溫度"], errors="coerce").dropna()
+            if not temperature_values.empty:
+                temperature_min = float(temperature_values.min())
+                temperature_max = float(temperature_values.max())
+                temperature_padding = max(1.0, (temperature_max - temperature_min) * 0.15)
+                temperature_range = [
+                    temperature_min - temperature_padding,
+                    temperature_max + temperature_padding,
+                ]
+            else:
+                temperature_range = None
+
             fig3.update_layout(
                 title=(
-                    "Before/After Viscosity and Solvent Ratio by Record"
+                    "Before/After Viscosity, Solvent Ratio and Temperature by Record"
                     f"<br><sup>Filters: {detail_title_filter}</sup>"
                 ),
-                xaxis=dict(title="Historical Record Order", dtick=1),
-                yaxis=dict(title="Viscosity (s)", side="left", showgrid=True),
+                xaxis=dict(
+                    title="Historical Record Order",
+                    dtick=1,
+                    domain=[0.0, 0.86],
+                ),
+                yaxis=dict(
+                    title="Viscosity (s)",
+                    side="left",
+                    showgrid=True,
+                ),
                 yaxis2=dict(
                     title="Solvent Ratio (%)",
                     overlaying="y",
                     side="right",
+                    anchor="free",
+                    position=0.90,
                     showgrid=False,
                     range=[0, ratio_axis_max],
+                ),
+                yaxis3=dict(
+                    title="Temperature (°C)",
+                    overlaying="y",
+                    side="right",
+                    anchor="free",
+                    position=1.0,
+                    showgrid=False,
+                    range=temperature_range,
                 ),
                 legend=dict(
                     orientation="h",
@@ -867,7 +915,8 @@ with tab_detail:
                     xanchor="right",
                     x=1,
                 ),
-                height=600,
+                margin=dict(l=80, r=165, t=120, b=90),
+                height=620,
                 hovermode="x unified",
             )
             st.plotly_chart(fig3, use_container_width=True)
@@ -882,6 +931,7 @@ with tab_detail:
                     "線別",
                     "黏度(秒)",
                     "黏度(秒)_1",
+                    "溫度",
                     "Base_Paint_Weight_kg",
                     "添加重量",
                     "Solvent_Ratio_Percent",
@@ -896,6 +946,7 @@ with tab_detail:
                 "線別": "Production Line",
                 "黏度(秒)": "Before Viscosity (s)",
                 "黏度(秒)_1": "After Viscosity (s)",
+                "溫度": "Temperature (°C)",
                 "Base_Paint_Weight_kg": "Base Paint Weight (kg)",
                 "添加重量": "Solvent Added (kg)",
                 "Solvent_Ratio_Percent": "Solvent Ratio (%)",
@@ -906,6 +957,7 @@ with tab_detail:
                     detail_table.style.format({
                         "Before Viscosity (s)": "{:.2f}",
                         "After Viscosity (s)": "{:.2f}",
+                        "Temperature (°C)": "{:.2f}",
                         "Base Paint Weight (kg)": "{:,.2f}",
                         "Solvent Added (kg)": "{:,.2f}",
                         "Solvent Ratio (%)": "{:.2f}",
@@ -913,6 +965,7 @@ with tab_detail:
                     use_container_width=True,
                     hide_index=True,
                 )
+
 
 # ----- TAB 3: LINE COMPARISON -----
 with tab_line:
