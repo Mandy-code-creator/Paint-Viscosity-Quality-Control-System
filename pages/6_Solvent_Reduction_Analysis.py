@@ -11,7 +11,12 @@ import io
 # ==========================================
 try:
     from docx import Document
-    from docx.shared import Inches
+    from docx.shared import Inches, Pt
+    from docx.enum.section import WD_ORIENT
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.enum.table import WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
     HAS_DOCX = True
 except ImportError:
     HAS_DOCX = False
@@ -324,17 +329,19 @@ def create_supplier_priority_png(plot_df, target_solvent_limit):
             2.55, max_y * 1.055, "Strong Evidence Zone", fontsize=10, color="black", ha="left", va="bottom",
             bbox=dict(facecolor="white", edgecolor="#DC2626", linewidth=0.8, pad=2),
         )
+        # Place the threshold note at the left side so it does not cover bubbles or paint-code labels.
         ax.text(
-            3.35, target_solvent_limit + max_y * 0.015,
-            f"High Solvent Adjustment Threshold: {target_solvent_limit:,.0f} kg",
-            fontsize=10, color="black", ha="right", va="bottom",
+            -0.40, target_solvent_limit + max_y * 0.018,
+            f"Threshold: {target_solvent_limit:,.0f} kg",
+            fontsize=9.5, color="black", ha="left", va="bottom",
             bbox=dict(facecolor="white", edgecolor="#DC2626", linewidth=0.8, pad=2),
+            zorder=5,
         )
         ax.set_xlim(-0.45, 3.45)
         ax.set_ylim(-max_y * 0.05, max_y * 1.15)
 
     fig.suptitle(
-        "Supplier Incoming Viscosity Improvement Priority",
+        "Figure 1. Supplier Incoming Viscosity Improvement Priority Matrix",
         x=0.08, y=0.985, ha="left", va="top",
         fontsize=16, fontweight="bold", color="black",
     )
@@ -1176,9 +1183,19 @@ with tab_pilot:
                 tickfont=dict(color="#000000", size=12),
             )
             fig_matrix.update_layout(
-                margin=dict(l=80, r=45, t=245, b=80),
+                title=dict(
+                    text=(
+                        "<b>Figure 1. Supplier Incoming Viscosity Improvement Priority Matrix</b>"
+                        "<br><sup>X-axis = High-Stability Checks Passed; "
+                        "Y-axis = Total On-site Solvent Adjustment; "
+                        "Bubble Size = Historical Batches</sup>"
+                    ),
+                    x=0.01, xanchor="left", y=0.98, yanchor="top",
+                    font=dict(size=20, color="#000000"),
+                ),
+                margin=dict(l=80, r=45, t=170, b=80),
                 legend=dict(
-                    title_text="", orientation="h", yanchor="bottom", y=1.08,
+                    title_text="", orientation="h", yanchor="bottom", y=1.01,
                     xanchor="left", x=0.0, font=dict(color="#000000", size=12),
                 ),
             )
@@ -1189,25 +1206,28 @@ with tab_pilot:
                 font=dict(size=12, color="#000000"), bgcolor="rgba(255,255,255,0.95)",
                 bordercolor="#D62728", borderwidth=1, borderpad=3,
             )
+            # Anchor the threshold note to the left edge to prevent overlap with x=3 bubbles and labels.
             fig_matrix.add_annotation(
-                x=3.36, y=target_solvent_limit,
-                text=f"High Solvent Adjustment Threshold: {target_solvent_limit:,.0f} kg",
-                showarrow=False, xanchor="right", yanchor="bottom",
-                font=dict(size=12, color="#000000"), bgcolor="rgba(255,255,255,0.95)",
+                x=0.01, xref="paper", y=target_solvent_limit, yref="y",
+                text=f"Threshold: {target_solvent_limit:,.0f} kg",
+                showarrow=False, xanchor="left", yanchor="bottom",
+                font=dict(size=11, color="#000000"), bgcolor="rgba(255,255,255,0.97)",
                 bordercolor="#D62728", borderwidth=1, borderpad=3,
             )
 
             label_df = plot_df[plot_df["Supplier_Action"].isin(["High Supplier Priority", "Validate with Supplier"])].copy()
             label_df = label_df.sort_values(["Action_Order", "Total_Solvent_kg"], ascending=[True, False]).head(10)
             label_df["Label_Rank_In_X"] = label_df.groupby("High_Stability_Count").cumcount()
-            x_shift_pattern = [0, -32, 32]
-            y_shift_pattern = [-24, -42, -60]
+            x_shift_pattern = [0, -42, 42]
+            y_shift_pattern = [-38, -66, -94]
             for _, row in label_df.iterrows():
                 rank = int(row["Label_Rank_In_X"]) % 3
+                # Raise labels for low-y bubbles so they remain clear of the horizontal threshold note.
+                extra_raise = -28 if float(row["Total_Solvent_kg"]) <= target_solvent_limit * 1.5 else 0
                 fig_matrix.add_annotation(
                     x=float(row["Matrix_X"]), y=float(row["Total_Solvent_kg"]), text=str(row["Paint_Code"]),
                     showarrow=True, arrowhead=0, arrowcolor="rgba(0,0,0,0.35)", arrowwidth=1,
-                    ax=x_shift_pattern[rank], ay=y_shift_pattern[rank],
+                    ax=x_shift_pattern[rank], ay=y_shift_pattern[rank] + extra_raise,
                     font=dict(size=12, color="#000000"), bgcolor="rgba(255,255,255,0.96)",
                     bordercolor="rgba(0,0,0,0.25)", borderwidth=1, borderpad=3,
                 )
@@ -1362,7 +1382,22 @@ with export_col1:
         with st.spinner("⏳ Generating Word report..."):
             try:
                 doc = Document()
-                doc.add_heading("Supplier Incoming Viscosity Improvement Priority", level=0)
+
+                # A4 landscape gives the decision table enough width and prevents column clipping.
+                section = doc.sections[0]
+                section.orientation = WD_ORIENT.LANDSCAPE
+                section.page_width, section.page_height = section.page_height, section.page_width
+                section.top_margin = Inches(0.45)
+                section.bottom_margin = Inches(0.45)
+                section.left_margin = Inches(0.45)
+                section.right_margin = Inches(0.45)
+
+                title_p = doc.add_paragraph()
+                title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                title_run = title_p.add_run("Supplier Incoming Viscosity Improvement Priority Report")
+                title_run.bold = True
+                title_run.font.size = Pt(18)
+
                 p = doc.add_paragraph()
                 p.add_run(f"Analysis Date: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                 p.add_run(f"Filters Applied: {filter_details}\n")
@@ -1371,13 +1406,25 @@ with export_col1:
                 if 'matrix_export_plot_df' in locals() and not matrix_export_plot_df.empty:
                     doc.add_heading("1. Supplier Priority Matrix", level=1)
                     chart_buffer = create_supplier_priority_png(matrix_export_plot_df, target_solvent_limit)
-                    doc.add_picture(chart_buffer, width=Inches(6.8))
+                    picture_p = doc.add_paragraph()
+                    picture_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    picture_p.add_run().add_picture(chart_buffer, width=Inches(9.8))
+                    caption = doc.add_paragraph("Figure 1. Supplier priority matrix for incoming-viscosity improvement.")
+                    caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    caption.runs[0].italic = True
+                    caption.runs[0].font.size = Pt(9)
                 else:
                     doc.add_paragraph("No decision matrix data is available for export.")
 
                 if 'display_df' in locals() and not display_df.empty:
+                    doc.add_page_break()
                     doc.add_heading("2. Supplier Decision Summary", level=1)
-                    export_table_df = display_df.copy().head(15)
+                    doc.add_paragraph(
+                        "Decision focus: Recommended Action → Total Solvent Adjustment → "
+                        "Incoming/Required Viscosity → Stable Ratio Range → Adjustment Consistency."
+                    )
+                    # Export every row shown in the app, not only the first 15 rows.
+                    export_table_df = display_df.copy()
                     export_table_df = export_table_df[[
                         "Paint_Code", "Supplier_Action", "Total_Solvent_kg", "Historical_Batches",
                         "Median_Incoming_Viscosity", "Median_Required_Viscosity",
@@ -1396,20 +1443,52 @@ with export_col1:
                     })
                     table = doc.add_table(rows=1, cols=len(export_table_df.columns))
                     table.style = "Table Grid"
+                    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+                    table.autofit = True
+
+                    # Repeat the header row when the table spans multiple pages.
+                    header_tr = table.rows[0]._tr
+                    tr_pr = header_tr.get_or_add_trPr()
+                    tbl_header = OxmlElement("w:tblHeader")
+                    tbl_header.set(qn("w:val"), "true")
+                    tr_pr.append(tbl_header)
+
                     hdr_cells = table.rows[0].cells
                     for j, col in enumerate(export_table_df.columns):
                         hdr_cells[j].text = str(col)
+                        hdr_cells[j].vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+                        for paragraph in hdr_cells[j].paragraphs:
+                            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            for run in paragraph.runs:
+                                run.bold = True
+                                run.font.size = Pt(7)
+
                     for _, row in export_table_df.iterrows():
                         cells = table.add_row().cells
                         for j, col in enumerate(export_table_df.columns):
                             val = row[col]
-                            if isinstance(val, float):
-                                if "Ratio" in str(col):
-                                    cells[j].text = f"{val:.2f}"
+                            if pd.isna(val):
+                                text = ""
+                            elif isinstance(val, (float, np.floating)):
+                                if "Consistency" in str(col):
+                                    text = f"{val:.1f}"
+                                elif "Ratio" in str(col):
+                                    text = f"{val:.2f}"
                                 else:
-                                    cells[j].text = f"{val:.1f}"
+                                    text = f"{val:.1f}"
                             else:
-                                cells[j].text = str(val)
+                                text = str(val)
+                            cells[j].text = text
+                            cells[j].vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+                            for paragraph in cells[j].paragraphs:
+                                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                for run in paragraph.runs:
+                                    run.font.size = Pt(7)
+
+                    table_caption = doc.add_paragraph("Table 1. Supplier decision summary (all filtered paint codes).")
+                    table_caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    table_caption.runs[0].italic = True
+                    table_caption.runs[0].font.size = Pt(9)
 
                 word_buffer = io.BytesIO()
                 doc.save(word_buffer)
