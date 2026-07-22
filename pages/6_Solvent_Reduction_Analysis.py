@@ -395,6 +395,131 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
     return buf
 
 
+
+def create_viscosity_history_png(chart_df):
+    """Create the Tab 2 dumbbell viscosity chart for Word export."""
+    fig, ax = plt.subplots(figsize=(11.2, 5.6), dpi=180)
+
+    if chart_df is None or chart_df.empty:
+        ax.text(0.5, 0.5, "No data available", ha="center", va="center", fontsize=12, color="black")
+        ax.set_axis_off()
+    else:
+        export_df = chart_df.copy().reset_index(drop=True)
+        x = export_df["Record_Index"].to_numpy(dtype=float)
+        before = pd.to_numeric(export_df["黏度(秒)"], errors="coerce").to_numpy(dtype=float)
+        after = pd.to_numeric(export_df["黏度(秒)_1"], errors="coerce").to_numpy(dtype=float)
+        delta = pd.to_numeric(export_df["Delta_V"], errors="coerce").to_numpy(dtype=float)
+
+        for xi, y_after, y_before in zip(x, after, before):
+            if np.isfinite(xi) and np.isfinite(y_after) and np.isfinite(y_before):
+                ax.plot([xi, xi], [y_after, y_before], color="#B8C2CC", linewidth=1.2, zorder=1)
+
+        ax.scatter(x, before, s=34, color="#0B67C2", edgecolors="white", linewidths=0.6,
+                   label="Before Viscosity (s)", zorder=3)
+        ax.scatter(x, after, s=34, color="#74BDF2", edgecolors="white", linewidths=0.6,
+                   label="After Viscosity (s)", zorder=3)
+
+        if len(export_df) <= 30:
+            for xi, y_before, y_after, d in zip(x, before, after, delta):
+                if np.isfinite(xi) and np.isfinite(y_before) and np.isfinite(y_after) and np.isfinite(d):
+                    ax.text(xi, (y_before + y_after) / 2, f"{d:.0f}", ha="center", va="center",
+                            fontsize=7.5, color="#374151",
+                            bbox=dict(facecolor="white", edgecolor="none", alpha=0.75, pad=0.5), zorder=4)
+
+        ax.set_xlabel("Historical Record Order", fontsize=11, color="black")
+        ax.set_ylabel("Viscosity (s)", fontsize=11, color="black")
+        ax.grid(axis="y", color="#E5E7EB", linewidth=0.8, zorder=0)
+        ax.tick_params(axis="both", colors="black", labelsize=9)
+        if len(export_df) <= 30:
+            ax.set_xticks(x)
+        else:
+            ax.locator_params(axis="x", nbins=12)
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, 1.10), ncol=2, frameon=False, fontsize=9.5)
+        ax.set_facecolor("white")
+        for spine in ax.spines.values():
+            spine.set_visible(True)
+            spine.set_color("#111827")
+            spine.set_linewidth(1.0)
+
+    fig.patch.set_facecolor("white")
+    fig.subplots_adjust(left=0.08, right=0.98, bottom=0.14, top=0.86)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight", facecolor="white", dpi=220)
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
+def create_ratio_temperature_png(chart_df):
+    """Create the Tab 2 solvent-ratio and temperature chart for Word export."""
+    fig, ax1 = plt.subplots(figsize=(11.2, 5.2), dpi=180)
+
+    if chart_df is None or chart_df.empty:
+        ax1.text(0.5, 0.5, "No data available", ha="center", va="center", fontsize=12, color="black")
+        ax1.set_axis_off()
+    else:
+        export_df = chart_df.copy().reset_index(drop=True)
+        x = export_df["Record_Index"].to_numpy(dtype=float)
+        ratio = pd.to_numeric(export_df["Solvent_Ratio_Percent"], errors="coerce").to_numpy(dtype=float)
+        temp = pd.to_numeric(export_df["溫度"], errors="coerce").to_numpy(dtype=float)
+
+        if len(export_df) > 1:
+            diffs = np.diff(np.sort(np.unique(x)))
+            bar_width = max(0.45, min(0.8, float(np.nanmedian(diffs)) * 0.72)) if len(diffs) else 0.65
+        else:
+            bar_width = 0.65
+
+        bars = ax1.bar(x, ratio, width=bar_width, color="#F87171", alpha=0.78,
+                       label="Solvent Ratio (%)", edgecolor="white", linewidth=0.5, zorder=2)
+        ax1.set_xlabel("Historical Record Order", fontsize=11, color="black")
+        ax1.set_ylabel("Solvent Ratio (%)", fontsize=11, color="#DC2626")
+        ratio_max = np.nanmax(ratio) if np.isfinite(ratio).any() else 5.0
+        ax1.set_ylim(0, max(5.0, ratio_max * 1.18))
+        ax1.tick_params(axis="y", colors="#DC2626", labelsize=9)
+        ax1.tick_params(axis="x", colors="black", labelsize=9)
+        ax1.grid(axis="y", color="#FEE2E2", linewidth=0.8, zorder=0)
+
+        ax2 = ax1.twinx()
+        valid_temp = np.isfinite(temp)
+        if valid_temp.any():
+            ax2.plot(x, temp, color="#7E22CE", marker="o", markersize=4.5, linewidth=1.8,
+                     label="Temperature (°C)", zorder=3)
+            temp_min = float(np.nanmin(temp))
+            temp_max = float(np.nanmax(temp))
+            temp_pad = max(1.0, (temp_max - temp_min) * 0.15)
+            ax2.set_ylim(temp_min - temp_pad, temp_max + temp_pad)
+        ax2.set_ylabel("Temperature (°C)", fontsize=11, color="#7E22CE")
+        ax2.tick_params(axis="y", colors="#7E22CE", labelsize=9)
+
+        if len(export_df) <= 30:
+            ax1.set_xticks(x)
+        else:
+            ax1.locator_params(axis="x", nbins=12)
+
+        handles1, labels1 = ax1.get_legend_handles_labels()
+        handles2, labels2 = ax2.get_legend_handles_labels()
+        ax1.legend(handles1 + handles2, labels1 + labels2, loc="upper center",
+                   bbox_to_anchor=(0.5, 1.10), ncol=2, frameon=False, fontsize=9.5)
+
+        ax1.set_facecolor("white")
+        for spine in ax1.spines.values():
+            spine.set_visible(True)
+            spine.set_color("#111827")
+            spine.set_linewidth(1.0)
+        ax2.spines["right"].set_color("#111827")
+        ax2.spines["right"].set_linewidth(1.0)
+        ax2.spines["top"].set_visible(False)
+        ax2.spines["left"].set_visible(False)
+        ax2.spines["bottom"].set_visible(False)
+
+    fig.patch.set_facecolor("white")
+    fig.subplots_adjust(left=0.08, right=0.92, bottom=0.14, top=0.86)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight", facecolor="white", dpi=220)
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
 def create_supplier_priority_png(plot_df, target_solvent_limit):
     """Create a Word-exportable supplier priority matrix with Matplotlib (no Kaleido)."""
     fig, ax = plt.subplots(figsize=(10.5, 6.5), dpi=180)
@@ -1776,14 +1901,67 @@ with export_col1:
                 else:
                     doc.add_paragraph("No Top 10 usage data is available for export.")
 
+                if 'chart_df' in locals() and chart_df is not None and not chart_df.empty:
+                    doc.add_page_break()
+                    doc.add_heading("2. Paint Code Adjustment History", level=1)
+
+                    history_context = doc.add_paragraph()
+                    history_context.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    context_run = history_context.add_run(
+                        f"Paint Code: {selected_code} | {chart_range_text} | Filters: {filter_details}"
+                    )
+                    context_run.italic = True
+                    context_run.font.size = Pt(8.5)
+
+                    figure_title = doc.add_paragraph()
+                    figure_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    title_run = figure_title.add_run(
+                        "Figure 2. Viscosity Adjustment by Historical Record"
+                    )
+                    title_run.bold = True
+                    title_run.font.size = Pt(11)
+
+                    viscosity_buffer = create_viscosity_history_png(chart_df)
+                    viscosity_p = doc.add_paragraph()
+                    viscosity_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    viscosity_p.paragraph_format.space_before = Pt(2)
+                    viscosity_p.paragraph_format.space_after = Pt(4)
+                    viscosity_p.add_run().add_picture(viscosity_buffer, width=Inches(10.2))
+
+                    doc.add_page_break()
+                    figure_title2 = doc.add_paragraph()
+                    figure_title2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    title_run2 = figure_title2.add_run(
+                        "Figure 3. Solvent Ratio and Temperature by Historical Record"
+                    )
+                    title_run2.bold = True
+                    title_run2.font.size = Pt(11)
+
+                    condition_buffer = create_ratio_temperature_png(chart_df)
+                    condition_p = doc.add_paragraph()
+                    condition_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    condition_p.paragraph_format.space_before = Pt(2)
+                    condition_p.paragraph_format.space_after = Pt(2)
+                    condition_p.add_run().add_picture(condition_buffer, width=Inches(10.2))
+
+                    note = doc.add_paragraph(
+                        "Note: Each record represents one independent viscosity-adjustment event. "
+                        "The vertical segment in Figure 2 represents the viscosity drop (Before - After)."
+                    )
+                    note.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                    for run in note.runs:
+                        run.font.size = Pt(8.5)
+                else:
+                    doc.add_paragraph("No selected paint-code history is available for export.")
+
                 if 'matrix_export_plot_df' in locals() and not matrix_export_plot_df.empty:
                     doc.add_page_break()
-                    doc.add_heading("2. Supplier Priority Matrix", level=1)
+                    doc.add_heading("3. Supplier Priority Matrix", level=1)
                     chart_buffer = create_supplier_priority_png(matrix_export_plot_df, target_solvent_limit)
                     picture_p = doc.add_paragraph()
                     picture_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     picture_p.add_run().add_picture(chart_buffer, width=Inches(9.8))
-                    caption = doc.add_paragraph("Figure 2. Supplier priority matrix for incoming-viscosity improvement.")
+                    caption = doc.add_paragraph("Figure 4. Supplier priority matrix for incoming-viscosity improvement.")
                     caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     caption.runs[0].italic = True
                     caption.runs[0].font.size = Pt(9)
@@ -1792,7 +1970,7 @@ with export_col1:
 
                 if 'display_df' in locals() and not display_df.empty:
                     doc.add_page_break()
-                    doc.add_heading("3. Supplier Decision Summary", level=1)
+                    doc.add_heading("4. Supplier Decision Summary", level=1)
                     doc.add_paragraph(
                         "Decision focus: Recommended Action → Total Solvent Adjustment → "
                         "Incoming/Required Viscosity → Stable Ratio Range → Adjustment Consistency."
