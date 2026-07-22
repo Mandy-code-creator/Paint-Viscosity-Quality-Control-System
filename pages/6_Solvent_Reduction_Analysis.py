@@ -471,7 +471,7 @@ def create_ratio_temperature_png(chart_df):
 
         bars = ax1.bar(x, ratio, width=bar_width, color="#F87171", alpha=0.78,
                        label="Solvent Ratio (%)", edgecolor="white", linewidth=0.5, zorder=2)
-        ax1.set_xlabel("Historical Record Order", fontsize=11, color="black")
+        ax1.set_xlabel("Historical Record", fontsize=11, color="black")
         ax1.set_ylabel("Solvent Ratio (%)", fontsize=11, color="#DC2626")
         ratio_max = np.nanmax(ratio) if np.isfinite(ratio).any() else 5.0
         ax1.set_ylim(0, max(5.0, ratio_max * 1.18))
