@@ -336,27 +336,35 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
 
         # ---------------------------------------------------------
         # PAINT LABELS
-        # Tall bars: place values inside the bar in white.
-        # Short bars: place values above the bar in black.
+        # Place all paint values inside the blue bars using black text
+        # on a white background box. This remains readable in Word/PDF
+        # and avoids blending into the blue bar.
         # ---------------------------------------------------------
         for bar in paint_bars:
             value = float(bar.get_height())
             x_center = bar.get_x() + bar.get_width() / 2
 
-            if value >= max_weight * 0.20:
+            if value >= max_weight * 0.12:
+                label_y = value - max(value * 0.08, max_weight * 0.018)
                 ax1.annotate(
                     f"{value:,.0f}",
-                    xy=(x_center, value),
-                    xytext=(0, -8),
+                    xy=(x_center, label_y),
+                    xytext=(0, 0),
                     textcoords="offset points",
                     ha="center",
                     va="top",
-                    fontsize=8.2,
-                    color="white",
+                    fontsize=8.0,
+                    color="black",
                     fontweight="bold",
-                    rotation=90 if value >= max_weight * 0.65 else 0,
+                    rotation=0,
+                    bbox=dict(
+                        boxstyle="round,pad=0.16",
+                        facecolor="white",
+                        edgecolor="none",
+                        alpha=0.92,
+                    ),
                     clip_on=True,
-                    zorder=6,
+                    zorder=7,
                 )
             else:
                 ax1.annotate(
@@ -366,10 +374,16 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
                     textcoords="offset points",
                     ha="center",
                     va="bottom",
-                    fontsize=8.2,
+                    fontsize=8.0,
                     color="black",
+                    bbox=dict(
+                        boxstyle="round,pad=0.14",
+                        facecolor="white",
+                        edgecolor="none",
+                        alpha=0.92,
+                    ),
                     clip_on=False,
-                    zorder=6,
+                    zorder=7,
                 )
 
         # ---------------------------------------------------------
