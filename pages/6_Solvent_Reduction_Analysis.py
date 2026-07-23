@@ -260,10 +260,14 @@ def apply_professional_layout(fig, title_text=None, subtitle_text=None, height=N
 
 
 def create_top10_usage_ratio_png(summary_df, filter_details):
-    """Create the Top 10 paint/solvent usage and weighted-ratio chart for Word export.
+    """Create the Top 10 usage/ratio chart for Word export with clean labels.
 
-    Ratio labels are positioned dynamically so they do not overlap the paint-bar
-    value labels, solvent-bar value labels, or the ratio line.
+    Layout rules:
+    1. Paint values are placed inside tall blue bars.
+    2. Solvent values stay above the short yellow bars.
+    3. Ratio labels are placed above the line points with alternating
+       horizontal offsets and white backgrounds.
+    4. Extra top space is reserved so labels never touch the chart border.
     """
     fig, ax1 = plt.subplots(figsize=(11.2, 6.3), dpi=180)
 
@@ -278,9 +282,19 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
         x = np.arange(len(chart_df))
         bar_width = 0.36
 
+        paint_values = pd.to_numeric(
+            chart_df["Total_Paint_kg"], errors="coerce"
+        ).fillna(0)
+        solvent_values = pd.to_numeric(
+            chart_df["Total_Solvent_kg"], errors="coerce"
+        ).fillna(0)
+        ratio_values = pd.to_numeric(
+            chart_df["Weighted_Ratio_Percent"], errors="coerce"
+        )
+
         paint_bars = ax1.bar(
             x - bar_width / 2,
-            chart_df["Total_Paint_kg"],
+            paint_values,
             width=bar_width,
             label="Paint (kg)",
             color="#5B8FF9",
@@ -290,7 +304,7 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
         )
         solvent_bars = ax1.bar(
             x + bar_width / 2,
-            chart_df["Total_Solvent_kg"],
+            solvent_values,
             width=bar_width,
             label="Solvent (kg)",
             color="#F6BD16",
@@ -300,10 +314,6 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
         )
 
         ax2 = ax1.twinx()
-        ratio_values = pd.to_numeric(
-            chart_df["Weighted_Ratio_Percent"], errors="coerce"
-        )
-
         ax2.plot(
             x,
             ratio_values,
@@ -315,98 +325,97 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
             zorder=5,
         )
 
-        max_weight = max(
-            float(chart_df[["Total_Paint_kg", "Total_Solvent_kg"]].max().max()),
-            1.0,
-        )
+        max_weight = max(float(max(paint_values.max(), solvent_values.max())), 1.0)
         max_ratio = max(float(ratio_values.max()), 1.0)
 
-        weight_upper = max_weight * 1.18
-        ratio_upper = max(5.0, max_ratio * 1.34)
+        weight_upper = max_weight * 1.24
+        ratio_upper = max(5.0, max_ratio * 1.42)
 
         ax1.set_ylim(0, weight_upper)
         ax2.set_ylim(0, ratio_upper)
 
+        # ---------------------------------------------------------
+        # PAINT LABELS
+        # Tall bars: place values inside the bar in white.
+        # Short bars: place values above the bar in black.
+        # ---------------------------------------------------------
         for bar in paint_bars:
-            value = bar.get_height()
-            ax1.annotate(
-                f"{value:,.0f}",
-                xy=(bar.get_x() + bar.get_width() / 2, value),
-                xytext=(0, 5),
-                textcoords="offset points",
-                ha="center",
-                va="bottom",
-                fontsize=8.2,
-                rotation=90 if value > max_weight * 0.72 else 0,
-                color="black",
-                clip_on=False,
-                zorder=6,
-            )
+            value = float(bar.get_height())
+            x_center = bar.get_x() + bar.get_width() / 2
 
+            if value >= max_weight * 0.20:
+                ax1.annotate(
+                    f"{value:,.0f}",
+                    xy=(x_center, value),
+                    xytext=(0, -8),
+                    textcoords="offset points",
+                    ha="center",
+                    va="top",
+                    fontsize=8.2,
+                    color="white",
+                    fontweight="bold",
+                    rotation=90 if value >= max_weight * 0.65 else 0,
+                    clip_on=True,
+                    zorder=6,
+                )
+            else:
+                ax1.annotate(
+                    f"{value:,.0f}",
+                    xy=(x_center, value),
+                    xytext=(0, 5),
+                    textcoords="offset points",
+                    ha="center",
+                    va="bottom",
+                    fontsize=8.2,
+                    color="black",
+                    clip_on=False,
+                    zorder=6,
+                )
+
+        # ---------------------------------------------------------
+        # SOLVENT LABELS
+        # ---------------------------------------------------------
         for bar in solvent_bars:
-            value = bar.get_height()
+            value = float(bar.get_height())
+            x_center = bar.get_x() + bar.get_width() / 2
+
             ax1.annotate(
                 f"{value:,.0f}",
-                xy=(bar.get_x() + bar.get_width() / 2, value),
+                xy=(x_center, value),
                 xytext=(0, 5),
                 textcoords="offset points",
                 ha="center",
                 va="bottom",
-                fontsize=8.2,
+                fontsize=8.0,
                 color="black",
                 clip_on=False,
                 zorder=6,
             )
 
-        paint_equiv_ratio = (
-            pd.to_numeric(chart_df["Total_Paint_kg"], errors="coerce")
-            / weight_upper
-            * ratio_upper
-        )
-        solvent_equiv_ratio = (
-            pd.to_numeric(chart_df["Total_Solvent_kg"], errors="coerce")
-            / weight_upper
-            * ratio_upper
-        )
-
-        last_label_side = None
+        # ---------------------------------------------------------
+        # RATIO LABELS
+        # Keep all percentage labels outside the bars.
+        # Use alternating horizontal shifts to avoid crowding.
+        # ---------------------------------------------------------
         for i, ratio in enumerate(ratio_values):
             if pd.isna(ratio):
                 continue
 
-            paint_gap = abs(float(ratio) - float(paint_equiv_ratio.iloc[i]))
-            solvent_gap = abs(float(ratio) - float(solvent_equiv_ratio.iloc[i]))
-
-            near_bar_label = (
-                paint_gap < ratio_upper * 0.055
-                or solvent_gap < ratio_upper * 0.045
-            )
-
-            if near_bar_label:
-                y_offset = -25
-                va = "top"
-                side = "below"
+            # Wider alternating offset for neighbouring labels.
+            if i % 3 == 0:
+                x_offset = -10
+            elif i % 3 == 1:
+                x_offset = 0
             else:
-                previous_ratio = (
-                    float(ratio_values.iloc[i - 1])
-                    if i > 0 and pd.notna(ratio_values.iloc[i - 1])
-                    else None
-                )
-                close_to_previous = (
-                    previous_ratio is not None
-                    and abs(float(ratio) - previous_ratio) < ratio_upper * 0.075
-                )
+                x_offset = 10
 
-                if close_to_previous and last_label_side == "above":
-                    y_offset = -24
-                    va = "top"
-                    side = "below"
-                else:
-                    y_offset = 15
-                    va = "bottom"
-                    side = "above"
+            # Standard position above the point.
+            y_offset = 15
 
-            x_offset = -7 if i % 2 == 0 else 7
+            # For very low ratio points, move the label slightly higher
+            # so it does not touch the paint-bar top or x-axis area.
+            if float(ratio) <= ratio_upper * 0.36:
+                y_offset = 18
 
             ax2.annotate(
                 f"{ratio:.2f}%",
@@ -414,7 +423,7 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
                 xytext=(x_offset, y_offset),
                 textcoords="offset points",
                 ha="center",
-                va=va,
+                va="bottom",
                 fontsize=8.8,
                 fontweight="bold",
                 color="black",
@@ -422,7 +431,7 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
                     boxstyle="round,pad=0.20",
                     facecolor="white",
                     edgecolor="none",
-                    alpha=0.96,
+                    alpha=0.97,
                 ),
                 arrowprops=dict(
                     arrowstyle="-",
@@ -434,12 +443,11 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
                 annotation_clip=False,
                 zorder=8,
             )
-            last_label_side = side
 
         ax1.set_xticks(x)
         ax1.set_xticklabels(
             chart_df["Paint_Code"].astype(str),
-            fontsize=9.0,
+            fontsize=8.8,
             color="black",
         )
         ax1.set_xlabel("Paint Code", fontsize=11, color="black", labelpad=10)
@@ -468,7 +476,7 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
             handles1 + handles2,
             labels1 + labels2,
             loc="upper center",
-            bbox_to_anchor=(0.5, 1.12),
+            bbox_to_anchor=(0.5, 1.13),
             ncol=3,
             frameon=False,
             fontsize=9.5,
@@ -477,7 +485,7 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
             txt.set_color("black")
 
     fig.patch.set_facecolor("white")
-    fig.subplots_adjust(left=0.08, right=0.92, bottom=0.16, top=0.88)
+    fig.subplots_adjust(left=0.08, right=0.92, bottom=0.16, top=0.86)
 
     buf = io.BytesIO()
     fig.savefig(
