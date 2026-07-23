@@ -1638,6 +1638,129 @@ with tab_pilot:
         }
         supplier_df["Action_Order"] = supplier_df["Supplier_Action"].map(action_order).fillna(99)
 
+        # =========================================================
+        # TABLE 2 — TOP 10 PAINT CODE STABILITY RESULTS
+        # =========================================================
+        st.markdown("### 表2　主要色號穩定性評估結果")
+        st.caption(
+            "依累積稀釋劑添加量由高至低，僅列示前10個主要色號；"
+            "各指標同時呈現實際數值及穩定性分級。"
+        )
+
+        stability_class_map = {
+            "High Stability": "高",
+            "Medium Stability": "中",
+            "Low Stability": "低",
+            "Insufficient Data": "資料不足",
+        }
+        overall_stability_map = {
+            "High Stability": "高穩定",
+            "Medium Stability": "需確認",
+            "Low Stability": "需確認",
+            "Insufficient Data": "資料不足",
+        }
+
+        top10_stability_df = (
+            supplier_df
+            .sort_values(
+                ["Total_Solvent_kg", "Historical_Batches", "Historical_Records"],
+                ascending=[False, False, False],
+            )
+            .head(10)
+            .copy()
+            .reset_index(drop=True)
+        )
+        top10_stability_df.insert(0, "Rank", np.arange(1, len(top10_stability_df) + 1))
+
+        def format_metric_with_level(value, level, value_format):
+            if pd.isna(value):
+                return "資料不足"
+            level_zh = stability_class_map.get(level, str(level))
+            return f"{value_format(value)}（{level_zh}）"
+
+        top10_stability_df["Ratio_Consistency_Display"] = top10_stability_df.apply(
+            lambda row: format_metric_with_level(
+                row["Ratio_Consistency"],
+                row["Ratio_Stability_Level"],
+                lambda value: f"{value * 100:.1f}%",
+            ),
+            axis=1,
+        )
+        top10_stability_df["Efficiency_Variation_Display"] = top10_stability_df.apply(
+            lambda row: format_metric_with_level(
+                row["Efficiency_Relative_Variation"],
+                row["Efficiency_Stability_Level"],
+                lambda value: f"{value:.4f}",
+            ),
+            axis=1,
+        )
+        top10_stability_df["Ratio_Trend_Display"] = top10_stability_df.apply(
+            lambda row: format_metric_with_level(
+                row["Ratio_Trend_Per_10_Records"],
+                row["Trend_Stability_Level"],
+                lambda value: f"{value:+.2f}",
+            ),
+            axis=1,
+        )
+        top10_stability_df["High_Stability_Display"] = top10_stability_df[
+            "High_Stability_Count"
+        ].apply(lambda value: "資料不足" if pd.isna(value) else f"{int(value)}/3")
+        top10_stability_df["Overall_Stability_Display"] = (
+            top10_stability_df["Stability_Level"]
+            .map(overall_stability_map)
+            .fillna(top10_stability_df["Stability_Level"])
+        )
+
+        top10_stability_display = top10_stability_df[[
+            "Rank",
+            "Paint_Code",
+            "Total_Solvent_kg",
+            "Ratio_Consistency_Display",
+            "Efficiency_Variation_Display",
+            "Ratio_Trend_Display",
+            "High_Stability_Display",
+            "Overall_Stability_Display",
+        ]].rename(columns={
+            "Rank": "順位",
+            "Paint_Code": "色號",
+            "Total_Solvent_kg": "累積稀釋劑添加量（kg）",
+            "Ratio_Consistency_Display": "添加比例一致率",
+            "Efficiency_Variation_Display": "稀釋效率相對變異",
+            "Ratio_Trend_Display": "添加比例趨勢（每10筆）",
+            "High_Stability_Display": "高穩定指標數",
+            "Overall_Stability_Display": "整體判定",
+        })
+
+        st.dataframe(
+            top10_stability_display,
+            column_config={
+                "順位": st.column_config.NumberColumn("順位", format="%d", width="small"),
+                "色號": st.column_config.TextColumn("色號", width="medium"),
+                "累積稀釋劑添加量（kg）": st.column_config.NumberColumn(
+                    "累積稀釋劑添加量（kg）", format="%.0f"
+                ),
+                "添加比例一致率": st.column_config.TextColumn(
+                    "添加比例一致率", help="數值越高越穩定"
+                ),
+                "稀釋效率相對變異": st.column_config.TextColumn(
+                    "稀釋效率相對變異", help="數值越低越穩定"
+                ),
+                "添加比例趨勢（每10筆）": st.column_config.TextColumn(
+                    "添加比例趨勢（每10筆）", help="絕對值越低越穩定"
+                ),
+                "高穩定指標數": st.column_config.TextColumn(
+                    "高穩定指標數", width="small"
+                ),
+                "整體判定": st.column_config.TextColumn("整體判定", width="small"),
+            },
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.caption(
+            "註：添加比例一致率數值越高越佳；稀釋效率相對變異及"
+            "添加比例趨勢絕對值越低越佳。僅3/3判定為整體高穩定。"
+        )
+
         plot_df = supplier_df.dropna(subset=["High_Stability_Count"]).copy()
         if not plot_df.empty:
             plot_df = plot_df.sort_values(
