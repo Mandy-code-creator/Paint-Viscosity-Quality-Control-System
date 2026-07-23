@@ -521,8 +521,8 @@ def create_ratio_temperature_png(chart_df):
     return buf
 
 def create_supplier_priority_png(plot_df, target_solvent_limit):
-    """Create a Word-exportable supplier priority matrix with Matplotlib (no Kaleido)."""
-    fig, ax = plt.subplots(figsize=(10.5, 6.5), dpi=180)
+    """Create a Word-exportable supplier priority matrix with non-overlapping labels."""
+    fig, ax = plt.subplots(figsize=(11.2, 7.2), dpi=180)
 
     export_colors = {
         "High Supplier Priority": "#1D4ED8",
@@ -531,18 +531,24 @@ def create_supplier_priority_png(plot_df, target_solvent_limit):
         "Low Priority": "#FDBA74",
     }
 
-    if plot_df.empty:
-        ax.text(0.5, 0.5, "No data available", ha="center", va="center", fontsize=12, color="black")
+    if plot_df is None or plot_df.empty:
+        ax.text(
+            0.5, 0.5, "No data available",
+            ha="center", va="center", fontsize=12, color="black",
+            transform=ax.transAxes,
+        )
+        ax.set_axis_off()
     else:
-        max_batches = max(float(plot_df["Historical_Batches"].max()), 1.0)
-        sizes = 45 + (plot_df["Historical_Batches"] / max_batches) * 620
+        chart_df = plot_df.copy().reset_index(drop=True)
+        max_batches = max(float(chart_df["Historical_Batches"].max()), 1.0)
+        bubble_sizes = 45 + chart_df["Historical_Batches"] / max_batches * 620
 
-        for action, subdf in plot_df.groupby("Supplier_Action"):
+        for action, subdf in chart_df.groupby("Supplier_Action", sort=False):
             ax.scatter(
                 subdf["Matrix_X"],
                 subdf["Total_Solvent_kg"],
-                s=sizes.loc[subdf.index],
-                c=export_colors.get(action, "#9CA3AF"),
+                s=bubble_sizes.loc[subdf.index],
+                color=export_colors.get(action, "#9CA3AF"),
                 edgecolors="white",
                 linewidths=1.0,
                 alpha=0.88,
@@ -550,102 +556,162 @@ def create_supplier_priority_png(plot_df, target_solvent_limit):
                 zorder=3,
             )
 
-        max_y = max(float(plot_df["Total_Solvent_kg"].max()), 1.0)
+        max_y = max(float(chart_df["Total_Solvent_kg"].max()), 1.0)
+        y_lower = -max_y * 0.045
+        y_upper = max_y * 1.16
+        ax.set_xlim(-0.45, 3.45)
+        ax.set_ylim(y_lower, y_upper)
+
         ax.axvline(2.5, color="#DC2626", linestyle=(0, (4, 4)), linewidth=1.2, zorder=2)
         ax.axhline(target_solvent_limit, color="#DC2626", linestyle=(0, (4, 4)), linewidth=1.2, zorder=2)
 
-        important = plot_df.copy()
         priority_map = {
             "High Supplier Priority": 4,
             "Validate with Supplier": 3,
             "Monitor": 2,
             "Low Priority": 1,
         }
+        important = chart_df.copy()
         important["Label_Priority"] = important["Supplier_Action"].map(priority_map).fillna(0)
         important = important.sort_values(
             ["Label_Priority", "Total_Solvent_kg", "Historical_Batches"],
             ascending=[False, False, False],
         )
         important["Label_Rank_In_X"] = important.groupby("High_Stability_Count").cumcount()
-        important = important[important["Label_Rank_In_X"] < 3].head(12)
+        important = important[important["Label_Rank_In_X"] < 3].head(12).copy()
 
-        x_offsets = [0.00, -0.12, 0.12]
-        y_offsets = [max_y * 0.035, max_y * 0.060, max_y * 0.085]
+        label_offsets = {
+            0: (0, 16),
+            1: (-42, 30),
+            2: (42, 30),
+        }
+        bottom_offsets = {
+            0: (-42, 24),
+            1: (0, 46),
+            2: (42, 24),
+        }
+
         for _, row in important.iterrows():
             rank = int(row["Label_Rank_In_X"]) % 3
+            point_x = float(row["Matrix_X"])
+            point_y = float(row["Total_Solvent_kg"])
+            x_offset, y_offset = label_offsets[rank]
+
+            if point_y <= target_solvent_limit * 1.5:
+                x_offset, y_offset = bottom_offsets[rank]
+            if point_x >= 2.85 and x_offset > 0:
+                x_offset = -48
+            if point_x <= 0.10 and x_offset < 0:
+                x_offset = 42
+
             ax.annotate(
-                row["Paint_Code"],
-                xy=(row["Matrix_X"], row["Total_Solvent_kg"]),
-                xytext=(row["Matrix_X"] + x_offsets[rank], row["Total_Solvent_kg"] + y_offsets[rank]),
-                textcoords="data",
-                fontsize=9,
+                str(row["Paint_Code"]),
+                xy=(point_x, point_y),
+                xycoords="data",
+                xytext=(x_offset, y_offset),
+                textcoords="offset points",
+                fontsize=8.6,
                 color="black",
                 ha="center",
                 va="bottom",
-                bbox=dict(boxstyle="round,pad=0.20", facecolor="white", edgecolor="#9CA3AF", linewidth=0.8),
-                arrowprops=dict(arrowstyle="-", color="#9CA3AF", lw=0.8),
-                zorder=4,
+                bbox=dict(
+                    boxstyle="round,pad=0.22",
+                    facecolor="white",
+                    edgecolor="#9CA3AF",
+                    linewidth=0.75,
+                    alpha=0.96,
+                ),
+                arrowprops=dict(
+                    arrowstyle="-",
+                    color="#9CA3AF",
+                    linewidth=0.75,
+                    shrinkA=2,
+                    shrinkB=4,
+                ),
+                annotation_clip=False,
+                zorder=5,
             )
 
         ax.text(
-            2.55, max_y * 1.055, "Strong Evidence Zone", fontsize=10, color="black", ha="left", va="bottom",
+            2.54, y_upper * 0.965, "Strong Evidence Zone",
+            fontsize=9.5, color="black", ha="left", va="top",
             bbox=dict(facecolor="white", edgecolor="#DC2626", linewidth=0.8, pad=2),
+            zorder=5,
         )
-        # Put the threshold note outside the right chart frame so it cannot cover bubbles or labels.
+
         threshold_transform = blended_transform_factory(ax.transAxes, ax.transData)
         ax.text(
             1.015, target_solvent_limit,
             f"Threshold: {target_solvent_limit:,.0f} kg",
             transform=threshold_transform,
-            fontsize=9.5, color="black", ha="left", va="center",
+            fontsize=9.2, color="black", ha="left", va="center",
             bbox=dict(facecolor="white", edgecolor="#DC2626", linewidth=0.8, pad=2),
             clip_on=False, zorder=5,
         )
-        ax.set_xlim(-0.45, 3.45)
-        ax.set_ylim(-max_y * 0.05, max_y * 1.15)
 
-    fig.suptitle(
-        "Figure 1. Supplier Incoming Viscosity Improvement Priority Matrix",
-        x=0.08, y=0.985, ha="left", va="top",
-        fontsize=16, fontweight="bold", color="black",
-    )
-    fig.text(
-        0.08, 0.94,
-        "X-axis = High-Stability Checks Passed; Y-axis = Total On-site Solvent Adjustment; Bubble Size = Historical Batches",
-        fontsize=10.5, color="black", ha="left", va="top",
-    )
-    ax.set_xlabel("High-Stability Checks Passed (0-3)", fontsize=11.5, color="black")
-    ax.set_ylabel("Total On-site Solvent Adjustment (kg)", fontsize=11.5, color="black")
+    ax.set_xlabel("High-Stability Checks Passed (0–3)", fontsize=11.5, color="black", labelpad=10)
+    ax.set_ylabel("Total On-site Solvent Adjustment (kg)", fontsize=11.5, color="black", labelpad=10)
     ax.set_xticks([0, 1, 2, 3])
     ax.tick_params(axis="both", colors="black", labelsize=10)
-    ax.grid(axis="y", color="#E5E7EB", linewidth=0.8)
+    ax.grid(axis="y", color="#E5E7EB", linewidth=0.8, zorder=0)
     ax.set_facecolor("white")
 
     for spine in ax.spines.values():
         spine.set_visible(True)
         spine.set_color("#111827")
-        spine.set_linewidth(1.2)
+        spine.set_linewidth(1.1)
 
     handles, labels = ax.get_legend_handles_labels()
     if handles:
-        by_label = dict(zip(labels, handles))
+        preferred_order = [
+            "High Supplier Priority",
+            "Low Priority",
+            "Monitor",
+            "Validate with Supplier",
+        ]
+        legend_items = dict(zip(labels, handles))
+        ordered_labels = [label for label in preferred_order if label in legend_items]
         leg = ax.legend(
-            by_label.values(), by_label.keys(), ncol=1,
-            loc="upper left", bbox_to_anchor=(1.01, 1.00),
-            frameon=True, fontsize=9.5,
-            handletextpad=0.6, labelspacing=0.9,
+            [legend_items[label] for label in ordered_labels],
+            ordered_labels,
+            ncol=1,
+            loc="upper left",
+            bbox_to_anchor=(1.01, 1.00),
+            frameon=True,
+            fontsize=9.3,
+            handletextpad=0.7,
+            labelspacing=0.9,
             borderaxespad=0.0,
         )
         leg.get_frame().set_facecolor("white")
         leg.get_frame().set_edgecolor("#D1D5DB")
         leg.get_frame().set_linewidth(0.8)
-        for txt in leg.get_texts():
-            txt.set_color("black")
+        for text in leg.get_texts():
+            text.set_color("black")
+
+    fig.suptitle(
+        "Figure 1. Supplier Incoming Viscosity Improvement Priority Matrix",
+        x=0.08, y=0.965, ha="left", va="top",
+        fontsize=16, fontweight="bold", color="black",
+    )
+    fig.text(
+        0.08, 0.915,
+        "X-axis = High-Stability Checks Passed; Y-axis = Total On-site Solvent Adjustment; Bubble Size = Historical Batches",
+        fontsize=10.3, color="black", ha="left", va="top",
+    )
 
     fig.patch.set_facecolor("white")
-    fig.subplots_adjust(left=0.10, right=0.77, bottom=0.16, top=0.72)
+    fig.subplots_adjust(left=0.10, right=0.76, bottom=0.14, top=0.76)
+
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", bbox_inches="tight", facecolor="white", dpi=220)
+    fig.savefig(
+        buf,
+        format="png",
+        facecolor="white",
+        dpi=220,
+        bbox_inches="tight",
+        pad_inches=0.18,
+    )
     plt.close(fig)
     buf.seek(0)
     return buf
@@ -1625,9 +1691,9 @@ with tab_pilot:
 
             apply_professional_layout(
                 fig_matrix,
-                title_text="Supplier Incoming Viscosity Improvement Priority",
-                subtitle_text="X-axis = High-Stability Checks Passed; Y-axis = Total On-site Solvent Adjustment; Bubble Size = Historical Batches",
-                height=760,
+                title_text=None,
+                subtitle_text=None,
+                height=780,
             )
             fig_matrix.update_xaxes(
                 title="High-Stability Checks Passed (0-3)",
@@ -1653,10 +1719,11 @@ with tab_pilot:
                         "Y-axis = Total On-site Solvent Adjustment; "
                         "Bubble Size = Historical Batches</sup>"
                     ),
-                    x=0.01, xanchor="left", y=0.98, yanchor="top",
+                    x=0.01, xanchor="left", y=0.975, yanchor="top",
                     font=dict(size=20, color="#000000"),
+                    pad=dict(b=18),
                 ),
-                margin=dict(l=80, r=255, t=170, b=90),
+                margin=dict(l=80, r=255, t=205, b=90),
                 legend=dict(
                     title_text="Action Category",
                     orientation="v",
@@ -1688,17 +1755,23 @@ with tab_pilot:
             label_df = plot_df[plot_df["Supplier_Action"].isin(["High Supplier Priority", "Validate with Supplier"])].copy()
             label_df = label_df.sort_values(["Action_Order", "Total_Solvent_kg"], ascending=[True, False]).head(10)
             label_df["Label_Rank_In_X"] = label_df.groupby("High_Stability_Count").cumcount()
-            x_shift_pattern = [0, -42, 42]
-            y_shift_pattern = [-38, -66, -94]
+            normal_offsets = [(0, -34), (-48, -58), (48, -58)]
+            bottom_offsets = [(-52, -36), (0, -72), (52, -36)]
             for _, row in label_df.iterrows():
                 rank = int(row["Label_Rank_In_X"]) % 3
-                # Raise labels for low-y bubbles so they remain clear of the horizontal threshold note.
-                extra_raise = -28 if float(row["Total_Solvent_kg"]) <= target_solvent_limit * 1.5 else 0
+                point_x = float(row["Matrix_X"])
+                point_y = float(row["Total_Solvent_kg"])
+                offsets = bottom_offsets if point_y <= target_solvent_limit * 1.5 else normal_offsets
+                ax_shift, ay_shift = offsets[rank]
+                if point_x >= 2.85 and ax_shift > 0:
+                    ax_shift = -58
+                if point_x <= 0.10 and ax_shift < 0:
+                    ax_shift = 48
                 fig_matrix.add_annotation(
-                    x=float(row["Matrix_X"]), y=float(row["Total_Solvent_kg"]), text=str(row["Paint_Code"]),
+                    x=point_x, y=point_y, text=str(row["Paint_Code"]),
                     showarrow=True, arrowhead=0, arrowcolor="rgba(0,0,0,0.35)", arrowwidth=1,
-                    ax=x_shift_pattern[rank], ay=y_shift_pattern[rank] + extra_raise,
-                    font=dict(size=12, color="#000000"), bgcolor="rgba(255,255,255,0.96)",
+                    ax=ax_shift, ay=ay_shift,
+                    font=dict(size=11, color="#000000"), bgcolor="rgba(255,255,255,0.97)",
                     bordercolor="rgba(0,0,0,0.25)", borderwidth=1, borderpad=3,
                 )
 
