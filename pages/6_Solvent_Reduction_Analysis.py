@@ -521,8 +521,12 @@ def create_ratio_temperature_png(chart_df):
     return buf
 
 def create_supplier_priority_png(plot_df, target_solvent_limit):
-    """Create a Word-exportable supplier priority matrix with non-overlapping labels."""
-    fig, ax = plt.subplots(figsize=(11.2, 7.2), dpi=180)
+    """Create a clean Word-exportable priority matrix.
+
+    The chart title and subtitle are intentionally excluded from the PNG and
+    are written as separate Word paragraphs during export.
+    """
+    fig, ax = plt.subplots(figsize=(11.2, 6.5), dpi=180)
 
     export_colors = {
         "High Supplier Priority": "#1D4ED8",
@@ -565,6 +569,8 @@ def create_supplier_priority_png(plot_df, target_solvent_limit):
         ax.axvline(2.5, color="#DC2626", linestyle=(0, (4, 4)), linewidth=1.2, zorder=2)
         ax.axhline(target_solvent_limit, color="#DC2626", linestyle=(0, (4, 4)), linewidth=1.2, zorder=2)
 
+        # Label only the most important paint codes and allocate non-overlapping
+        # vertical label slots within each stability-score group.
         priority_map = {
             "High Supplier Priority": 4,
             "Validate with Supplier": 3,
@@ -578,48 +584,50 @@ def create_supplier_priority_png(plot_df, target_solvent_limit):
             ascending=[False, False, False],
         )
         important["Label_Rank_In_X"] = important.groupby("High_Stability_Count").cumcount()
-        important = important[important["Label_Rank_In_X"] < 3].head(12).copy()
+        important = important[important["Label_Rank_In_X"] < 2].head(10).copy()
 
-        label_offsets = {
-            0: (0, 16),
-            1: (-42, 30),
-            2: (42, 30),
-        }
-        bottom_offsets = {
-            0: (-42, 24),
-            1: (0, 46),
-            2: (42, 24),
-        }
+        min_gap = max(max_y * 0.055, 850.0)
+        label_positions = {}
+        for score, group in important.groupby("High_Stability_Count", sort=True):
+            group = group.sort_values("Total_Solvent_kg")
+            previous_y = None
+            for idx, row in group.iterrows():
+                desired_y = float(row["Total_Solvent_kg"]) + max_y * 0.035
+                if previous_y is not None and desired_y - previous_y < min_gap:
+                    desired_y = previous_y + min_gap
+                desired_y = min(desired_y, y_upper - max_y * 0.045)
+                label_positions[idx] = desired_y
+                previous_y = desired_y
 
-        for _, row in important.iterrows():
-            rank = int(row["Label_Rank_In_X"]) % 3
+        for idx, row in important.iterrows():
             point_x = float(row["Matrix_X"])
             point_y = float(row["Total_Solvent_kg"])
-            x_offset, y_offset = label_offsets[rank]
+            rank = int(row["Label_Rank_In_X"])
+            horizontal_shift = -0.12 if rank % 2 == 0 else 0.12
+            if point_x >= 2.85:
+                horizontal_shift = -0.16
+            elif point_x <= 0.10:
+                horizontal_shift = 0.16
 
-            if point_y <= target_solvent_limit * 1.5:
-                x_offset, y_offset = bottom_offsets[rank]
-            if point_x >= 2.85 and x_offset > 0:
-                x_offset = -48
-            if point_x <= 0.10 and x_offset < 0:
-                x_offset = 42
+            label_x = point_x + horizontal_shift
+            label_y = label_positions.get(idx, point_y + max_y * 0.04)
 
             ax.annotate(
                 str(row["Paint_Code"]),
                 xy=(point_x, point_y),
                 xycoords="data",
-                xytext=(x_offset, y_offset),
-                textcoords="offset points",
-                fontsize=8.6,
+                xytext=(label_x, label_y),
+                textcoords="data",
+                fontsize=8.5,
                 color="black",
                 ha="center",
                 va="bottom",
                 bbox=dict(
-                    boxstyle="round,pad=0.22",
+                    boxstyle="round,pad=0.20",
                     facecolor="white",
                     edgecolor="#9CA3AF",
                     linewidth=0.75,
-                    alpha=0.96,
+                    alpha=0.97,
                 ),
                 arrowprops=dict(
                     arrowstyle="-",
@@ -634,7 +642,7 @@ def create_supplier_priority_png(plot_df, target_solvent_limit):
 
         ax.text(
             2.54, y_upper * 0.965, "Strong Evidence Zone",
-            fontsize=9.5, color="black", ha="left", va="top",
+            fontsize=9.2, color="black", ha="left", va="top",
             bbox=dict(facecolor="white", edgecolor="#DC2626", linewidth=0.8, pad=2),
             zorder=5,
         )
@@ -644,7 +652,7 @@ def create_supplier_priority_png(plot_df, target_solvent_limit):
             1.015, target_solvent_limit,
             f"Threshold: {target_solvent_limit:,.0f} kg",
             transform=threshold_transform,
-            fontsize=9.2, color="black", ha="left", va="center",
+            fontsize=9.0, color="black", ha="left", va="center",
             bbox=dict(facecolor="white", edgecolor="#DC2626", linewidth=0.8, pad=2),
             clip_on=False, zorder=5,
         )
@@ -686,22 +694,12 @@ def create_supplier_priority_png(plot_df, target_solvent_limit):
         leg.get_frame().set_facecolor("white")
         leg.get_frame().set_edgecolor("#D1D5DB")
         leg.get_frame().set_linewidth(0.8)
-        for text in leg.get_texts():
-            text.set_color("black")
+        for text_item in leg.get_texts():
+            text_item.set_color("black")
 
-    fig.suptitle(
-        "Figure 1. Supplier Incoming Viscosity Improvement Priority Matrix",
-        x=0.08, y=0.965, ha="left", va="top",
-        fontsize=16, fontweight="bold", color="black",
-    )
-    fig.text(
-        0.08, 0.915,
-        "X-axis = High-Stability Checks Passed; Y-axis = Total On-site Solvent Adjustment; Bubble Size = Historical Batches",
-        fontsize=10.3, color="black", ha="left", va="top",
-    )
-
+    # No embedded title/subtitle here. They are added separately in Word.
     fig.patch.set_facecolor("white")
-    fig.subplots_adjust(left=0.10, right=0.76, bottom=0.14, top=0.76)
+    fig.subplots_adjust(left=0.10, right=0.76, bottom=0.15, top=0.96)
 
     buf = io.BytesIO()
     fig.savefig(
@@ -710,7 +708,7 @@ def create_supplier_priority_png(plot_df, target_solvent_limit):
         facecolor="white",
         dpi=220,
         bbox_inches="tight",
-        pad_inches=0.18,
+        pad_inches=0.16,
     )
     plt.close(fig)
     buf.seek(0)
@@ -2030,14 +2028,40 @@ with export_col1:
                 if 'matrix_export_plot_df' in locals() and not matrix_export_plot_df.empty:
                     doc.add_page_break()
                     doc.add_heading("3. Supplier Priority Matrix", level=1)
-                    chart_buffer = create_supplier_priority_png(matrix_export_plot_df, target_solvent_limit)
+
+                    chart_title_p = doc.add_paragraph()
+                    chart_title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    chart_title_run = chart_title_p.add_run(
+                        "Figure 4. Paint Code Stability and Improvement Priority Matrix"
+                    )
+                    chart_title_run.bold = True
+                    chart_title_run.font.size = Pt(13)
+
+                    chart_subtitle_p = doc.add_paragraph()
+                    chart_subtitle_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    chart_subtitle_run = chart_subtitle_p.add_run(
+                        "X-axis = High-Stability Checks Passed; "
+                        "Y-axis = Total On-site Solvent Adjustment; "
+                        "Bubble Size = Historical Batches"
+                    )
+                    chart_subtitle_run.font.size = Pt(9)
+                    chart_subtitle_run.italic = True
+
+                    chart_buffer = create_supplier_priority_png(
+                        matrix_export_plot_df,
+                        target_solvent_limit,
+                    )
                     picture_p = doc.add_paragraph()
                     picture_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    picture_p.paragraph_format.space_before = Pt(3)
                     picture_p.add_run().add_picture(chart_buffer, width=Inches(9.8))
-                    caption = doc.add_paragraph("Figure 4. Supplier priority matrix for incoming-viscosity improvement.")
+
+                    caption = doc.add_paragraph(
+                        "Note: Labels are shown only for key paint codes to avoid overlap."
+                    )
                     caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     caption.runs[0].italic = True
-                    caption.runs[0].font.size = Pt(9)
+                    caption.runs[0].font.size = Pt(8.5)
                 else:
                     doc.add_paragraph("No decision matrix data is available for export.")
 
