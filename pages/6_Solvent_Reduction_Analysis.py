@@ -260,11 +260,18 @@ def apply_professional_layout(fig, title_text=None, subtitle_text=None, height=N
 
 
 def create_top10_usage_ratio_png(summary_df, filter_details):
-    """Create the Top 10 paint/solvent usage and weighted ratio chart for Word export."""
+    """Create the Top 10 paint/solvent usage and weighted-ratio chart for Word export.
+
+    Ratio labels are positioned dynamically so they do not overlap the paint-bar
+    value labels, solvent-bar value labels, or the ratio line.
+    """
     fig, ax1 = plt.subplots(figsize=(11.2, 6.3), dpi=180)
 
     if summary_df is None or summary_df.empty:
-        ax1.text(0.5, 0.5, "No data available", ha="center", va="center", fontsize=12, color="black")
+        ax1.text(
+            0.5, 0.5, "No data available",
+            ha="center", va="center", fontsize=12, color="black"
+        )
         ax1.set_axis_off()
     else:
         chart_df = summary_df.copy().reset_index(drop=True)
@@ -293,63 +300,148 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
         )
 
         ax2 = ax1.twinx()
+        ratio_values = pd.to_numeric(
+            chart_df["Weighted_Ratio_Percent"], errors="coerce"
+        )
+
         ax2.plot(
             x,
-            chart_df["Weighted_Ratio_Percent"],
+            ratio_values,
             marker="o",
             markersize=6,
             linewidth=2.4,
             color="#10A9E2",
             label="Solvent Ratio (%)",
-            zorder=4,
+            zorder=5,
         )
 
-        max_weight = max(float(chart_df[["Total_Paint_kg", "Total_Solvent_kg"]].max().max()), 1.0)
-        max_ratio = max(float(chart_df["Weighted_Ratio_Percent"].max()), 1.0)
-        ax1.set_ylim(0, max_weight * 1.18)
-        ax2.set_ylim(0, max(5.0, max_ratio * 1.30))
+        max_weight = max(
+            float(chart_df[["Total_Paint_kg", "Total_Solvent_kg"]].max().max()),
+            1.0,
+        )
+        max_ratio = max(float(ratio_values.max()), 1.0)
+
+        weight_upper = max_weight * 1.18
+        ratio_upper = max(5.0, max_ratio * 1.34)
+
+        ax1.set_ylim(0, weight_upper)
+        ax2.set_ylim(0, ratio_upper)
 
         for bar in paint_bars:
             value = bar.get_height()
-            ax1.text(
-                bar.get_x() + bar.get_width() / 2,
-                value + max_weight * 0.012,
+            ax1.annotate(
                 f"{value:,.0f}",
+                xy=(bar.get_x() + bar.get_width() / 2, value),
+                xytext=(0, 5),
+                textcoords="offset points",
                 ha="center",
                 va="bottom",
-                fontsize=8.5,
+                fontsize=8.2,
                 rotation=90 if value > max_weight * 0.72 else 0,
                 color="black",
+                clip_on=False,
+                zorder=6,
             )
 
         for bar in solvent_bars:
             value = bar.get_height()
-            ax1.text(
-                bar.get_x() + bar.get_width() / 2,
-                value + max_weight * 0.012,
+            ax1.annotate(
                 f"{value:,.0f}",
-                ha="center",
-                va="bottom",
-                fontsize=8.5,
-                color="black",
-            )
-
-        for i, ratio in enumerate(chart_df["Weighted_Ratio_Percent"]):
-            ax2.annotate(
-                f"{ratio:.2f}%",
-                xy=(x[i], ratio),
-                xytext=(0, 10),
+                xy=(bar.get_x() + bar.get_width() / 2, value),
+                xytext=(0, 5),
                 textcoords="offset points",
                 ha="center",
                 va="bottom",
-                fontsize=9,
-                fontweight="bold",
+                fontsize=8.2,
                 color="black",
-                bbox=dict(boxstyle="round,pad=0.18", facecolor="white", edgecolor="none", alpha=0.88),
+                clip_on=False,
+                zorder=6,
             )
 
+        paint_equiv_ratio = (
+            pd.to_numeric(chart_df["Total_Paint_kg"], errors="coerce")
+            / weight_upper
+            * ratio_upper
+        )
+        solvent_equiv_ratio = (
+            pd.to_numeric(chart_df["Total_Solvent_kg"], errors="coerce")
+            / weight_upper
+            * ratio_upper
+        )
+
+        last_label_side = None
+        for i, ratio in enumerate(ratio_values):
+            if pd.isna(ratio):
+                continue
+
+            paint_gap = abs(float(ratio) - float(paint_equiv_ratio.iloc[i]))
+            solvent_gap = abs(float(ratio) - float(solvent_equiv_ratio.iloc[i]))
+
+            near_bar_label = (
+                paint_gap < ratio_upper * 0.055
+                or solvent_gap < ratio_upper * 0.045
+            )
+
+            if near_bar_label:
+                y_offset = -25
+                va = "top"
+                side = "below"
+            else:
+                previous_ratio = (
+                    float(ratio_values.iloc[i - 1])
+                    if i > 0 and pd.notna(ratio_values.iloc[i - 1])
+                    else None
+                )
+                close_to_previous = (
+                    previous_ratio is not None
+                    and abs(float(ratio) - previous_ratio) < ratio_upper * 0.075
+                )
+
+                if close_to_previous and last_label_side == "above":
+                    y_offset = -24
+                    va = "top"
+                    side = "below"
+                else:
+                    y_offset = 15
+                    va = "bottom"
+                    side = "above"
+
+            x_offset = -7 if i % 2 == 0 else 7
+
+            ax2.annotate(
+                f"{ratio:.2f}%",
+                xy=(x[i], ratio),
+                xytext=(x_offset, y_offset),
+                textcoords="offset points",
+                ha="center",
+                va=va,
+                fontsize=8.8,
+                fontweight="bold",
+                color="black",
+                bbox=dict(
+                    boxstyle="round,pad=0.20",
+                    facecolor="white",
+                    edgecolor="none",
+                    alpha=0.96,
+                ),
+                arrowprops=dict(
+                    arrowstyle="-",
+                    color="#10A9E2",
+                    linewidth=0.65,
+                    shrinkA=2,
+                    shrinkB=4,
+                ),
+                annotation_clip=False,
+                zorder=8,
+            )
+            last_label_side = side
+
         ax1.set_xticks(x)
-        ax1.set_xticklabels(chart_df["Paint_Code"].astype(str), fontsize=9.5, color="black")
+        ax1.set_xticklabels(
+            chart_df["Paint_Code"].astype(str),
+            fontsize=9.0,
+            color="black",
+        )
         ax1.set_xlabel("Paint Code", fontsize=11, color="black", labelpad=10)
         ax1.set_ylabel("Weight (kg)", fontsize=11, color="black")
         ax2.set_ylabel("Solvent Ratio (%)", fontsize=11, color="black")
@@ -363,6 +455,7 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
             spine.set_visible(True)
             spine.set_color("#111827")
             spine.set_linewidth(1.0)
+
         ax2.spines["right"].set_color("#111827")
         ax2.spines["right"].set_linewidth(1.0)
         ax2.spines["top"].set_visible(False)
@@ -383,18 +476,21 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
         for txt in legend.get_texts():
             txt.set_color("black")
 
-    # Keep the exported chart image clean: the figure title and filter details
-    # are written as separate Word paragraphs, not embedded inside the PNG.
     fig.patch.set_facecolor("white")
     fig.subplots_adjust(left=0.08, right=0.92, bottom=0.16, top=0.88)
 
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", bbox_inches="tight", facecolor="white", dpi=220)
+    fig.savefig(
+        buf,
+        format="png",
+        bbox_inches="tight",
+        facecolor="white",
+        dpi=220,
+        pad_inches=0.12,
+    )
     plt.close(fig)
     buf.seek(0)
     return buf
-
-
 
 def create_viscosity_history_png(chart_df):
     """Create the Tab 2 dumbbell viscosity chart for Word export."""
