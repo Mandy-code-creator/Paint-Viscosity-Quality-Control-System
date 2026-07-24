@@ -702,7 +702,7 @@ def create_supplier_priority_png(plot_df, target_solvent_limit):
             ascending=[False, False, False],
         )
         important["Label_Rank_In_X"] = important.groupby("High_Stability_Count").cumcount()
-        important = important[important["Label_Rank_In_X"] < 2].head(10).copy()
+        important = important[important["Label_Rank_In_X"] < 3].head(10).copy()
 
         min_gap = max(max_y * 0.055, 850.0)
         label_positions = {}
