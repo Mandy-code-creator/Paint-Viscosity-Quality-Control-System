@@ -689,20 +689,22 @@ def create_supplier_priority_png(plot_df, target_solvent_limit):
 
         # Label only the most important paint codes and allocate non-overlapping
         # vertical label slots within each stability-score group.
-        priority_map = {
-            "High Supplier Priority": 4,
-            "Validate with Supplier": 3,
-            "Monitor": 2,
-            "Low Priority": 1,
-        }
-        important = chart_df.copy()
-        important["Label_Priority"] = important["Supplier_Action"].map(priority_map).fillna(0)
+        # LOGIC MỚI: Chỉ lọc và gắn nhãn cho nhóm CẦN XỬ LÝ (Trên ngưỡng 500kg)
+        important = chart_df[chart_df["Supplier_Action"].isin([
+            "High Supplier Priority", 
+            "Validate with Supplier"
+        ])].copy()
+        
+        # Sắp xếp ưu tiên theo Lượng hao tổn dung môi (từ cao xuống thấp)
         important = important.sort_values(
-            ["Label_Priority", "Total_Solvent_kg", "Historical_Batches"],
-            ascending=[False, False, False],
+            ["Total_Solvent_kg", "Historical_Batches"],
+            ascending=[False, False]
         )
-        important["Label_Rank_In_X"] = important.groupby("High_Stability_Count").cumcount()
-        important = important[important["Label_Rank_In_X"] < 3].head(10).copy()
+        
+        # Cho phép hiển thị tối đa 3 nhãn trên mỗi cột dọc để không đè chữ, tổng tối đa 10 nhãn
+        if not important.empty:
+            important["Label_Rank_In_X"] = important.groupby("High_Stability_Count").cumcount()
+            important = important[important["Label_Rank_In_X"] < 3].head(10).copy()
 
         min_gap = max(max_y * 0.055, 850.0)
         label_positions = {}
