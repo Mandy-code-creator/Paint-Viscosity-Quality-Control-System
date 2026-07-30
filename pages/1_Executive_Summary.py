@@ -2099,6 +2099,7 @@ with tab4:
             Ref_Paint_Weight_kg=("塗料重量", "median"),
             Ref_Solvent_Add_kg=("添加重量", "median"),
             Historical_Total_Ratio=("Solvent_Ratio_Percent", "median"),
+            Sensitivity_P90=("Sensitivity", lambda x: x.quantile(0.90)),
             Final_Visc_P25=("黏度(秒)_1", lambda x: x.quantile(0.25)),
             Final_Visc_P75=("黏度(秒)_1", lambda x: x.quantile(0.75)),
             Ratio_P90=("Solvent_Ratio_Percent", lambda x: x.quantile(0.90)),
@@ -2215,6 +2216,75 @@ with tab4:
         * FIRST_ADD_WARNING_FRACTION
     )
 
+    # =====================================================
+    # Second-addition guide for workers
+    # =====================================================
+    # The worker measures viscosity once after the first addition.
+    # The second addition depends on how far the measured viscosity
+    # remains above the historical target upper reference.
+    # P90 sensitivity is used as the conservative high-response case.
+    SECOND_ADD_SAFETY_FACTOR = 0.80
+
+    def build_second_add_guide(row):
+        target_upper = row["Final_Visc_P75"]
+        p90_sensitivity = row["Sensitivity_P90"]
+        first_ratio = row["First_Add_Ratio"]
+        cumulative_limit = row["Saturation_Warning_Ratio"]
+        ref_start = row["Ref_Start_Visc"]
+
+        if (
+            pd.isna(target_upper)
+            or pd.isna(p90_sensitivity)
+            or p90_sensitivity <= 0
+            or pd.isna(first_ratio)
+            or pd.isna(cumulative_limit)
+        ):
+            return "資料不足，請工程確認"
+
+        remaining_allowance = max(cumulative_limit - first_ratio, 0.0)
+
+        def safe_ratio(excess_seconds):
+            theoretical = (
+                max(float(excess_seconds), 0.0)
+                / float(p90_sensitivity)
+                * SECOND_ADD_SAFETY_FACTOR
+            )
+            return round(min(theoretical, remaining_allowance), 1)
+
+        low_upper = target_upper + 10
+        medium_upper = target_upper + 25
+
+        low_ratio = safe_ratio(10)
+        medium_ratio = safe_ratio(25)
+
+        # For the highest band, use the typical starting viscosity of
+        # this group, but never exceed the remaining cumulative allowance.
+        high_excess = max(float(ref_start) - float(target_upper), 25.0)
+        high_ratio = safe_ratio(high_excess)
+
+        target_text = f"{target_upper:.1f}"
+        low_text = f"{low_upper:.1f}"
+        medium_text = f"{medium_upper:.1f}"
+
+        return (
+            f"≤{target_text}s：停止；"
+            f"{target_upper + 0.1:.1f}-{low_text}s：+{low_ratio:.1f}%；"
+            f"{low_upper + 0.1:.1f}-{medium_text}s：+{medium_ratio:.1f}%；"
+            f">{medium_text}s：+{high_ratio:.1f}%"
+        )
+
+    worker_sop["Second_Add_Guide"] = worker_sop.apply(
+        build_second_add_guide,
+        axis=1
+    )
+
+    # Shop-floor cumulative upper limit uses the warning threshold.
+    # The engineering stop threshold remains available in Tab 3,
+    # but is not shown to workers to avoid treating it as a target.
+    worker_sop["Worker_Cumulative_Limit"] = (
+        worker_sop["Saturation_Warning_Ratio"]
+    )
+
     worker_sop["塗裝位置"] = (
         worker_sop["Position_UI"]
         .map({
@@ -2238,8 +2308,8 @@ with tab4:
             "Historical_Temp_Range",
             "Historical_Final_Visc_Range",
             "First_Add_Ratio",
-            "Saturation_Warning_Ratio",
-            "Saturation_Stop_Ratio"
+            "Second_Add_Guide",
+            "Worker_Cumulative_Limit"
         ]
     ].copy()
 
@@ -2251,8 +2321,8 @@ with tab4:
         "Historical_Temp_Range": "歷史參考溫度範圍",
         "Historical_Final_Visc_Range": "歷史參考目標黏度範圍",
         "First_Add_Ratio": "建議首次添加比例",
-        "Saturation_Warning_Ratio": "累積添加警戒比例",
-        "Saturation_Stop_Ratio": "累積添加停止比例"
+        "Second_Add_Guide": "第一次添加後追加參考",
+        "Worker_Cumulative_Limit": "累積添加上限"
     })
 
     worker_output["_zone_order"] = (
@@ -2290,12 +2360,11 @@ with tab4:
                 "建議首次添加比例 (%)",
                 format="%.1f"
             ),
-            "累積添加警戒比例": st.column_config.NumberColumn(
-                "累積添加警戒比例 (%)",
-                format="%.1f"
+            "第一次添加後追加參考": st.column_config.TextColumn(
+                "第一次添加後追加參考"
             ),
-            "累積添加停止比例": st.column_config.NumberColumn(
-                "累積添加停止比例 (%)",
+            "累積添加上限": st.column_config.NumberColumn(
+                "累積添加上限 (%)",
                 format="%.1f"
             )
         },
@@ -2314,8 +2383,9 @@ with tab4:
         3. 輸入或秤量實際塗料重量。  
         4. 第一次添加量 = 實際塗料重量 × 建議首次添加比例 ÷ 100。  
         5. 攪拌至少 5 分鐘後重新量測黏度。  
-        6. 若仍高於 USL，回到 Tab 2，系統依本桶實測效率計算一次追加量。  
-        7. 系統最多建議追加至警戒比例；達警戒比例後須由工程師確認，達停止比例不得再添加。  
+        6. 依「第一次添加後追加參考」對照實測黏度，只執行一次第二次追加。  
+        7. 若已達歷史參考目標上限則停止；累積添加比例不得超過「累積添加上限」。  
+        8. 第二次追加後仍未達目標時，不得自行繼續添加，請通知工程人員確認。  
         """
     )
 
@@ -2323,7 +2393,8 @@ with tab4:
         "歷史參考目標黏度範圍採用歷史最終黏度的 P25-P75，僅供現場比對，"
         "實際合格判定仍以製程規格為準。"
         "建議首次添加比例採警戒比例的 50% 作為安全起點；"
-        "後續由 Tab 2 依實測反應計算，並最多追加至警戒比例。"
+        "第二次追加量依第一次添加後的實測黏度分級，並以歷史 P90 稀釋效率及 80% 安全係數計算。"
+        "累積添加上限採歷史警戒比例，避免將工程停止值誤認為現場添加目標。"
     )
 
     # Round SOP percentage columns before export.
@@ -2333,8 +2404,7 @@ with tab4:
 
     sop_numeric_columns = [
         "建議首次添加比例",
-        "累積添加警戒比例",
-        "累積添加停止比例"
+        "累積添加上限"
     ]
 
     for col in sop_numeric_columns:
@@ -2351,6 +2421,6 @@ with tab4:
     st.download_button(
         label="下載現場歷史加料參考表 CSV",
         data=csv_export,
-        file_name="現場歷史加料參考表_含歷史目標黏度.csv",
+        file_name="現場歷史加料參考表_含第二次追加參考.csv",
         mime="text/csv"
     )
