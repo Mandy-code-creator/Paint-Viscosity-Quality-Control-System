@@ -2236,6 +2236,7 @@ with tab4:
             "Solvent_Type",
             "Worker_Viscosity_Zone",
             "Historical_Temp_Range",
+            "Historical_Final_Visc_Range",
             "First_Add_Ratio",
             "Saturation_Warning_Ratio",
             "Saturation_Stop_Ratio"
@@ -2248,6 +2249,7 @@ with tab4:
         "Solvent_Type": "稀釋劑種類",
         "Worker_Viscosity_Zone": "黏度區間",
         "Historical_Temp_Range": "歷史參考溫度範圍",
+        "Historical_Final_Visc_Range": "歷史參考目標黏度範圍",
         "First_Add_Ratio": "建議首次添加比例",
         "Saturation_Warning_Ratio": "累積添加警戒比例",
         "Saturation_Stop_Ratio": "累積添加停止比例"
@@ -2280,6 +2282,9 @@ with tab4:
             ),
             "歷史參考溫度範圍": st.column_config.TextColumn(
                 "歷史參考溫度範圍 (°C)"
+            ),
+            "歷史參考目標黏度範圍": st.column_config.TextColumn(
+                "歷史參考目標黏度範圍 (秒)"
             ),
             "建議首次添加比例": st.column_config.NumberColumn(
                 "建議首次添加比例 (%)",
@@ -2315,7 +2320,9 @@ with tab4:
     )
 
     st.caption(
-        "建議首次添加比例採警戒比例的 50% 作為安全起點。"
+        "歷史參考目標黏度範圍採用歷史最終黏度的 P25-P75，僅供現場比對，"
+        "實際合格判定仍以製程規格為準。"
+        "建議首次添加比例採警戒比例的 50% 作為安全起點；"
         "後續由 Tab 2 依實測反應計算，並最多追加至警戒比例。"
     )
 
@@ -2344,6 +2351,6 @@ with tab4:
     st.download_button(
         label="下載現場歷史加料參考表 CSV",
         data=csv_export,
-        file_name="現場歷史加料參考表_1位小數.csv",
+        file_name="現場歷史加料參考表_含歷史目標黏度.csv",
         mime="text/csv"
     )
