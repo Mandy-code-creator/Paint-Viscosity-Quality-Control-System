@@ -2011,27 +2011,32 @@ with tab3:
 # =========================================================
 # TAB 4: MASTER SHOP FLOOR SOP
 # =========================================================
+# =========================================================
+# TAB 4: MASTER SHOP FLOOR SOP
+# =========================================================
 with tab4:
     st.markdown("### 🖨️ 現場歷史加料參考 SOP")
 
     st.warning(
-        "操作順序：查詢相同條件 → 輸入實際塗料重量 → "
-        "依建議首次添加比例加料 → 攪拌5分鐘 → 重新量測。"
-        "累積添加比例不得超過停止比例。"
+        "操作方式：先確認目前黏度區間，再選擇欲達到的目標黏度區間，"
+        "依建議添加比例一次加料，攪拌5分鐘後重新量測。"
+        "建議添加比例不得超過警戒比例，累積添加不得達到停止比例。"
     )
 
     st.caption(
-        "註：稀釋劑比例以實際塗料重量為基準。"
-        "歷史中位添加量僅作為資料驗證，不得視為固定加料量。"
+        "註：稀釋劑比例以原始塗料重量為基準。"
+        "本表僅顯示具足夠歷史紀錄，且建議比例未超過警戒比例的安全參考組合。"
     )
 
-    # Tab 4 uses all valid Group A records.
     matrix_df = valid_df.copy()
 
     if matrix_df.empty:
         st.warning("無有效 Group A 調整資料可建立現場 SOP。")
         st.stop()
 
+    # -----------------------------------------------------
+    # Initial viscosity zones
+    # -----------------------------------------------------
     def create_worker_viscosity_zone(df):
         temp_df = df.copy()
 
@@ -2049,6 +2054,8 @@ with tab4:
         )
 
         def worker_zone(viscosity):
+            if pd.isna(viscosity):
+                return "Unknown"
             if viscosity <= 70:
                 return "<=70"
             elif viscosity <= 90:
@@ -2057,16 +2064,13 @@ with tab4:
                 return "91-110"
             elif viscosity <= 130:
                 return "111-130"
-            else:
-                return ">130"
+            return ">130"
 
         temp_df["Worker_Viscosity_Zone"] = (
-            temp_df["黏度(秒)"]
-            .apply(worker_zone)
+            temp_df["黏度(秒)"].apply(worker_zone)
         )
 
         high_visc_mask = temp_df["黏度(秒)"] > 130
-
         temp_df.loc[
             high_visc_mask,
             "Worker_Viscosity_Zone"
@@ -2079,71 +2083,45 @@ with tab4:
 
         return temp_df
 
+    # -----------------------------------------------------
+    # Final viscosity target zones: 1-10, 11-20, 21-30, ...
+    # -----------------------------------------------------
+    def create_final_viscosity_zone(value):
+        if pd.isna(value) or value <= 0:
+            return "Unknown"
+
+        upper = int(np.ceil(float(value) / 10.0) * 10)
+        lower = max(1, upper - 9)
+        return f"{lower}-{upper}"
+
+    def get_final_zone_order(zone):
+        try:
+            return int(str(zone).split("-")[0])
+        except Exception:
+            return 9999
+
     matrix_df = create_worker_viscosity_zone(matrix_df)
-
-    group_cols_worker = [
-        "Resin",
-        "Position_UI",
-        "Vendor",
-        "Solvent_Type",
-        "Worker_Viscosity_Zone"
-    ]
-
-    worker_sop = (
-        matrix_df
-        .groupby(group_cols_worker, observed=False)
-        .agg(
-            Adjustment_Records=("塗料批號", "size"),
-            History_Batches=("塗料批號", "nunique"),
-            Ref_Start_Visc=("黏度(秒)", "median"),
-            Ref_Paint_Weight_kg=("塗料重量", "median"),
-            Ref_Solvent_Add_kg=("添加重量", "median"),
-            Historical_Total_Ratio=("Solvent_Ratio_Percent", "median"),
-            Sensitivity_P90=("Sensitivity", lambda x: x.quantile(0.90)),
-            Final_Visc_P25=("黏度(秒)_1", lambda x: x.quantile(0.25)),
-            Final_Visc_P75=("黏度(秒)_1", lambda x: x.quantile(0.75)),
-            Ratio_P90=("Solvent_Ratio_Percent", lambda x: x.quantile(0.90)),
-            Ratio_P95=("Solvent_Ratio_Percent", lambda x: x.quantile(0.95)),
-            Temperature_P25=("溫度", lambda x: x.quantile(0.25)),
-            Temperature_P75=("溫度", lambda x: x.quantile(0.75))
-        )
-        .reset_index()
+    matrix_df["Target_Viscosity_Zone"] = (
+        matrix_df["黏度(秒)_1"].apply(create_final_viscosity_zone)
     )
 
-    # Keep all valid historical combinations as references.
-    # Low batch count does not automatically mean that the data is unusable.
-    if worker_sop.empty:
-        st.warning("無有效歷史資料可建立現場參考表。")
+    matrix_df = matrix_df[
+        (matrix_df["Worker_Viscosity_Zone"] != "Unknown")
+        & (matrix_df["Target_Viscosity_Zone"] != "Unknown")
+    ].copy()
+
+    if matrix_df.empty:
+        st.warning("無法建立有效的初始與目標黏度區間。")
         st.stop()
 
-    worker_sop["Historical_Final_Visc_Range"] = (
-        worker_sop.apply(
-            lambda row: format_range(
-                row["Final_Visc_P25"],
-                row["Final_Visc_P75"],
-                decimals=1
-            ),
-            axis=1
-        )
-    )
-
-    worker_sop["Historical_Temp_Range"] = (
-        worker_sop.apply(
-            lambda row: format_range(
-                row["Temperature_P25"],
-                row["Temperature_P75"],
-                decimals=1
-            ),
-            axis=1
-        )
-    )
-
     # -----------------------------------------------------
-    # Calculate warning / stop ratios per exact worker zone
+    # Warning / stop limits are calculated by exact system
+    # and initial-viscosity zone. They are then applied to
+    # every final target-viscosity zone under that group.
     # -----------------------------------------------------
     saturation_summary = []
 
-    system_keys = matrix_df[
+    initial_zone_keys = matrix_df[
         [
             "Resin",
             "Position_UI",
@@ -2153,35 +2131,64 @@ with tab4:
         ]
     ].drop_duplicates()
 
-    for _, system_row in system_keys.iterrows():
-        temp_zone_df = matrix_df[
-            (matrix_df["Resin"] == system_row["Resin"])
-            & (matrix_df["Position_UI"] == system_row["Position_UI"])
-            & (matrix_df["Vendor"] == system_row["Vendor"])
-            & (matrix_df["Solvent_Type"] == system_row["Solvent_Type"])
+    for _, key_row in initial_zone_keys.iterrows():
+        zone_df = matrix_df[
+            (matrix_df["Resin"] == key_row["Resin"])
+            & (matrix_df["Position_UI"] == key_row["Position_UI"])
+            & (matrix_df["Vendor"] == key_row["Vendor"])
+            & (matrix_df["Solvent_Type"] == key_row["Solvent_Type"])
             & (
                 matrix_df["Worker_Viscosity_Zone"]
-                == system_row["Worker_Viscosity_Zone"]
+                == key_row["Worker_Viscosity_Zone"]
             )
         ].copy()
 
-        temp_saturation = build_saturation_profile(temp_zone_df)
-        temp_limits = get_safety_limits(
-            temp_zone_df,
-            temp_saturation
+        saturation_result = build_saturation_profile(zone_df)
+        safety_limits = get_safety_limits(
+            zone_df,
+            saturation_result
         )
 
         saturation_summary.append({
-            "Resin": system_row["Resin"],
-            "Position_UI": system_row["Position_UI"],
-            "Vendor": system_row["Vendor"],
-            "Solvent_Type": system_row["Solvent_Type"],
-            "Worker_Viscosity_Zone": system_row["Worker_Viscosity_Zone"],
-            "Saturation_Warning_Ratio": temp_limits["warning_ratio"],
-            "Saturation_Stop_Ratio": temp_limits["stop_ratio"]
+            "Resin": key_row["Resin"],
+            "Position_UI": key_row["Position_UI"],
+            "Vendor": key_row["Vendor"],
+            "Solvent_Type": key_row["Solvent_Type"],
+            "Worker_Viscosity_Zone": key_row["Worker_Viscosity_Zone"],
+            "Saturation_Warning_Ratio": safety_limits["warning_ratio"],
+            "Saturation_Stop_Ratio": safety_limits["stop_ratio"]
         })
 
     saturation_summary_df = pd.DataFrame(saturation_summary)
+
+    # -----------------------------------------------------
+    # Build SOP by:
+    # System x initial viscosity zone x final target zone
+    # -----------------------------------------------------
+    group_cols_worker = [
+        "Resin",
+        "Position_UI",
+        "Vendor",
+        "Solvent_Type",
+        "Worker_Viscosity_Zone",
+        "Target_Viscosity_Zone"
+    ]
+
+    worker_sop = (
+        matrix_df
+        .groupby(group_cols_worker, observed=False)
+        .agg(
+            Adjustment_Records=("塗料批號", "size"),
+            History_Batches=("塗料批號", "nunique"),
+            Recommended_Add_Ratio=("Solvent_Ratio_Percent", "median"),
+            Ratio_P25=("Solvent_Ratio_Percent", lambda x: x.quantile(0.25)),
+            Ratio_P75=("Solvent_Ratio_Percent", lambda x: x.quantile(0.75)),
+            Temperature_P25=("溫度", lambda x: x.quantile(0.25)),
+            Temperature_P75=("溫度", lambda x: x.quantile(0.75)),
+            Final_Viscosity_Median=("黏度(秒)_1", "median")
+        )
+        .reset_index()
+    )
 
     worker_sop = worker_sop.merge(
         saturation_summary_df,
@@ -2195,15 +2202,52 @@ with tab4:
         how="left"
     )
 
-    # Fallback when no saturation profile can be detected.
+    # Fallbacks if a diminishing-return point cannot be detected.
+    zone_ratio_fallback = (
+        matrix_df
+        .groupby(
+            [
+                "Resin",
+                "Position_UI",
+                "Vendor",
+                "Solvent_Type",
+                "Worker_Viscosity_Zone"
+            ],
+            observed=False
+        )
+        .agg(
+            Ratio_P90_Fallback=(
+                "Solvent_Ratio_Percent",
+                lambda x: x.quantile(0.90)
+            ),
+            Ratio_P95_Fallback=(
+                "Solvent_Ratio_Percent",
+                lambda x: x.quantile(0.95)
+            )
+        )
+        .reset_index()
+    )
+
+    worker_sop = worker_sop.merge(
+        zone_ratio_fallback,
+        on=[
+            "Resin",
+            "Position_UI",
+            "Vendor",
+            "Solvent_Type",
+            "Worker_Viscosity_Zone"
+        ],
+        how="left"
+    )
+
     worker_sop["Saturation_Warning_Ratio"] = (
         worker_sop["Saturation_Warning_Ratio"]
-        .fillna(worker_sop["Ratio_P90"])
+        .fillna(worker_sop["Ratio_P90_Fallback"])
     )
 
     worker_sop["Saturation_Stop_Ratio"] = (
         worker_sop["Saturation_Stop_Ratio"]
-        .fillna(worker_sop["Ratio_P95"])
+        .fillna(worker_sop["Ratio_P95_Fallback"])
     )
 
     worker_sop["Saturation_Stop_Ratio"] = np.maximum(
@@ -2211,79 +2255,44 @@ with tab4:
         worker_sop["Saturation_Warning_Ratio"]
     )
 
-    worker_sop["First_Add_Ratio"] = (
-        worker_sop["Saturation_Warning_Ratio"]
-        * FIRST_ADD_WARNING_FRACTION
-    )
-
-    # =====================================================
-    # Second-addition guide for workers
-    # =====================================================
-    # The worker measures viscosity once after the first addition.
-    # The second addition depends on how far the measured viscosity
-    # remains above the historical target upper reference.
-    # P90 sensitivity is used as the conservative high-response case.
-    SECOND_ADD_SAFETY_FACTOR = 0.80
-
-    def build_second_add_guide(row):
-        target_upper = row["Final_Visc_P75"]
-        p90_sensitivity = row["Sensitivity_P90"]
-        first_ratio = row["First_Add_Ratio"]
-        cumulative_limit = row["Saturation_Warning_Ratio"]
-        ref_start = row["Ref_Start_Visc"]
-
-        if (
-            pd.isna(target_upper)
-            or pd.isna(p90_sensitivity)
-            or p90_sensitivity <= 0
-            or pd.isna(first_ratio)
-            or pd.isna(cumulative_limit)
-        ):
-            return "資料不足，請工程確認"
-
-        remaining_allowance = max(cumulative_limit - first_ratio, 0.0)
-
-        def safe_ratio(excess_seconds):
-            theoretical = (
-                max(float(excess_seconds), 0.0)
-                / float(p90_sensitivity)
-                * SECOND_ADD_SAFETY_FACTOR
-            )
-            return round(min(theoretical, remaining_allowance), 1)
-
-        low_upper = target_upper + 10
-        medium_upper = target_upper + 25
-
-        low_ratio = safe_ratio(10)
-        medium_ratio = safe_ratio(25)
-
-        # For the highest band, use the typical starting viscosity of
-        # this group, but never exceed the remaining cumulative allowance.
-        high_excess = max(float(ref_start) - float(target_upper), 25.0)
-        high_ratio = safe_ratio(high_excess)
-
-        target_text = f"{target_upper:.1f}"
-        low_text = f"{low_upper:.1f}"
-        medium_text = f"{medium_upper:.1f}"
-
-        return (
-            f"≤{target_text}s：停止；"
-            f"{target_upper + 0.1:.1f}-{low_text}s：+{low_ratio:.1f}%；"
-            f"{low_upper + 0.1:.1f}-{medium_text}s：+{medium_ratio:.1f}%；"
-            f">{medium_text}s：+{high_ratio:.1f}%"
-        )
-
-    worker_sop["Second_Add_Guide"] = worker_sop.apply(
-        build_second_add_guide,
+    # Historical temperature range shown as P25-P75.
+    worker_sop["Historical_Temp_Range"] = worker_sop.apply(
+        lambda row: format_range(
+            row["Temperature_P25"],
+            row["Temperature_P75"],
+            decimals=1
+        ),
         axis=1
     )
 
-    # Shop-floor cumulative upper limit uses the warning threshold.
-    # The engineering stop threshold remains available in Tab 3,
-    # but is not shown to workers to avoid treating it as a target.
-    worker_sop["Worker_Cumulative_Limit"] = (
-        worker_sop["Saturation_Warning_Ratio"]
-    )
+    # -----------------------------------------------------
+    # SOP release rules
+    # 1. Enough records in the exact target zone.
+    # 2. Recommended ratio must remain below/equal warning.
+    # 3. Recommended ratio must remain strictly below stop.
+    # This prevents an unsafe target zone from being issued
+    # as a normal shop-floor instruction.
+    # -----------------------------------------------------
+    worker_sop = worker_sop[
+        (worker_sop["Adjustment_Records"] >= MIN_REFERENCE_RECORDS)
+        & worker_sop["Recommended_Add_Ratio"].notna()
+        & worker_sop["Saturation_Warning_Ratio"].notna()
+        & worker_sop["Saturation_Stop_Ratio"].notna()
+        & (
+            worker_sop["Recommended_Add_Ratio"]
+            <= worker_sop["Saturation_Warning_Ratio"]
+        )
+        & (
+            worker_sop["Recommended_Add_Ratio"]
+            < worker_sop["Saturation_Stop_Ratio"]
+        )
+    ].copy()
+
+    if worker_sop.empty:
+        st.warning(
+            "目前沒有同時符合資料筆數與飽和安全條件的目標黏度組合。"
+        )
+        st.stop()
 
     worker_sop["塗裝位置"] = (
         worker_sop["Position_UI"]
@@ -2295,9 +2304,9 @@ with tab4:
         .fillna(worker_sop["Position_UI"])
     )
 
-    # =========================================================
+    # =====================================================
     # Worker SOP output table
-    # =========================================================
+    # =====================================================
     worker_output = worker_sop[
         [
             "Resin",
@@ -2305,11 +2314,11 @@ with tab4:
             "Vendor",
             "Solvent_Type",
             "Worker_Viscosity_Zone",
+            "Target_Viscosity_Zone",
             "Historical_Temp_Range",
-            "Historical_Final_Visc_Range",
-            "First_Add_Ratio",
-            "Second_Add_Guide",
-            "Worker_Cumulative_Limit"
+            "Recommended_Add_Ratio",
+            "Saturation_Warning_Ratio",
+            "Saturation_Stop_Ratio"
         ]
     ].copy()
 
@@ -2317,17 +2326,19 @@ with tab4:
         "Resin": "樹脂種類",
         "Vendor": "塗料供應商",
         "Solvent_Type": "稀釋劑種類",
-        "Worker_Viscosity_Zone": "黏度區間",
+        "Worker_Viscosity_Zone": "初始黏度區間",
+        "Target_Viscosity_Zone": "目標黏度區間",
         "Historical_Temp_Range": "歷史參考溫度範圍",
-        "Historical_Final_Visc_Range": "歷史參考目標黏度範圍",
-        "First_Add_Ratio": "建議首次添加比例",
-        "Second_Add_Guide": "第一次添加後追加參考",
-        "Worker_Cumulative_Limit": "累積添加上限"
+        "Recommended_Add_Ratio": "建議添加比例",
+        "Saturation_Warning_Ratio": "累積添加警戒比例",
+        "Saturation_Stop_Ratio": "累積添加停止比例"
     })
 
-    worker_output["_zone_order"] = (
-        worker_output["黏度區間"]
-        .apply(get_zone_order)
+    worker_output["_initial_order"] = (
+        worker_output["初始黏度區間"].apply(get_zone_order)
+    )
+    worker_output["_target_order"] = (
+        worker_output["目標黏度區間"].apply(get_final_zone_order)
     )
 
     worker_output = (
@@ -2338,37 +2349,39 @@ with tab4:
                 "塗裝位置",
                 "塗料供應商",
                 "稀釋劑種類",
-                "_zone_order"
+                "_initial_order",
+                "_target_order"
             ]
         )
-        .drop(columns="_zone_order")
+        .drop(columns=["_initial_order", "_target_order"])
+        .reset_index(drop=True)
     )
 
     st.dataframe(
         worker_output,
         column_config={
-            "黏度區間": st.column_config.TextColumn(
-                "黏度區間 (秒)"
+            "初始黏度區間": st.column_config.TextColumn(
+                "初始黏度區間 (秒)"
+            ),
+            "目標黏度區間": st.column_config.TextColumn(
+                "目標黏度區間 (秒)"
             ),
             "歷史參考溫度範圍": st.column_config.TextColumn(
                 "歷史參考溫度範圍 (°C)"
             ),
-            "歷史參考目標黏度範圍": st.column_config.TextColumn(
-                "歷史參考目標黏度範圍 (秒)"
-            ),
-            "建議首次添加比例": st.column_config.NumberColumn(
-                "建議首次添加比例 (%)",
+            "建議添加比例": st.column_config.NumberColumn(
+                "建議添加比例 (%)",
                 format="%.1f"
             ),
-            "第一次添加後追加參考": st.column_config.TextColumn(
-                "第一次添加後追加參考"
+            "累積添加警戒比例": st.column_config.NumberColumn(
+                "累積添加警戒比例 (%)",
+                format="%.1f"
             ),
-            "累積添加上限": st.column_config.NumberColumn(
-                "累積添加上限 (%)",
+            "累積添加停止比例": st.column_config.NumberColumn(
+                "累積添加停止比例 (%)",
                 format="%.1f"
             )
         },
-
         use_container_width=True,
         hide_index=True
     )
@@ -2379,35 +2392,30 @@ with tab4:
     st.markdown(
         """
         1. 先確認樹脂、塗裝位置、供應商及稀釋劑種類。  
-        2. 量測目前黏度，查詢相對應的初始黏度區間。  
-        3. 輸入或秤量實際塗料重量。  
-        4. 第一次添加量 = 實際塗料重量 × 建議首次添加比例 ÷ 100。  
-        5. 攪拌至少 5 分鐘後重新量測黏度。  
-        6. 依「第一次添加後追加參考」對照實測黏度，只執行一次第二次追加。  
-        7. 若已達歷史參考目標上限則停止；累積添加比例不得超過「累積添加上限」。  
-        8. 第二次追加後仍未達目標時，不得自行繼續添加，請通知工程人員確認。  
+        2. 量測目前黏度，查詢相對應的「初始黏度區間」。  
+        3. 依製程需求選擇「目標黏度區間」。  
+        4. 添加量 = 原始塗料重量 × 建議添加比例 ÷ 100。  
+        5. 一次添加後攪拌至少 5 分鐘，再重新量測確認。  
+        6. 建議添加比例不得超過警戒比例；累積達停止比例時不得再添加。  
         """
     )
 
     st.caption(
-        "歷史參考目標黏度範圍採用歷史最終黏度的 P25-P75，僅供現場比對，"
-        "實際合格判定仍以製程規格為準。"
-        "建議首次添加比例採警戒比例的 50% 作為安全起點；"
-        "第二次追加量依第一次添加後的實測黏度分級，並以歷史 P90 稀釋效率及 80% 安全係數計算。"
-        "累積添加上限採歷史警戒比例，避免將工程停止值誤認為現場添加目標。"
+        "建議添加比例為相同條件、相同初始黏度區間及相同目標黏度區間之"
+        "歷史添加比例中位數。目標區間若歷史建議比例已超過警戒比例，"
+        "系統不會將該組合列入一般現場 SOP。"
     )
 
-    # Round SOP percentage columns before export.
-    # st.dataframe formatting affects only the on-screen display;
-    # CSV otherwise keeps the original full-precision float values.
+    # Round percentage columns before CSV export.
     export_output = worker_output.copy()
 
-    sop_numeric_columns = [
-        "建議首次添加比例",
-        "累積添加上限"
+    numeric_columns = [
+        "建議添加比例",
+        "累積添加警戒比例",
+        "累積添加停止比例"
     ]
 
-    for col in sop_numeric_columns:
+    for col in numeric_columns:
         export_output[col] = pd.to_numeric(
             export_output[col],
             errors="coerce"
@@ -2421,6 +2429,6 @@ with tab4:
     st.download_button(
         label="下載現場歷史加料參考表 CSV",
         data=csv_export,
-        file_name="現場歷史加料參考表_含第二次追加參考.csv",
+        file_name="現場歷史加料參考表_依目標黏度區間.csv",
         mime="text/csv"
     )
