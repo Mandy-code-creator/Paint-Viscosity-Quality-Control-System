@@ -1047,8 +1047,8 @@ with tab4:
         if pd.isna(value) or value <= 0: return "Unknown"
         upper = int(np.ceil(float(value) / 10.0) * 10)
         lower = max(1, upper - 9)
-        # Thêm dấu nháy đơn ở đầu để ép Excel hiểu đây là Text, không đổi thành ngày tháng
-        return f"'{lower}-{upper}"
+        # Dùng chữ " to " hoặc "~" thay cho dấu "-" để Excel không hiểu nhầm thành ngày tháng
+        return f"{lower} to {upper}"
 
     def get_final_zone_order(zone):
         try: return int(str(zone).split("-")[0])
