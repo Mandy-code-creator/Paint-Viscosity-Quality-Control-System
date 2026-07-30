@@ -16,9 +16,7 @@ from docx.enum.section import WD_ORIENT
 # =========================================================
 MIN_REFERENCE_RECORDS = 5        # Minimum adjustment records to use zone-specific reference
 FIRST_ADD_WARNING_FRACTION = 0.50  # First addition = 50% of warning ratio
-NEXT_ADD_FRACTION = 0.60          # Use only 60% of theoretical remaining demand
-PRE_WARNING_STEP_MAX = 3.0        # Max single addition before warning (%)
-POST_WARNING_STEP_MAX = 1.0       # Max single addition at/after warning (%)
+NEXT_ADD_FRACTION = 0.80          # Second addition = 80% of theoretical remaining demand
 MIXING_TIME_MINUTES = 5
 
 
@@ -1670,7 +1668,9 @@ with tab2:
                         / safe_sensitivity
                     )
 
-                    # Feedback-loop safety: never add the full theoretical amount.
+                    # Efficiency feedback logic:
+                    # Use 80% of the theoretical remaining requirement to retain
+                    # a small safety buffer, but allow one practical addition.
                     protected_additional_ratio = (
                         theoretical_additional_ratio
                         * NEXT_ADD_FRACTION
@@ -1686,23 +1686,13 @@ with tab2:
                         - actual_step1_ratio
                     )
 
-                    if actual_step1_ratio >= sop_result["warning_ratio"]:
-                        step_max_ratio = POST_WARNING_STEP_MAX
-                    else:
-                        step_max_ratio = PRE_WARNING_STEP_MAX
-
+                    # Automatic recommendation may approach, but never cross,
+                    # the warning ratio. Beyond warning requires engineering review.
                     additional_ratio = min(
                         protected_additional_ratio,
-                        step_max_ratio,
+                        remaining_ratio_to_warning,
                         max(remaining_ratio_to_stop, 0.0)
                     )
-
-                    # Before warning, do not cross the warning threshold in one shot.
-                    if actual_step1_ratio < sop_result["warning_ratio"]:
-                        additional_ratio = min(
-                            additional_ratio,
-                            remaining_ratio_to_warning
-                        )
 
                     additional_kg = (
                         sop_result["actual_paint_weight"]
@@ -1720,22 +1710,27 @@ with tab2:
                     if remaining_ratio_to_stop <= 0:
                         second_step_blocked = True
                         st.error(
-                            "🚨 第一次添加後已接近或超過停止比例。"
-                            "不可繼續添加稀釋劑。"
+                            "🚨 第一次添加後已達停止比例，不可繼續添加稀釋劑。"
+                        )
+
+                    elif actual_step1_ratio >= sop_result["warning_ratio"]:
+                        second_step_blocked = True
+                        st.error(
+                            "⚠️ 目前累積添加比例已達警戒值。"
+                            "系統停止自動建議，請由製程工程師確認後續處理。"
                         )
 
                     elif additional_ratio <= 0:
                         second_step_blocked = True
                         st.error(
-                            "🚨 已無安全追加空間，不可繼續自動加料。"
+                            "🚨 已無警戒比例以下的安全追加空間。"
                             "請通知製程工程師。"
                         )
 
                     elif total_ratio_after_step2 >= sop_result["warning_ratio"]:
                         st.warning(
-                            "⚠️ 本次追加後將達到警戒比例。"
-                            f"單次追加已限制為 {additional_ratio:.2f}%。"
-                            "添加後必須重新量測，不可一次加入理論剩餘量。"
+                            "⚠️ 本次建議最多追加至警戒比例。"
+                            "添加並攪拌後請重新量測；若仍高於規格，請由工程師確認。"
                         )
 
                     if not second_step_blocked:
@@ -1767,9 +1762,9 @@ with tab2:
 
                         st.markdown(
                             """
-                            **重要：** 系統不會一次加入全部理論剩餘量。
-                            本次建議已套用 60% 保護係數、單次追加上限及警戒／停止限制。
-                            添加後必須重新攪拌並重新量測。
+                            **重要：** 本次建議採理論剩餘量的 80%，
+                            並限制不得超過累積添加警戒比例。
+                            添加後請重新攪拌並確認黏度。
                             """
                         )
 
@@ -2220,8 +2215,6 @@ with tab4:
         * FIRST_ADD_WARNING_FRACTION
     )
 
-    worker_sop["Single_Add_Max_Ratio"] = POST_WARNING_STEP_MAX
-
     worker_sop["塗裝位置"] = (
         worker_sop["Position_UI"]
         .map({
@@ -2244,7 +2237,6 @@ with tab4:
             "Worker_Viscosity_Zone",
             "Historical_Temp_Range",
             "First_Add_Ratio",
-            "Single_Add_Max_Ratio",
             "Saturation_Warning_Ratio",
             "Saturation_Stop_Ratio"
         ]
@@ -2257,7 +2249,6 @@ with tab4:
         "Worker_Viscosity_Zone": "黏度區間",
         "Historical_Temp_Range": "歷史參考溫度範圍",
         "First_Add_Ratio": "建議首次添加比例",
-        "Single_Add_Max_Ratio": "單次追加上限",
         "Saturation_Warning_Ratio": "累積添加警戒比例",
         "Saturation_Stop_Ratio": "累積添加停止比例"
     })
@@ -2292,19 +2283,15 @@ with tab4:
             ),
             "建議首次添加比例": st.column_config.NumberColumn(
                 "建議首次添加比例 (%)",
-                format="%.2f"
-            ),
-            "單次追加上限": st.column_config.NumberColumn(
-                "單次追加上限 (%)",
-                format="%.2f"
+                format="%.1f"
             ),
             "累積添加警戒比例": st.column_config.NumberColumn(
                 "累積添加警戒比例 (%)",
-                format="%.2f"
+                format="%.1f"
             ),
             "累積添加停止比例": st.column_config.NumberColumn(
                 "累積添加停止比例 (%)",
-                format="%.2f"
+                format="%.1f"
             )
         },
 
@@ -2322,23 +2309,41 @@ with tab4:
         3. 輸入或秤量實際塗料重量。  
         4. 第一次添加量 = 實際塗料重量 × 建議首次添加比例 ÷ 100。  
         5. 攪拌至少 5 分鐘後重新量測黏度。  
-        6. 若仍高於 USL，回到 Tab 2 計算；每次追加不得超過「單次追加上限」。  
-        7. 達警戒比例後須逐次量測；達停止比例不得再添加。  
+        6. 若仍高於 USL，回到 Tab 2，系統依本桶實測效率計算一次追加量。  
+        7. 系統最多建議追加至警戒比例；達警戒比例後須由工程師確認，達停止比例不得再添加。  
         """
     )
 
     st.caption(
         "建議首次添加比例採警戒比例的 50% 作為安全起點。"
-        "後續追加必須依 Tab 2 的實測反應重新計算。"
+        "後續由 Tab 2 依實測反應計算，並最多追加至警戒比例。"
     )
 
-    csv_export = worker_output.to_csv(
-        index=False
+    # Round SOP percentage columns before export.
+    # st.dataframe formatting affects only the on-screen display;
+    # CSV otherwise keeps the original full-precision float values.
+    export_output = worker_output.copy()
+
+    sop_numeric_columns = [
+        "建議首次添加比例",
+        "累積添加警戒比例",
+        "累積添加停止比例"
+    ]
+
+    for col in sop_numeric_columns:
+        export_output[col] = pd.to_numeric(
+            export_output[col],
+            errors="coerce"
+        ).round(1)
+
+    csv_export = export_output.to_csv(
+        index=False,
+        float_format="%.1f"
     ).encode("utf-8-sig")
 
     st.download_button(
         label="下載現場歷史加料參考表 CSV",
         data=csv_export,
-        file_name="現場歷史加料參考表.csv",
+        file_name="現場歷史加料參考表_1位小數.csv",
         mime="text/csv"
     )
