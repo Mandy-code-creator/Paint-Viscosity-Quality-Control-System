@@ -222,10 +222,10 @@ def get_viscosity_zone(value):
 
 def get_zone_order(zone):
     zone = str(zone)
-    if zone.startswith("<=70"): return 1
-    elif zone.startswith("71-90"): return 2
-    elif zone.startswith("91-110"): return 3
-    elif zone.startswith("111-130"): return 4
+    if zone.startswith("<="): return 1
+    elif zone.startswith("71"): return 2
+    elif zone.startswith("91"): return 3
+    elif zone.startswith("111"): return 4
     elif zone.startswith("130-") or zone.startswith(">130"): return 5
     return 99
 
@@ -609,7 +609,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
     "📊 Tab 1: Historical Analysis",
     "🎯 Tab 2: SOP Recommendation",
     "🔬 Tab 3: Engineering Matrix",
-    "🖨️ Tab 4: Master Shop Floor SOP"
+    "🖨️ Tab 4: Master Shop Floor SOP (V2.0)"
 ])
 
 # =========================================================
@@ -997,10 +997,10 @@ with tab3:
 
 
 # =========================================================
-# TAB 4: MASTER SHOP FLOOR SOP (TRIPLE-LOCK SAFETY)
+# TAB 4: MASTER SHOP FLOOR SOP (V2.0 DELTA VISCOSITY MODEL)
 # =========================================================
 with tab4:
-    st.markdown("### 🖨️ 現場歷史加料參考 SOP")
+    st.markdown("### 🖨️ 現場 SOP (V2.0 物理降幅模型)")
 
     st.warning(
         "操作方式：先確認目前黏度區間，再選擇欲達到的目標黏度區間，"
@@ -1009,8 +1009,9 @@ with tab4:
     )
 
     st.caption(
-        "註：稀釋劑比例以原始塗料重量為基準。"
-        "本表已套用「目標分組」、「動態安全鎖」與「物理飽和極限 (Saturation Limit)」三重防護 (Triple-Lock)。"
+        "註：系統已升級至 V2.0 (Delta Viscosity Model)。\n"
+        "建議添加比例不再依賴歷史最終結果的經驗值，而是透過「(初始黏度 - 目標黏度) ÷ 稀釋效率」進行精準物理計算，"
+        "徹底解決了低黏度目標量反常的邏輯漏洞，同時維持 Triple-Lock 安全防護。"
     )
 
     matrix_df = valid_df.copy()
@@ -1047,11 +1048,10 @@ with tab4:
         if pd.isna(value) or value <= 0: return "Unknown"
         upper = int(np.ceil(float(value) / 10.0) * 10)
         lower = max(1, upper - 9)
-        # Sử dụng dấu ~ thay cho dấu - để tránh Excel tự động đổi thành ngày tháng (tháng 10, tháng 11...)
         return f"{lower}~{upper}"
 
     def get_final_zone_order(zone):
-        try: return int(str(zone).split("-")[0])
+        try: return int(str(zone).split("~")[0])
         except Exception: return 9999
 
     matrix_df = create_worker_viscosity_zone(matrix_df)
@@ -1103,12 +1103,9 @@ with tab4:
         matrix_df.groupby(group_cols_target, observed=False)
         .agg(
             Adjustment_Records=("塗料批號", "size"),
-            Ref_Sensitivity=("Sensitivity", "median"), # Added Sensitivity here
-            Recommended_Add_Ratio=("Solvent_Ratio_Percent", "median"),
-            Historical_P90=("Solvent_Ratio_Percent", lambda x: x.quantile(0.90)),
-            Historical_P95=("Solvent_Ratio_Percent", lambda x: x.quantile(0.95)),
-            Final_Visc_Lower=("黏度(秒)_1", get_spc_lower_bound), # Applied SPC Sigma Filtering
-            Final_Visc_Upper=("黏度(秒)_1", get_spc_upper_bound), # Applied SPC Sigma Filtering
+            Ref_Sensitivity=("Sensitivity", "median"), # Critical factor for V2.0
+            Final_Visc_Lower=("黏度(秒)_1", get_spc_lower_bound), 
+            Final_Visc_Upper=("黏度(秒)_1", get_spc_upper_bound), 
             Temperature_P25=("溫度", lambda x: x.quantile(0.25)),
             Temperature_P75=("溫度", lambda x: x.quantile(0.75))
         ).reset_index()
@@ -1117,40 +1114,59 @@ with tab4:
     worker_sop = worker_sop[worker_sop["Adjustment_Records"] >= MIN_REFERENCE_RECORDS].copy()
 
     # -----------------------------------------------------
-    # 5. TRIPLE-LOCK SAFETY (三重安全鎖定)
-    # Merge physical saturation into target calculation
+    # 5. V2.0 DELTA VISCOSITY ALGORITHM (物理降幅核心計算)
     # -----------------------------------------------------
+    def get_zone_center(zone_str, zone_type="initial"):
+        if zone_type == "initial":
+            z = str(zone_str)
+            if z == "<=70": return 60.0
+            elif z == "71-90": return 80.5
+            elif z == "91-110": return 100.5
+            elif z == "111-130": return 120.5
+            elif z.startswith("130-"):
+                try: return (130 + float(z.split("-")[1])) / 2
+                except: return 140.0
+            elif z == ">130": return 140.0
+        else: # target (e.g. 31~40)
+            try:
+                parts = str(zone_str).split("~")
+                return (float(parts[0]) + float(parts[1])) / 2
+            except: return np.nan
+        return np.nan
+
+    # 擷取區間中心值
+    worker_sop["Initial_Center"] = worker_sop["Worker_Viscosity_Zone"].apply(lambda x: get_zone_center(x, "initial"))
+    worker_sop["Target_Center"] = worker_sop["Target_Viscosity_Zone"].apply(lambda x: get_zone_center(x, "target"))
+    
+    # 計算預期降幅 Delta V
+    worker_sop["Expected_Delta_V"] = worker_sop["Initial_Center"] - worker_sop["Target_Center"]
+
+    # 過濾掉不合理的降幅 (例如目標比初始還高)
+    worker_sop = worker_sop[worker_sop["Expected_Delta_V"] > 0].copy()
+
+    # 計算物理理論比例 = 降幅 / 稀釋效率
+    worker_sop["Theoretical_Ratio"] = worker_sop["Expected_Delta_V"] / worker_sop["Ref_Sensitivity"]
+
+    # 合併物理飽和極限 (來自初始塗料屬性，而非目標經驗)
     worker_sop = worker_sop.merge(sat_df, on=group_cols_initial, how="left")
 
-    worker_sop["Phys_Sat_Warning"] = worker_sop["Phys_Sat_Warning"].fillna(worker_sop["Historical_P90"])
-    worker_sop["Phys_Sat_Stop"] = worker_sop["Phys_Sat_Stop"].fillna(worker_sop["Historical_P95"])
+    # 警戒極限 = 物理飽和警戒 (若無資料則用 1.3 倍理論值)
+    worker_sop["Saturation_Warning_Ratio"] = worker_sop["Phys_Sat_Warning"].fillna(worker_sop["Theoretical_Ratio"] * 1.3)
 
-    # Warning Limit = MIN(History P90, Dynamic Cap 1.3x, Physical Saturation)
-    worker_sop["Saturation_Warning_Ratio"] = np.minimum(
-        worker_sop["Historical_P90"],
-        np.minimum(worker_sop["Recommended_Add_Ratio"] * 1.3, worker_sop["Phys_Sat_Warning"])
-    )
+    # 停止極限 = 物理飽和停止 (若無資料則用 1.5 倍理論值)
+    worker_sop["Saturation_Stop_Ratio"] = worker_sop["Phys_Sat_Stop"].fillna(worker_sop["Theoretical_Ratio"] * 1.5)
+    
+    # 確保停止極限 >= 警戒極限
+    worker_sop["Saturation_Stop_Ratio"] = np.maximum(worker_sop["Saturation_Stop_Ratio"], worker_sop["Saturation_Warning_Ratio"])
 
-    # Stop Limit = MIN(History P95, Dynamic Cap 1.5x, Physical Saturation)
-    worker_sop["Saturation_Stop_Ratio"] = np.minimum(
-        worker_sop["Historical_P95"],
-        np.minimum(worker_sop["Recommended_Add_Ratio"] * 1.5, worker_sop["Phys_Sat_Stop"])
-    )
-
-    # 確保停止極限始終大於等於警戒極限
-    worker_sop["Saturation_Stop_Ratio"] = np.maximum(
-        worker_sop["Saturation_Stop_Ratio"], 
-        worker_sop["Saturation_Warning_Ratio"]
-    )
-
-    # Calculate First Add Ratio (50% of Warning Limit)
+    # Triple-Lock：第一刀 = MIN(理論需求量, 50% 警戒極限)
     worker_sop["First_Add_Ratio"] = np.minimum(
-        worker_sop["Recommended_Add_Ratio"], 
+        worker_sop["Theoretical_Ratio"], 
         worker_sop["Saturation_Warning_Ratio"] * FIRST_ADD_WARNING_FRACTION
     )
 
     # -----------------------------------------------------
-    # 6. Format Data & UI Output (Trimmed to 11 Columns)
+    # 6. Format Data & UI Output 
     # -----------------------------------------------------
     worker_sop["Historical_Final_Visc_Range"] = worker_sop.apply(
         lambda row: format_range(row["Final_Visc_Lower"], row["Final_Visc_Upper"], decimals=1), axis=1
@@ -1244,6 +1260,6 @@ with tab4:
     st.download_button(
         label="下載現場歷史加料參考表 CSV",
         data=csv_export,
-        file_name="現場歷史加料參考表_依目標黏度區間.csv",
+        file_name="現場歷史加料參考表_V2_Delta_Model.csv",
         mime="text/csv"
     )
