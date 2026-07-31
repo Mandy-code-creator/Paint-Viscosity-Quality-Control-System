@@ -1166,25 +1166,35 @@ with tab4:
     # 目標越低、需要下降的黏度越大，預估累積需求比例應越高。
     worker_sop["Estimated_Total_Ratio"] = worker_sop["Theoretical_Ratio"].clip(lower=0)
 
-    # 第一次添加比例採分段控制，不再套用固定 3% 上限。
-    # 目的：讓不同降黏需求反映出不同的首次添加量，同時保留警戒值安全空間。
+    # 第一次添加比例採「累進分段」控制，不再套用固定 3% 上限。
+    # 目的：消除 6% 與 12% 分界處的反向跳降，確保總需求增加時，
+    # 第一次建議添加比例不會反而下降。
     # 規則：
-    # 1. 預估總需求 <= 6%：首次可加入 100% 預估需求。
-    # 2. 預估總需求 > 6% 且 <= 12%：首次加入 70%。
-    # 3. 預估總需求 > 12%：首次加入 60%。
-    # 4. 無論上述結果為何，首次添加不得超過警戒比例的 80%。
+    # 1. 前 6% 需求：按 100% 納入第一次添加。
+    # 2. 6% 至 12% 的超出部分：按 70% 納入第一次添加。
+    # 3. 超過 12% 的超出部分：按 60% 納入第一次添加。
+    # 4. 最終仍不得超過警戒比例的 80%。
     def calculate_worker_first_add_ratio(row):
-        total_ratio = float(row["Estimated_Total_Ratio"])
-        warning_ratio = float(row["Saturation_Warning_Ratio"])
+        total_ratio = pd.to_numeric(row.get("Estimated_Total_Ratio"), errors="coerce")
+        warning_ratio = pd.to_numeric(row.get("Saturation_Warning_Ratio"), errors="coerce")
 
+        if pd.isna(total_ratio) or not np.isfinite(total_ratio) or total_ratio <= 0:
+            return 0.0
+
+        # Marginal tiering: only the portion within each tier uses that tier's factor.
         if total_ratio <= 6.0:
             demand_based_ratio = total_ratio
         elif total_ratio <= 12.0:
-            demand_based_ratio = total_ratio * 0.70
+            demand_based_ratio = 6.0 + (total_ratio - 6.0) * 0.70
         else:
-            demand_based_ratio = total_ratio * 0.60
+            demand_based_ratio = 6.0 + (12.0 - 6.0) * 0.70 + (total_ratio - 12.0) * 0.60
 
-        warning_safety_limit = warning_ratio * 0.80
+        # Fail-safe: cap the first addition at 80% of the warning ratio.
+        if pd.isna(warning_ratio) or not np.isfinite(warning_ratio) or warning_ratio <= 0:
+            warning_safety_limit = demand_based_ratio
+        else:
+            warning_safety_limit = warning_ratio * 0.80
+
         return max(0.0, min(demand_based_ratio, warning_safety_limit))
 
     worker_sop["First_Add_Ratio"] = worker_sop.apply(
@@ -1282,7 +1292,7 @@ with tab4:
         2. 量測目前黏度，查詢相對應的「初始黏度區間」。  
         3. 依製程需求選擇「目標黏度區間」。 
         4. 「預估總需求比例」代表依目前區間降至目標區間的完整理論需求，不可直接一次全部加入。  
-        5. 「第一次建議添加比例」僅為第一次安全添加量，依總需求分段計算，並受警戒比例安全上限限制。  
+        5. 「第一次建議添加比例」僅為第一次安全添加量，採累進分段計算，並受警戒比例安全上限限制。  
         6. 添加量 = 原始塗料重量 × 第一次建議添加比例(%) ÷ 100。  
         7. 一次添加後攪拌至少 5 分鐘，再重新量測確認。  
         8. 若仍高於目標上限，回到 Tab 2 依實測結果與閉迴路控制邏輯計算下一次添加量。  
