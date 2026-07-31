@@ -1166,16 +1166,31 @@ with tab4:
     # 目標越低、需要下降的黏度越大，預估累積需求比例應越高。
     worker_sop["Estimated_Total_Ratio"] = worker_sop["Theoretical_Ratio"].clip(lower=0)
 
-    # 第一次添加只是安全測試步驟，不代表全部需求。
-    # 三重限制：
-    # 1. 不超過預估總需求的 50%
-    # 2. 不超過正常區單次最大 3%
-    # 3. 不超過警戒比例的 50%
-    worker_sop["First_Add_Ratio"] = np.minimum.reduce([
-        (worker_sop["Estimated_Total_Ratio"] * FIRST_ADD_WARNING_FRACTION).to_numpy(dtype=float),
-        np.full(len(worker_sop), STEP_MAX_RATIO_NORMAL, dtype=float),
-        (worker_sop["Saturation_Warning_Ratio"] * FIRST_ADD_WARNING_FRACTION).to_numpy(dtype=float)
-    ])
+    # 第一次添加比例採分段控制，不再套用固定 3% 上限。
+    # 目的：讓不同降黏需求反映出不同的首次添加量，同時保留警戒值安全空間。
+    # 規則：
+    # 1. 預估總需求 <= 6%：首次可加入 100% 預估需求。
+    # 2. 預估總需求 > 6% 且 <= 12%：首次加入 70%。
+    # 3. 預估總需求 > 12%：首次加入 60%。
+    # 4. 無論上述結果為何，首次添加不得超過警戒比例的 80%。
+    def calculate_worker_first_add_ratio(row):
+        total_ratio = float(row["Estimated_Total_Ratio"])
+        warning_ratio = float(row["Saturation_Warning_Ratio"])
+
+        if total_ratio <= 6.0:
+            demand_based_ratio = total_ratio
+        elif total_ratio <= 12.0:
+            demand_based_ratio = total_ratio * 0.70
+        else:
+            demand_based_ratio = total_ratio * 0.60
+
+        warning_safety_limit = warning_ratio * 0.80
+        return max(0.0, min(demand_based_ratio, warning_safety_limit))
+
+    worker_sop["First_Add_Ratio"] = worker_sop.apply(
+        calculate_worker_first_add_ratio,
+        axis=1
+    )
 
     # 第一次添加後仍可能需要的預估比例。
     # 實際第二次添加仍必須回到 Tab 2，依第一次量測結果重新計算。
@@ -1225,8 +1240,8 @@ with tab4:
         "Target_Viscosity_Zone": "目標黏度區間",
         "Ref_Sensitivity": "參考稀釋效率",
         "Expected_Delta_V": "預計降黏幅度(秒)",
-        "Estimated_Total_Ratio": "預估累積需求比例(%)",
-        "First_Add_Ratio": "建議首次添加比例(%)",
+        "Estimated_Total_Ratio": "預估總需求比例(%)",
+        "First_Add_Ratio": "第一次建議添加比例(%)",
         "Estimated_Remaining_Ratio": "首次後預估剩餘比例(%)",
         "Historical_Final_Visc_Range": "歷史最終黏度範圍",
         "Historical_Temp_Range": "歷史參考溫度範圍",
@@ -1248,8 +1263,8 @@ with tab4:
             "目標黏度區間": st.column_config.TextColumn("目標黏度區間 (秒)"),
             "參考稀釋效率": st.column_config.NumberColumn("參考稀釋效率 (s/%)", format="%.2f"),
             "預計降黏幅度(秒)": st.column_config.NumberColumn("預計降黏幅度 (秒)", format="%.1f"),
-            "預估累積需求比例(%)": st.column_config.NumberColumn("預估累積需求比例 (%)", format="%.2f"),
-            "建議首次添加比例(%)": st.column_config.NumberColumn("建議首次添加比例 (%)", format="%.2f"),
+            "預估總需求比例(%)": st.column_config.NumberColumn("預估總需求比例 (%)", format="%.2f"),
+            "第一次建議添加比例(%)": st.column_config.NumberColumn("第一次建議添加比例 (%)", format="%.2f"),
             "首次後預估剩餘比例(%)": st.column_config.NumberColumn("首次後預估剩餘比例 (%)", format="%.2f"),
             "歷史最終黏度範圍": st.column_config.TextColumn("歷史最終黏度範圍"),
             "歷史參考溫度範圍": st.column_config.TextColumn("歷史參考溫度範圍 (°C)"),
