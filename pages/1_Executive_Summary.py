@@ -1010,8 +1010,8 @@ with tab4:
 
     st.caption(
         "註：系統已升級至 V2.0 (Delta Viscosity Model)。\n"
-        "建議添加比例不再依賴歷史最終結果的經驗值，而是透過「(初始黏度 - 目標黏度) ÷ 稀釋效率」進行精準物理計算，"
-        "徹底解決了低黏度目標量反常的邏輯漏洞，同時維持 Triple-Lock 安全防護。"
+        "系統先透過「(初始黏度 - 目標黏度) ÷ 稀釋效率」計算預估累積總需求，"
+        "再另外套用單次步進與警戒限制，產生第一次安全添加比例。兩者用途不同，不可混為同一數值。"
     )
 
     matrix_df = valid_df.copy()
@@ -1159,10 +1159,29 @@ with tab4:
     # 確保停止極限 >= 警戒極限
     worker_sop["Saturation_Stop_Ratio"] = np.maximum(worker_sop["Saturation_Stop_Ratio"], worker_sop["Saturation_Warning_Ratio"])
 
-    # Triple-Lock：第一刀 = MIN(理論需求量, 50% 警戒極限)
-    worker_sop["First_Add_Ratio"] = np.minimum(
-        worker_sop["Theoretical_Ratio"], 
-        worker_sop["Saturation_Warning_Ratio"] * FIRST_ADD_WARNING_FRACTION
+    # -----------------------------------------------------
+    # 5.1 區分「預估總需求」與「第一次安全添加」
+    # -----------------------------------------------------
+    # 預估累積總需求：反映不同目標黏度所需的完整降黏需求。
+    # 目標越低、需要下降的黏度越大，預估累積需求比例應越高。
+    worker_sop["Estimated_Total_Ratio"] = worker_sop["Theoretical_Ratio"].clip(lower=0)
+
+    # 第一次添加只是安全測試步驟，不代表全部需求。
+    # 三重限制：
+    # 1. 不超過預估總需求的 50%
+    # 2. 不超過正常區單次最大 3%
+    # 3. 不超過警戒比例的 50%
+    worker_sop["First_Add_Ratio"] = np.minimum.reduce([
+        (worker_sop["Estimated_Total_Ratio"] * FIRST_ADD_WARNING_FRACTION).to_numpy(dtype=float),
+        np.full(len(worker_sop), STEP_MAX_RATIO_NORMAL, dtype=float),
+        (worker_sop["Saturation_Warning_Ratio"] * FIRST_ADD_WARNING_FRACTION).to_numpy(dtype=float)
+    ])
+
+    # 第一次添加後仍可能需要的預估比例。
+    # 實際第二次添加仍必須回到 Tab 2，依第一次量測結果重新計算。
+    worker_sop["Estimated_Remaining_Ratio"] = np.maximum(
+        worker_sop["Estimated_Total_Ratio"] - worker_sop["First_Add_Ratio"],
+        0.0
     )
 
     # -----------------------------------------------------
@@ -1188,9 +1207,12 @@ with tab4:
         "Worker_Viscosity_Zone",
         "Target_Viscosity_Zone",
         "Ref_Sensitivity",
+        "Expected_Delta_V",
+        "Estimated_Total_Ratio",
+        "First_Add_Ratio",
+        "Estimated_Remaining_Ratio",
         "Historical_Final_Visc_Range",
         "Historical_Temp_Range",
-        "First_Add_Ratio",
         "Saturation_Warning_Ratio",
         "Saturation_Stop_Ratio"
     ]].copy()
@@ -1201,10 +1223,13 @@ with tab4:
         "Solvent_Type": "稀釋劑種類",
         "Worker_Viscosity_Zone": "初始黏度區間", 
         "Target_Viscosity_Zone": "目標黏度區間",
-        "Ref_Sensitivity": "參考稀釋效率", 
+        "Ref_Sensitivity": "參考稀釋效率",
+        "Expected_Delta_V": "預計降黏幅度(秒)",
+        "Estimated_Total_Ratio": "預估累積需求比例(%)",
+        "First_Add_Ratio": "建議首次添加比例(%)",
+        "Estimated_Remaining_Ratio": "首次後預估剩餘比例(%)",
         "Historical_Final_Visc_Range": "歷史最終黏度範圍",
-        "Historical_Temp_Range": "歷史參考溫度範圍", 
-        "First_Add_Ratio": "建議首次添加比例(%)", 
+        "Historical_Temp_Range": "歷史參考溫度範圍",
         "Saturation_Warning_Ratio": "累積添加警戒比例(%)",
         "Saturation_Stop_Ratio": "累積添加停止比例(%)"
     })
@@ -1222,9 +1247,12 @@ with tab4:
             "初始黏度區間": st.column_config.TextColumn("初始黏度區間 (秒)"),
             "目標黏度區間": st.column_config.TextColumn("目標黏度區間 (秒)"),
             "參考稀釋效率": st.column_config.NumberColumn("參考稀釋效率 (s/%)", format="%.2f"),
+            "預計降黏幅度(秒)": st.column_config.NumberColumn("預計降黏幅度 (秒)", format="%.1f"),
+            "預估累積需求比例(%)": st.column_config.NumberColumn("預估累積需求比例 (%)", format="%.2f"),
+            "建議首次添加比例(%)": st.column_config.NumberColumn("建議首次添加比例 (%)", format="%.2f"),
+            "首次後預估剩餘比例(%)": st.column_config.NumberColumn("首次後預估剩餘比例 (%)", format="%.2f"),
             "歷史最終黏度範圍": st.column_config.TextColumn("歷史最終黏度範圍"),
             "歷史參考溫度範圍": st.column_config.TextColumn("歷史參考溫度範圍 (°C)"),
-            "建議首次添加比例(%)": st.column_config.NumberColumn("建議首次添加比例(%)", format="%.2f"),
             "累積添加警戒比例(%)": st.column_config.NumberColumn("累積添加警戒比例(%)", format="%.2f"),
             "累積添加停止比例(%)": st.column_config.NumberColumn("累積添加停止比例(%)", format="%.2f")
         },
@@ -1238,11 +1266,12 @@ with tab4:
         1. 先確認樹脂、塗裝位置、供應商及稀釋劑種類。  
         2. 量測目前黏度，查詢相對應的「初始黏度區間」。  
         3. 依製程需求選擇「目標黏度區間」。 
-        4. 確認參考稀釋效率，評估該塗料的敏感度。 
-        5. 添加量 = 原始塗料重量 × 建議首次添加比例(%) ÷ 100。  
-        6. 一次添加後攪拌至少 5 分鐘，再重新量測確認。  
-        7. 若仍高於目標上限，回到 Tab 2 依實測結果與閉迴路控制邏輯計算下一次添加量。 
-        8. 累積添加比例不得超過「累積添加停止比例」。  
+        4. 「預估累積需求比例」代表依目前區間降至目標區間的完整理論需求，不可直接一次全部加入。  
+        5. 「建議首次添加比例」僅為第一次安全添加量；不同目標可能因單次 3% 上限而顯示相同數值。  
+        6. 添加量 = 原始塗料重量 × 建議首次添加比例(%) ÷ 100。  
+        7. 一次添加後攪拌至少 5 分鐘，再重新量測確認。  
+        8. 若仍高於目標上限，回到 Tab 2 依實測結果與閉迴路控制邏輯計算下一次添加量。  
+        9. 累積添加比例不得超過「累積添加停止比例」。  
         """
     )
 
@@ -1250,7 +1279,14 @@ with tab4:
     # 7. CSV Export
     # -----------------------------------------------------
     export_output = worker_output.copy()
-    numeric_columns = ["建議首次添加比例(%)", "累積添加警戒比例(%)", "累積添加停止比例(%)"]
+    numeric_columns = [
+        "預計降黏幅度(秒)",
+        "預估累積需求比例(%)",
+        "建議首次添加比例(%)",
+        "首次後預估剩餘比例(%)",
+        "累積添加警戒比例(%)",
+        "累積添加停止比例(%)"
+    ]
 
     for col in numeric_columns:
         export_output[col] = pd.to_numeric(export_output[col], errors="coerce").round(1)
