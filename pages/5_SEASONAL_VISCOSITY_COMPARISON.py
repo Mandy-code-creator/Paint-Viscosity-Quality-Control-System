@@ -1813,3 +1813,79 @@ if st.button("產生互動式季節分析報告 HTML", type="primary"):
 
     except Exception as error:
         st.error(f"❌ 產生報告時發生錯誤：{error}")
+# =========================================================
+# 20. DIRECT-TO-LINE PURCHASING SPECIFICATION (免加稀釋劑方案)
+# =========================================================
+st.markdown("---")
+st.subheader("💡 建議採購黏度規格 (免加稀釋劑方案)")
+st.markdown(
+    "基於歷史實際使用的「添加後黏度」數據，利用 1-Sigma 統計原則找出最穩定且符合產線需求的黏度區間。"
+    "此報表可作為與供應商（Vendor）談判「**免加稀釋劑直接上線 (Ready-to-Use)**」的進料規格參考。"
+)
+
+# 1. Lọc dữ liệu có độ nhớt sau khi pha hợp lệ
+optimal_spec_df = filter_df[filter_df["黏度(秒)_1"] > 0].copy()
+
+if not optimal_spec_df.empty:
+    # 2. Tính toán khoảng phân vị P25, P75 và số lượng lô
+    purchasing_spec = optimal_spec_df.groupby(["Vendor", "Paint_Code"]).agg(
+        歷史有效批數=("Batch_ID", "nunique"),
+        實際使用黏度_P25=("黏度(秒)_1", lambda x: x.quantile(0.25)),
+        實際使用黏度_中位數=("黏度(秒)_1", "median"),
+        實際使用黏度_P75=("黏度(秒)_1", lambda x: x.quantile(0.75)),
+        平均單桶消耗稀釋劑=("添加重量", "mean")
+    ).reset_index()
+
+    # 3. Chỉ lấy các màu sơn có lịch sử >= 10 mẻ (để dữ liệu đàm phán có độ tin cậy cao)
+    purchasing_spec = purchasing_spec[purchasing_spec["歷史有效批數"] >= 10].copy()
+
+    if purchasing_spec.empty:
+        st.info("⚠️ 目前篩選條件下的色號歷史批數不足 (需 >= 10 批)，無法產生具統計意義的採購規格建議。")
+    else:
+        # 4. Làm tròn và định dạng lại bảng dữ liệu
+        purchasing_spec["建議進料下限 (s)"] = purchasing_spec["實際使用黏度_P25"].round(1)
+        purchasing_spec["產線實際中位數 (s)"] = purchasing_spec["實際使用黏度_中位數"].round(1)
+        purchasing_spec["建議進料上限 (s)"] = purchasing_spec["實際使用黏度_P75"].round(1)
+        purchasing_spec["預估節省溶劑 (kg/桶)"] = purchasing_spec["平均單桶消耗稀釋劑"].round(2)
+
+        final_purchasing_report = purchasing_spec[[
+            "Vendor", 
+            "Paint_Code", 
+            "歷史有效批數", 
+            "建議進料下限 (s)", 
+            "產線實際中位數 (s)", 
+            "建議進料上限 (s)",
+            "預估節省溶劑 (kg/桶)"
+        ]].sort_values(by=["Vendor", "Paint_Code"])
+
+        # 5. Hiển thị bảng trên UI Streamlit
+        st.dataframe(
+            final_purchasing_report,
+            column_config={
+                "Vendor": "供應商",
+                "Paint_Code": "色號",
+                "歷史有效批數": st.column_config.NumberColumn("歷史有效批數", format="%d"),
+                "建議進料下限 (s)": st.column_config.NumberColumn("建議進料下限 (s)", format="%.1f"),
+                "產線實際中位數 (s)": st.column_config.NumberColumn("產線實際中位數 (s)", format="%.1f"),
+                "建議進料上限 (s)": st.column_config.NumberColumn("建議進料上限 (s)", format="%.1f"),
+                "預估節省溶劑 (kg/桶)": st.column_config.NumberColumn("預估節省溶劑 (kg/桶)", format="%.2f"),
+            },
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.caption(
+            "📍 **應用說明**：建議要求供應商將出廠黏度控制在上述「進料下限」與「進料上限」之間。"
+            "一旦進料黏度達標，產線即可省下「預估節省溶劑」的成本，並免去人工調配的工時與異常風險。"
+        )
+
+        # 6. Nút xuất file CSV cho bộ phận Mua hàng
+        purchasing_csv = dataframe_to_csv_bytes(final_purchasing_report)
+        st.download_button(
+            label="下載免加稀釋劑採購規格建議表 CSV",
+            data=purchasing_csv,
+            file_name="Direct_to_Line_Purchasing_Spec.csv",
+            mime="text/csv"
+        )
+else:
+    st.info("無有效黏度數據可進行採購規格計算。")
