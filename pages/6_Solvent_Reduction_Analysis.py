@@ -978,8 +978,8 @@ with tab_ranking:
         ),
     )
     label_col2.caption(
-        "The chart uses yearly ratio markers without connecting lines to avoid implying a continuous trend across different paint codes. "
-        "Annual highest and lowest ratios are summarized in the management table above the chart."
+        "Yearly solvent-ratio points are connected with thin dashed lines and use colors distinct from the bars. "
+        "Years without records remain visible on the x-axis, while missing ratio values are left blank."
     )
 
     ranking_source_df = filter_df.copy()
@@ -1140,14 +1140,10 @@ with tab_ranking:
                     x=multi_x,
                     y=summary_df["Total_Paint_kg"],
                     name="Paint (kg)",
-                    marker_color="#5B8FF9",
+                    marker_color="#7EA6F8",
+                    opacity=0.78,
                     yaxis="y1",
-                    text=summary_df["Total_Paint_kg"].map(
-                        lambda x: f"{x:,.0f}" if pd.notna(x) and x >= summary_df["Total_Paint_kg"].max() * 0.18 else ""
-                    ),
-                    textposition="inside",
-                    insidetextanchor="end",
-                    textfont=dict(size=9, color="#111827"),
+                    text="",
                     customdata=np.column_stack([
                         summary_df["Paint_Code"],
                         summary_df["Analysis_Year"],
@@ -1172,13 +1168,18 @@ with tab_ranking:
                     x=multi_x,
                     y=summary_df["Total_Solvent_kg"],
                     name="Solvent (kg)",
-                    marker_color="#F6BD16",
+                    marker_color="#F5B82E",
+                    opacity=0.92,
                     yaxis="y1",
                     text=summary_df["Total_Solvent_kg"].map(
-                        lambda x: f"{x:,.0f}" if pd.notna(x) and x >= summary_df["Total_Solvent_kg"].max() * 0.12 else ""
+                        lambda value: (
+                            f"{value:,.0f}"
+                            if pd.notna(value) and value > 0
+                            else ""
+                        )
                     ),
                     textposition="outside",
-                    textfont=dict(size=9, color="#111827"),
+                    textfont=dict(size=8, color="#374151"),
                     customdata=np.column_stack([
                         summary_df["Paint_Code"],
                         summary_df["Analysis_Year"],
@@ -1199,9 +1200,16 @@ with tab_ranking:
             # All values remain available in hover. To keep the chart readable,
             # only one percentage label is shown for each paint code: the latest
             # available year for that paint code.
-            ratio_line_colors = [
-                "#00AEEF", "#2563EB", "#7C3AED", "#059669",
-                "#DC2626", "#EA580C", "#0891B2", "#4F46E5",
+            ratio_year_colors = {
+                "2024": "#008C95",
+                "2025": "#C84C3A",
+                "2026": "#6F42C1",
+            }
+            fallback_ratio_colors = [
+                "#2F6B3C",
+                "#A23E8C",
+                "#7A5C00",
+                "#374151",
             ]
             available_years = sorted(
                 summary_df["Analysis_Year"].astype(str).unique().tolist(),
@@ -1218,20 +1226,29 @@ with tab_ranking:
                     year_df["Paint_Code"].astype(str).tolist(),
                     year_df["Analysis_Year"].astype(str).tolist(),
                 ]
-                line_color = ratio_line_colors[
-                    year_index % len(ratio_line_colors)
-                ]
+                line_color = ratio_year_colors.get(
+                    str(year_value),
+                    fallback_ratio_colors[
+                        year_index % len(fallback_ratio_colors)
+                    ],
+                )
 
                 fig_dual.add_trace(
                     go.Scatter(
                         x=year_x,
                         y=year_df["Weighted_Ratio_Percent"],
                         name=f"Solvent Ratio {year_value} (%)",
-                        mode="markers",
-                        marker=dict(
-                            size=9,
+                        mode="lines+markers",
+                        line=dict(
                             color=line_color,
-                            line=dict(width=1.0, color="white"),
+                            width=1.8,
+                            dash="dash",
+                        ),
+                        marker=dict(
+                            size=8,
+                            color=line_color,
+                            symbol="circle",
+                            line=dict(width=1.2, color="white"),
                         ),
                         yaxis="y2",
                         connectgaps=False,
@@ -1385,6 +1402,102 @@ with tab_ranking:
                 yearly_extreme_rows
             )
 
+            # Highlight yearly highest and lowest ratios using marker shape only.
+            # No text labels are placed inside the plot.
+            if not yearly_extremes_table.empty:
+                high_rows = []
+                low_rows = []
+
+                for _, extreme_row in yearly_extremes_table.iterrows():
+                    year_value = str(extreme_row["Year"])
+
+                    high_match = summary_df[
+                        (summary_df["Analysis_Year"].astype(str) == year_value)
+                        & (
+                            summary_df["Paint_Code"].astype(str)
+                            == str(extreme_row["Highest Paint Code"])
+                        )
+                    ]
+
+                    low_match = summary_df[
+                        (summary_df["Analysis_Year"].astype(str) == year_value)
+                        & (
+                            summary_df["Paint_Code"].astype(str)
+                            == str(extreme_row["Lowest Paint Code"])
+                        )
+                    ]
+
+                    if not high_match.empty:
+                        high_rows.append(high_match.iloc[0])
+
+                    if not low_match.empty:
+                        low_rows.append(low_match.iloc[0])
+
+                high_df = pd.DataFrame(high_rows)
+                low_df = pd.DataFrame(low_rows)
+
+                if not high_df.empty:
+                    fig_dual.add_trace(
+                        go.Scatter(
+                            x=[
+                                high_df["Paint_Code"].astype(str).tolist(),
+                                high_df["Analysis_Year"].astype(str).tolist(),
+                            ],
+                            y=high_df["Weighted_Ratio_Percent"],
+                            mode="markers",
+                            name="Yearly Highest",
+                            marker=dict(
+                                size=12,
+                                symbol="diamond",
+                                color="#B91C1C",
+                                line=dict(width=1.5, color="white"),
+                            ),
+                            yaxis="y2",
+                            customdata=np.column_stack([
+                                high_df["Analysis_Year"],
+                                high_df["Paint_Code"],
+                            ]),
+                            hovertemplate=(
+                                "<b>Yearly Highest</b><br>"
+                                "Year: %{customdata[0]}<br>"
+                                "Paint Code: %{customdata[1]}<br>"
+                                "Ratio: %{y:.2f}%"
+                                "<extra></extra>"
+                            ),
+                        )
+                    )
+
+                if not low_df.empty:
+                    fig_dual.add_trace(
+                        go.Scatter(
+                            x=[
+                                low_df["Paint_Code"].astype(str).tolist(),
+                                low_df["Analysis_Year"].astype(str).tolist(),
+                            ],
+                            y=low_df["Weighted_Ratio_Percent"],
+                            mode="markers",
+                            name="Yearly Lowest",
+                            marker=dict(
+                                size=12,
+                                symbol="diamond-open",
+                                color="#1D4ED8",
+                                line=dict(width=2, color="#1D4ED8"),
+                            ),
+                            yaxis="y2",
+                            customdata=np.column_stack([
+                                low_df["Analysis_Year"],
+                                low_df["Paint_Code"],
+                            ]),
+                            hovertemplate=(
+                                "<b>Yearly Lowest</b><br>"
+                                "Year: %{customdata[0]}<br>"
+                                "Paint Code: %{customdata[1]}<br>"
+                                "Ratio: %{y:.2f}%"
+                                "<extra></extra>"
+                            ),
+                        )
+                    )
+
             ratio_max = pd.to_numeric(
                 summary_df["Weighted_Ratio_Percent"], errors="coerce"
             ).max()
@@ -1398,7 +1511,7 @@ with tab_ranking:
             fig_dual.update_layout(
                 title=dict(
                     text=(
-                        "<b>Annual Paint & Solvent Usage with Solvent Ratio</b>"
+                        "<b>Annual Paint & Solvent Usage with Solvent Ratio by Year</b>"
                         f"<br><sup>Years: {available_years_text} | "
                         f"Filters Applied: {filter_details}</sup>"
                     ),
@@ -1441,17 +1554,17 @@ with tab_ranking:
                 legend=dict(
                     orientation="h",
                     yanchor="bottom",
-                    y=1.02,
+                    y=1.025,
                     xanchor="center",
                     x=0.5,
-                    font=dict(size=10),
-                    bgcolor="rgba(255,255,255,0.95)",
+                    font=dict(size=9.5),
+                    bgcolor="rgba(255,255,255,0.96)",
                 ),
                 barmode="group",
                 bargap=0.20,
                 bargroupgap=0.08,
-                height=700,
-                margin=dict(l=85, r=105, t=145, b=140),
+                height=720,
+                margin=dict(l=85, r=105, t=160, b=145),
                 plot_bgcolor="white",
                 paper_bgcolor="white",
                 font=dict(color="black"),
