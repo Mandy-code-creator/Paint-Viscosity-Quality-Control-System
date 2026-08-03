@@ -1144,10 +1144,10 @@ with tab_ranking:
                 )
 
             # ---------------------------------------------------------
-            # CLEAN LABEL LAYER
-            # Show only the latest available year for each paint code.
-            # This removes overlapping labels while preserving every value
-            # in the hover tooltip.
+            # ---------------------------------------------------------
+            # CLEAN LABEL LAYER (FIXED OVERLAP)
+            # Dùng annotations để tạo nền trắng (bgcolor) che các đường line,
+            # giúp nhãn tỷ lệ dung môi không bị đường kẻ cắt ngang.
             # ---------------------------------------------------------
             latest_label_df = (
                 summary_df
@@ -1163,36 +1163,29 @@ with tab_ranking:
                 .reset_index(drop=True)
             )
 
-            latest_label_x = [
-                latest_label_df["Paint_Code"].astype(str).tolist(),
-                latest_label_df["Analysis_Year"].astype(str).tolist(),
-            ]
-
-            latest_label_text = latest_label_df[
-                "Weighted_Ratio_Percent"
-            ].apply(
-                lambda value: f"{value:.2f}%" if pd.notna(value) else ""
-            )
-
-            latest_label_positions = [
-                "top center" if index % 2 == 0 else "bottom center"
-                for index in range(len(latest_label_df))
-            ]
-
-            fig_dual.add_trace(
-                go.Scatter(
-                    x=latest_label_x,
-                    y=latest_label_df["Weighted_Ratio_Percent"],
-                    mode="text",
-                    text=latest_label_text,
-                    textposition=latest_label_positions,
-                    textfont=dict(size=9, color="#111827"),
-                    yaxis="y2",
-                    showlegend=False,
-                    hoverinfo="skip",
-                    cliponaxis=False,
+            for index, row in latest_label_df.iterrows():
+                val = row["Weighted_Ratio_Percent"]
+                if pd.isna(val):
+                    continue
+                
+                # So le nhãn lên/xuống để tránh bị đè nếu các điểm ở gần nhau
+                y_offset = 18 if index % 2 == 0 else -18
+                y_anchor = "bottom" if index % 2 == 0 else "top"
+                
+                fig_dual.add_annotation(
+                    x=[str(row["Paint_Code"]), str(row["Analysis_Year"])],
+                    y=val,
+                    yref="y2",
+                    text=f"<b>{val:.2f}%</b>",
+                    showarrow=False,
+                    yanchor=y_anchor,
+                    yshift=y_offset,
+                    font=dict(size=9.5, color="#111827"),
+                    bgcolor="rgba(255, 255, 255, 0.92)", # Nền trắng trong suốt che đường line
+                    bordercolor="#D1D5DB",
+                    borderwidth=1,
+                    borderpad=3
                 )
-            )
 
             ratio_max = pd.to_numeric(
                 summary_df["Weighted_Ratio_Percent"], errors="coerce"
@@ -1222,8 +1215,10 @@ with tab_ranking:
                     linecolor="#111827",
                     linewidth=1.2,
                     mirror=True,
-                    tickfont=dict(color="black", size=10),
+                    tickfont=dict(color="black", size=8.5), # GIẢM XUỐNG 8.5 ĐỂ KHÔNG BỊ CHỒNG CHỮ
+                    tickangle=0, 
                 ),
+                
                 yaxis=dict(
                     title="Weight (kg)",
                     side="left",
