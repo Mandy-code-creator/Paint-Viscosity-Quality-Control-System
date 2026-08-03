@@ -413,28 +413,33 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
 
         # ---------------------------------------------------------
         # RATIO LABELS
-        # Keep all percentage labels outside the bars.
-        # Use alternating horizontal shifts to avoid crowding.
+        # When yearly data are present, show only the latest available
+        # year for each paint code. All other values remain visible in
+        # the interactive app and detail table.
         # ---------------------------------------------------------
-        for i, ratio in enumerate(ratio_values):
+        label_indices = list(range(len(chart_df)))
+        if "Analysis_Year" in chart_df.columns:
+            temp_label_df = chart_df.copy()
+            temp_label_df["_Year_Number"] = pd.to_numeric(
+                temp_label_df["Analysis_Year"], errors="coerce"
+            )
+            label_indices = (
+                temp_label_df
+                .sort_values(["Paint_Code", "_Year_Number"])
+                .groupby("Paint_Code", dropna=False)
+                .tail(1)
+                .index
+                .tolist()
+            )
+
+        for label_rank, i in enumerate(label_indices):
+            ratio = ratio_values.iloc[i]
             if pd.isna(ratio):
                 continue
 
-            # Wider alternating offset for neighbouring labels.
-            if i % 3 == 0:
-                x_offset = -10
-            elif i % 3 == 1:
-                x_offset = 0
-            else:
-                x_offset = 10
-
-            # Standard position above the point.
-            y_offset = 15
-
-            # For very low ratio points, move the label slightly higher
-            # so it does not touch the paint-bar top or x-axis area.
-            if float(ratio) <= ratio_upper * 0.36:
-                y_offset = 18
+            x_offset = -7 if label_rank % 2 == 0 else 7
+            y_offset = 15 if label_rank % 2 == 0 else -18
+            va = "bottom" if y_offset > 0 else "top"
 
             ax2.annotate(
                 f"{ratio:.2f}%",
@@ -442,22 +447,15 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
                 xytext=(x_offset, y_offset),
                 textcoords="offset points",
                 ha="center",
-                va="bottom",
-                fontsize=8.8,
+                va=va,
+                fontsize=8.5,
                 fontweight="bold",
                 color="black",
                 bbox=dict(
-                    boxstyle="round,pad=0.20",
+                    boxstyle="round,pad=0.18",
                     facecolor="white",
                     edgecolor="none",
-                    alpha=0.97,
-                ),
-                arrowprops=dict(
-                    arrowstyle="-",
-                    color="#10A9E2",
-                    linewidth=0.65,
-                    shrinkA=2,
-                    shrinkB=4,
+                    alpha=0.96,
                 ),
                 annotation_clip=False,
                 zorder=8,
@@ -1088,7 +1086,9 @@ with tab_ranking:
 
             # One ratio line per year avoids drawing a misleading connection
             # from the final year of one paint code to the first year of the next.
-            # Labels are added separately and selectively to prevent overlap.
+            # All values remain available in hover. To keep the chart readable,
+            # only one percentage label is shown for each paint code: the latest
+            # available year for that paint code.
             ratio_line_colors = [
                 "#00AEEF", "#2563EB", "#7C3AED", "#059669",
                 "#DC2626", "#EA580C", "#0891B2", "#4F46E5",
@@ -1097,29 +1097,6 @@ with tab_ranking:
                 summary_df["Analysis_Year"].astype(str).unique().tolist(),
                 key=lambda value: int(value),
             )
-            latest_year = max(available_years, key=int)
-
-            # Presentation rules:
-            # 1. Keep every value available in hover.
-            # 2. Show all labels for the latest year.
-            # 3. For prior years, show labels only when the point is materially
-            #    different from the latest-year value for the same paint code.
-            # 4. Alternate label positions by year to reduce collisions.
-            LABEL_DIFFERENCE_THRESHOLD = 0.75
-            latest_ratio_by_code = (
-                summary_df[
-                    summary_df["Analysis_Year"].astype(str) == str(latest_year)
-                ]
-                .set_index("Paint_Code")["Weighted_Ratio_Percent"]
-                .to_dict()
-            )
-
-            label_position_cycle = [
-                "top center",
-                "bottom center",
-                "top left",
-                "bottom right",
-            ]
 
             for year_index, year_value in enumerate(available_years):
                 year_df = summary_df[
@@ -1135,23 +1112,20 @@ with tab_ranking:
                     year_index % len(ratio_line_colors)
                 ]
 
-                # Draw only lines and markers. Full values remain available on hover.
                 fig_dual.add_trace(
                     go.Scatter(
                         x=year_x,
                         y=year_df["Weighted_Ratio_Percent"],
                         name=f"Solvent Ratio {year_value} (%)",
                         mode="lines+markers",
-                        line=dict(
-                            color=line_color,
-                            width=2.5,
-                        ),
+                        line=dict(color=line_color, width=2.5),
                         marker=dict(
                             size=8,
                             color=line_color,
                             line=dict(width=0.8, color="white"),
                         ),
                         yaxis="y2",
+                        connectgaps=False,
                         customdata=np.column_stack([
                             year_df["Paint_Code"],
                             year_df["Analysis_Year"],
@@ -1169,51 +1143,56 @@ with tab_ranking:
                     )
                 )
 
-                # Add only useful labels rather than labeling every point.
-                label_text = []
-                for _, row in year_df.iterrows():
-                    ratio_value = pd.to_numeric(
-                        row["Weighted_Ratio_Percent"], errors="coerce"
-                    )
-                    paint_code = str(row["Paint_Code"])
-
-                    if pd.isna(ratio_value):
-                        label_text.append("")
-                        continue
-
-                    if str(year_value) == str(latest_year):
-                        show_label = True
-                    else:
-                        latest_ratio = pd.to_numeric(
-                            latest_ratio_by_code.get(paint_code, np.nan),
-                            errors="coerce",
-                        )
-                        show_label = (
-                            pd.isna(latest_ratio)
-                            or abs(float(ratio_value) - float(latest_ratio))
-                            >= LABEL_DIFFERENCE_THRESHOLD
-                        )
-
-                    label_text.append(
-                        f"{float(ratio_value):.2f}%" if show_label else ""
-                    )
-
-                fig_dual.add_trace(
-                    go.Scatter(
-                        x=year_x,
-                        y=year_df["Weighted_Ratio_Percent"],
-                        mode="text",
-                        text=label_text,
-                        textposition=label_position_cycle[
-                            year_index % len(label_position_cycle)
-                        ],
-                        textfont=dict(size=9, color="#111827"),
-                        yaxis="y2",
-                        showlegend=False,
-                        hoverinfo="skip",
-                        cliponaxis=False,
+            # ---------------------------------------------------------
+            # CLEAN LABEL LAYER
+            # Show only the latest available year for each paint code.
+            # This removes overlapping labels while preserving every value
+            # in the hover tooltip.
+            # ---------------------------------------------------------
+            latest_label_df = (
+                summary_df
+                .assign(
+                    _Year_Number=pd.to_numeric(
+                        summary_df["Analysis_Year"], errors="coerce"
                     )
                 )
+                .sort_values(["_Paint_Order", "_Year_Number"])
+                .groupby("Paint_Code", as_index=False, dropna=False)
+                .tail(1)
+                .sort_values("_Paint_Order")
+                .reset_index(drop=True)
+            )
+
+            latest_label_x = [
+                latest_label_df["Paint_Code"].astype(str).tolist(),
+                latest_label_df["Analysis_Year"].astype(str).tolist(),
+            ]
+
+            latest_label_text = latest_label_df[
+                "Weighted_Ratio_Percent"
+            ].apply(
+                lambda value: f"{value:.2f}%" if pd.notna(value) else ""
+            )
+
+            latest_label_positions = [
+                "top center" if index % 2 == 0 else "bottom center"
+                for index in range(len(latest_label_df))
+            ]
+
+            fig_dual.add_trace(
+                go.Scatter(
+                    x=latest_label_x,
+                    y=latest_label_df["Weighted_Ratio_Percent"],
+                    mode="text",
+                    text=latest_label_text,
+                    textposition=latest_label_positions,
+                    textfont=dict(size=9, color="#111827"),
+                    yaxis="y2",
+                    showlegend=False,
+                    hoverinfo="skip",
+                    cliponaxis=False,
+                )
+            )
 
             ratio_max = pd.to_numeric(
                 summary_df["Weighted_Ratio_Percent"], errors="coerce"
