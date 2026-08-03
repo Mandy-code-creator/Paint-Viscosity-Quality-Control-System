@@ -1258,6 +1258,18 @@ with tab_ranking:
                 "_Paint_Order"
             ).reset_index(drop=True)
 
+            # Available years are still required for:
+            # 1. placing the overall-ratio point at the center year;
+            # 2. displaying the selected year range in the chart subtitle.
+            available_years = sorted(
+                summary_df["Analysis_Year"]
+                .dropna()
+                .astype(str)
+                .unique()
+                .tolist(),
+                key=lambda value: int(value),
+            )
+
             # Place the overall point at the center year of each paint-code group.
             center_year = (
                 available_years[len(available_years) // 2]
@@ -1275,7 +1287,7 @@ with tab_ranking:
                     ],
                     y=overall_ratio_df["Overall_3Y_Ratio_Percent"],
                     mode="lines+markers",
-                    name="Overall 3-Year Ratio (%)",
+                    name="Overall Period Ratio (%)",
                     line=dict(
                         color="#0F766E",
                         width=2.8,
@@ -1295,7 +1307,7 @@ with tab_ranking:
                         overall_ratio_df["Base_Paint_All_Years"],
                     ]),
                     hovertemplate=(
-                        "<b>Overall 3-Year Ratio</b><br>"
+                        "<b>Overall Period Ratio</b><br>"
                         "Paint Code: %{customdata[0]}<br>"
                         "Total Paint: %{customdata[1]:,.0f} kg<br>"
                         "Total Solvent: %{customdata[2]:,.0f} kg<br>"
