@@ -1343,173 +1343,252 @@ with tab_ranking:
                 label_df["_Extreme_Type"] = "Latest"
 
             # Hover Only intentionally leaves label_df empty.
-            if not label_df.empty:
-                label_df["_Year_Number"] = pd.to_numeric(
-                    label_df["Analysis_Year"],
-                    errors="coerce",
-                )
+            # ---------------------------------------------------------
+            # CLEAN YEARLY EXTREMES PRESENTATION
+            # Do not place text labels next to points. Instead:
+            # 1. highlight yearly high/low points with distinct markers;
+            # 2. show a compact yearly summary panel above the chart.
+            # This completely avoids overlap and broken leader lines.
+            # ---------------------------------------------------------
+            yearly_extremes_df = pd.DataFrame()
 
-                # Build a stable numeric x-position for collision detection.
-                point_order_df = (
-                    summary_df[
-                        [
-                            "Paint_Code",
-                            "Analysis_Year",
-                            "_Paint_Order",
-                            "_Year_Order",
-                        ]
-                    ]
-                    .drop_duplicates()
-                    .sort_values(
-                        ["_Paint_Order", "_Year_Order"]
-                    )
-                    .reset_index(drop=True)
-                )
-                point_order_df["_X_Order"] = np.arange(
-                    len(point_order_df),
-                    dtype=float,
-                )
+            if ratio_label_mode == "Yearly Highest & Lowest (Recommended)":
+                yearly_extreme_rows = []
 
-                label_df = label_df.merge(
-                    point_order_df[
-                        [
-                            "Paint_Code",
-                            "Analysis_Year",
-                            "_X_Order",
-                        ]
-                    ],
-                    on=[
-                        "Paint_Code",
-                        "Analysis_Year",
-                    ],
-                    how="left",
-                )
+                for year_value, year_group in summary_df.groupby(
+                    "Analysis_Year", dropna=False, sort=True
+                ):
+                    valid_group = year_group.dropna(
+                        subset=["Weighted_Ratio_Percent"]
+                    ).copy()
 
-                label_df = label_df.sort_values(
-                    [
-                        "_X_Order",
-                        "_Extreme_Type",
-                    ]
-                ).reset_index(drop=True)
-
-                # Allocate annotation lanes.
-                # Labels that are close both horizontally and vertically
-                # are pushed to different pixel offsets.
-                placed_labels = []
-                offset_lanes = [
-                    (-34, 32),
-                    (34, 32),
-                    (-42, -38),
-                    (42, -38),
-                    (0, 48),
-                    (0, -52),
-                ]
-
-                for label_index, row in label_df.iterrows():
-                    ratio_value = pd.to_numeric(
-                        row["Weighted_Ratio_Percent"],
-                        errors="coerce",
-                    )
-
-                    if pd.isna(ratio_value):
+                    if valid_group.empty:
                         continue
 
-                    extreme_type = str(
-                        row.get("_Extreme_Type", "")
+                    max_index = valid_group[
+                        "Weighted_Ratio_Percent"
+                    ].idxmax()
+                    min_index = valid_group[
+                        "Weighted_Ratio_Percent"
+                    ].idxmin()
+
+                    max_row = summary_df.loc[[max_index]].copy()
+                    max_row["_Extreme_Type"] = "Highest"
+
+                    min_row = summary_df.loc[[min_index]].copy()
+                    min_row["_Extreme_Type"] = "Lowest"
+
+                    yearly_extreme_rows.extend([max_row, min_row])
+
+                if yearly_extreme_rows:
+                    yearly_extremes_df = pd.concat(
+                        yearly_extreme_rows,
+                        ignore_index=True,
+                    ).drop_duplicates(
+                        subset=[
+                            "Paint_Code",
+                            "Analysis_Year",
+                            "Weighted_Ratio_Percent",
+                            "_Extreme_Type",
+                        ]
                     )
-                    x_order = float(
-                        row.get("_X_Order", label_index)
+
+            elif ratio_label_mode == "Latest Year - Top 3 Paint Codes":
+                latest_label_df = (
+                    summary_df
+                    .assign(
+                        _Year_Number=pd.to_numeric(
+                            summary_df["Analysis_Year"],
+                            errors="coerce",
+                        )
+                    )
+                    .sort_values(
+                        ["_Paint_Order", "_Year_Number"]
+                    )
+                    .groupby(
+                        "Paint_Code",
+                        as_index=False,
+                        dropna=False,
+                    )
+                    .tail(1)
+                )
+
+                top_label_codes = (
+                    top10_overall_df
+                    .sort_values(
+                        "Total_Solvent_kg",
+                        ascending=False,
+                    )
+                    .head(3)["Paint_Code"]
+                    .astype(str)
+                    .tolist()
+                )
+
+                yearly_extremes_df = latest_label_df[
+                    latest_label_df["Paint_Code"]
+                    .astype(str)
+                    .isin(top_label_codes)
+                ].copy()
+
+                yearly_extremes_df["_Extreme_Type"] = "Latest"
+
+            # Add clean highlight markers only; no text near data points.
+            if not yearly_extremes_df.empty:
+                high_df = yearly_extremes_df[
+                    yearly_extremes_df["_Extreme_Type"] == "Highest"
+                ].copy()
+
+                low_df = yearly_extremes_df[
+                    yearly_extremes_df["_Extreme_Type"] == "Lowest"
+                ].copy()
+
+                latest_df = yearly_extremes_df[
+                    yearly_extremes_df["_Extreme_Type"] == "Latest"
+                ].copy()
+
+                if not high_df.empty:
+                    fig_dual.add_trace(
+                        go.Scatter(
+                            x=[
+                                high_df["Paint_Code"].astype(str).tolist(),
+                                high_df["Analysis_Year"].astype(str).tolist(),
+                            ],
+                            y=high_df["Weighted_Ratio_Percent"],
+                            mode="markers",
+                            name="Yearly Highest Ratio",
+                            marker=dict(
+                                symbol="triangle-up",
+                                size=12,
+                                color="#DC2626",
+                                line=dict(width=1.2, color="white"),
+                            ),
+                            yaxis="y2",
+                            customdata=np.column_stack([
+                                high_df["Analysis_Year"],
+                                high_df["Paint_Code"],
+                            ]),
+                            hovertemplate=(
+                                "<b>Yearly Highest</b><br>"
+                                "Year: %{customdata[0]}<br>"
+                                "Paint Code: %{customdata[1]}<br>"
+                                "Solvent Ratio: %{y:.2f}%"
+                                "<extra></extra>"
+                            ),
+                        )
                     )
 
-                    if extreme_type == "Highest":
-                        label_text = (
-                            f"▲ {int(row['Analysis_Year'])} High "
-                            f"{float(ratio_value):.2f}%"
+                if not low_df.empty:
+                    fig_dual.add_trace(
+                        go.Scatter(
+                            x=[
+                                low_df["Paint_Code"].astype(str).tolist(),
+                                low_df["Analysis_Year"].astype(str).tolist(),
+                            ],
+                            y=low_df["Weighted_Ratio_Percent"],
+                            mode="markers",
+                            name="Yearly Lowest Ratio",
+                            marker=dict(
+                                symbol="triangle-down",
+                                size=12,
+                                color="#2563EB",
+                                line=dict(width=1.2, color="white"),
+                            ),
+                            yaxis="y2",
+                            customdata=np.column_stack([
+                                low_df["Analysis_Year"],
+                                low_df["Paint_Code"],
+                            ]),
+                            hovertemplate=(
+                                "<b>Yearly Lowest</b><br>"
+                                "Year: %{customdata[0]}<br>"
+                                "Paint Code: %{customdata[1]}<br>"
+                                "Solvent Ratio: %{y:.2f}%"
+                                "<extra></extra>"
+                            ),
                         )
-                        border_color = "#DC2626"
-                        preferred_lanes = [0, 1, 4, 2, 3, 5]
-                    elif extreme_type == "Lowest":
-                        label_text = (
-                            f"▼ {int(row['Analysis_Year'])} Low "
-                            f"{float(ratio_value):.2f}%"
-                        )
-                        border_color = "#2563EB"
-                        preferred_lanes = [2, 3, 5, 0, 1, 4]
-                    else:
-                        label_text = f"{float(ratio_value):.2f}%"
-                        border_color = "#9CA3AF"
-                        preferred_lanes = [0, 2, 1, 3, 4, 5]
+                    )
 
-                    # Detect nearby labels. A collision is likely when points
-                    # are within 1.6 x slots and ratios differ by less than 0.9%.
-                    nearby_lane_ids = {
-                        item["lane_id"]
-                        for item in placed_labels
-                        if (
-                            abs(x_order - item["x_order"]) <= 1.6
-                            and abs(
-                                float(ratio_value)
-                                - item["ratio_value"]
-                            ) <= 0.9
+                if not latest_df.empty:
+                    fig_dual.add_trace(
+                        go.Scatter(
+                            x=[
+                                latest_df["Paint_Code"].astype(str).tolist(),
+                                latest_df["Analysis_Year"].astype(str).tolist(),
+                            ],
+                            y=latest_df["Weighted_Ratio_Percent"],
+                            mode="markers",
+                            name="Latest Highlight",
+                            marker=dict(
+                                symbol="diamond",
+                                size=11,
+                                color="#7C3AED",
+                                line=dict(width=1.2, color="white"),
+                            ),
+                            yaxis="y2",
+                            customdata=np.column_stack([
+                                latest_df["Analysis_Year"],
+                                latest_df["Paint_Code"],
+                            ]),
+                            hovertemplate=(
+                                "<b>Latest Highlight</b><br>"
+                                "Year: %{customdata[0]}<br>"
+                                "Paint Code: %{customdata[1]}<br>"
+                                "Solvent Ratio: %{y:.2f}%"
+                                "<extra></extra>"
+                            ),
                         )
-                    }
+                    )
 
-                    lane_id = next(
+            # Build a compact summary line for the top panel.
+            yearly_extreme_summary_text = ""
+            if (
+                ratio_label_mode == "Yearly Highest & Lowest (Recommended)"
+                and not yearly_extremes_df.empty
+            ):
+                summary_parts = []
+
+                for year_value in sorted(
+                    yearly_extremes_df["Analysis_Year"]
+                    .astype(str)
+                    .unique()
+                    .tolist(),
+                    key=lambda value: int(value),
+                ):
+                    year_extremes = yearly_extremes_df[
+                        yearly_extremes_df["Analysis_Year"]
+                        .astype(str)
+                        == str(year_value)
+                    ]
+
+                    high_row = year_extremes[
+                        year_extremes["_Extreme_Type"] == "Highest"
+                    ]
+                    low_row = year_extremes[
+                        year_extremes["_Extreme_Type"] == "Lowest"
+                    ]
+
+                    if high_row.empty or low_row.empty:
+                        continue
+
+                    high_row = high_row.iloc[0]
+                    low_row = low_row.iloc[0]
+
+                    summary_parts.append(
                         (
-                            candidate
-                            for candidate in preferred_lanes
-                            if candidate not in nearby_lane_ids
-                        ),
-                        preferred_lanes[
-                            label_index % len(preferred_lanes)
-                        ],
+                            f"<b>{year_value}</b>: "
+                            f"<span style='color:#DC2626'>▲ "
+                            f"{high_row['Paint_Code']} "
+                            f"{high_row['Weighted_Ratio_Percent']:.2f}%</span>"
+                            f" &nbsp; "
+                            f"<span style='color:#2563EB'>▼ "
+                            f"{low_row['Paint_Code']} "
+                            f"{low_row['Weighted_Ratio_Percent']:.2f}%</span>"
+                        )
                     )
 
-                    ax_offset, ay_offset = offset_lanes[lane_id]
-
-                    # Plotly annotation uses ay relative to the point.
-                    # Positive ay moves the label downward.
-                    y_anchor = (
-                        "bottom"
-                        if ay_offset < 0
-                        else "top"
-                    )
-
-                    fig_dual.add_annotation(
-                        x=[
-                            str(row["Paint_Code"]),
-                            str(row["Analysis_Year"]),
-                        ],
-                        y=float(ratio_value),
-                        xref="x",
-                        yref="y2",
-                        text=label_text,
-                        showarrow=True,
-                        arrowhead=0,
-                        ax=ax_offset,
-                        ay=ay_offset,
-                        xanchor="center",
-                        yanchor=y_anchor,
-                        font=dict(
-                            size=8.8,
-                            color="#111827",
-                        ),
-                        bgcolor="rgba(255,255,255,0.99)",
-                        bordercolor=border_color,
-                        borderwidth=0.9,
-                        borderpad=3,
-                        arrowcolor=border_color,
-                        arrowwidth=0.8,
-                        opacity=0.99,
-                    )
-
-                    placed_labels.append(
-                        {
-                            "x_order": x_order,
-                            "ratio_value": float(ratio_value),
-                            "lane_id": lane_id,
-                        }
-                    )
+                yearly_extreme_summary_text = " &nbsp; | &nbsp; ".join(
+                    summary_parts
+                )
 
             ratio_max = pd.to_numeric(
                 summary_df["Weighted_Ratio_Percent"], errors="coerce"
@@ -1567,16 +1646,38 @@ with tab_ranking:
                 legend=dict(
                     orientation="h",
                     yanchor="bottom",
-                    y=1.045,
+                    y=1.055,
                     xanchor="center",
                     x=0.5,
                     font=dict(size=10),
                 ),
+                annotations=(
+                    [
+                        dict(
+                            x=0.5,
+                            y=1.155,
+                            xref="paper",
+                            yref="paper",
+                            text=yearly_extreme_summary_text,
+                            showarrow=False,
+                            xanchor="center",
+                            yanchor="bottom",
+                            align="center",
+                            font=dict(size=10, color="#111827"),
+                            bgcolor="rgba(248,250,252,0.98)",
+                            bordercolor="#CBD5E1",
+                            borderwidth=1,
+                            borderpad=6,
+                        )
+                    ]
+                    if yearly_extreme_summary_text
+                    else []
+                ),
                 barmode="group",
                 bargap=0.20,
                 bargroupgap=0.08,
-                height=790,
-                margin=dict(l=85, r=105, t=190, b=145),
+                height=820,
+                margin=dict(l=85, r=105, t=235, b=145),
                 plot_bgcolor="white",
                 paper_bgcolor="white",
                 font=dict(color="black"),
