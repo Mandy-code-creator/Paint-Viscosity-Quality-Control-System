@@ -1336,20 +1336,20 @@ with tab_ranking:
                 top10_source_df
                 .groupby("Paint_Code", as_index=False)
                 .agg(
-                    Total_Paint_All_Years=(
-                        "Paint_Weight",
+                    Base_Paint_All_Years=(
+                        "Base_Paint_Weight_kg",
                         "sum",
                     ),
                     Total_Solvent_All_Years=(
-                        "Solvent_Added",
+                        "添加重量",
                         "sum",
                     ),
                 )
             )
 
-            overall_ratio_df["Base_Paint_All_Years"] = (
-                overall_ratio_df["Total_Paint_All_Years"]
-                - overall_ratio_df["Total_Solvent_All_Years"]
+            overall_ratio_df["Total_Paint_All_Years"] = (
+                overall_ratio_df["Base_Paint_All_Years"]
+                + overall_ratio_df["Total_Solvent_All_Years"]
             )
 
             overall_ratio_df["Overall_3Y_Ratio_Percent"] = np.where(
