@@ -1150,11 +1150,12 @@ with tab_ranking:
                             else ""
                         )
                     ),
-                    textposition="outside",
+                    textposition="inside",
+                    insidetextanchor="end",
                     textangle=0,
                     textfont=dict(
-                        size=8,
-                        color="#355C9A",
+                        size=9,
+                        color="#111827",
                     ),
                     cliponaxis=False,
                     customdata=np.column_stack([
@@ -1194,8 +1195,8 @@ with tab_ranking:
                     textposition="outside",
                     textangle=0,
                     textfont=dict(
-                        size=8,
-                        color="#9A6700",
+                        size=8.5,
+                        color="#7A4E00",
                     ),
                     cliponaxis=False,
                     customdata=np.column_stack([
@@ -1296,8 +1297,8 @@ with tab_ranking:
             )
 
             overall_label_positions = [
-                "top center" if index % 2 == 0 else "bottom center"
-                for index in range(len(overall_ratio_df))
+                "top center"
+                for _ in range(len(overall_ratio_df))
             ]
 
             overall_ratio_text = overall_ratio_df[
@@ -1337,8 +1338,9 @@ with tab_ranking:
                     text=overall_ratio_text,
                     textposition=overall_label_positions,
                     textfont=dict(
-                        size=9,
-                        color="#0F5F59",
+                        size=10,
+                        color="#111827",
+                        family="Arial Black",
                     ),
                     cliponaxis=False,
                     yaxis="y2",
@@ -1362,7 +1364,8 @@ with tab_ranking:
             )
 
             ratio_max = pd.to_numeric(
-                summary_df["Weighted_Ratio_Percent"], errors="coerce"
+                overall_ratio_df["Overall_3Y_Ratio_Percent"],
+                errors="coerce",
             ).max()
             ratio_upper = (
                 max(5.0, float(ratio_max) * 1.35)
@@ -1389,7 +1392,7 @@ with tab_ranking:
                     linecolor="#111827",
                     linewidth=1.2,
                     mirror=True,
-                    tickfont=dict(color="black", size=8.5), # GIẢM XUỐNG 8.5 ĐỂ KHÔNG BỊ CHỒNG CHỮ
+                    tickfont=dict(color="black", size=9), # GIẢM XUỐNG 8.5 ĐỂ KHÔNG BỊ CHỒNG CHỮ
                     tickangle=0, 
                 ),
                 
@@ -1424,18 +1427,24 @@ with tab_ranking:
                     bgcolor="rgba(255,255,255,0.96)",
                 ),
                 barmode="group",
-                bargap=0.20,
-                bargroupgap=0.08,
-                height=780,
-                margin=dict(l=85, r=105, t=160, b=145),
+                bargap=0.24,
+                bargroupgap=0.10,
+                height=820,
+                margin=dict(l=90, r=110, t=175, b=155),
                 plot_bgcolor="white",
                 paper_bgcolor="white",
                 font=dict(color="black"),
-                hovermode="x unified",
-                uniformtext_minsize=8,
-                uniformtext_mode="hide",
+                hovermode="closest",
+                uniformtext=dict(
+                    minsize=7,
+                    mode="show",
+                ),
             )
 
+            st.caption(
+                "Every non-zero annual Paint and Solvent bar is labeled directly. "
+                "The overall-period solvent ratio is displayed above each teal marker."
+            )
             st.plotly_chart(fig_dual, use_container_width=True)
             exported_figs["4. Top 10 Usage and Ratio by Year"] = fig_dual
 
