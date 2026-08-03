@@ -1814,78 +1814,446 @@ if st.button("產生互動式季節分析報告 HTML", type="primary"):
     except Exception as error:
         st.error(f"❌ 產生報告時發生錯誤：{error}")
 # =========================================================
-# 20. DIRECT-TO-LINE PURCHASING SPECIFICATION (免加稀釋劑方案)
+# 20. DIRECT-TO-LINE PURCHASING SPECIFICATION
+#     PS2G12933 READY-TO-USE PILOT
 # =========================================================
 st.markdown("---")
-st.subheader("💡 建議採購黏度規格 (免加稀釋劑方案)")
+st.subheader("💡 PS2G12933 建議進料黏度分析")
 st.markdown(
-    "基於歷史實際使用的「添加後黏度」數據，利用 1-Sigma 統計原則找出最穩定且符合產線需求的黏度區間。"
-    "此報表可作為與供應商（Vendor）談判「**免加稀釋劑直接上線 (Ready-to-Use)**」的進料規格參考。"
+    "PS2G12933 稀釋劑使用量最高且調整後黏度集中，"
+    "建議優先作為免加稀釋劑直接生產之試驗色號。"
 )
 
-# 1. Lọc dữ liệu có độ nhớt sau khi pha hợp lệ
-optimal_spec_df = filter_df[filter_df["黏度(秒)_1"] > 0].copy()
+target_paint_code = "PS2G12933"
 
-if not optimal_spec_df.empty:
-    # 2. Tính toán khoảng phân vị P25, P75 và số lượng lô
-    purchasing_spec = optimal_spec_df.groupby(["Vendor", "Paint_Code"]).agg(
-        歷史有效批數=("Batch_ID", "nunique"),
-        實際使用黏度_P25=("黏度(秒)_1", lambda x: x.quantile(0.25)),
-        實際使用黏度_中位數=("黏度(秒)_1", "median"),
-        實際使用黏度_P75=("黏度(秒)_1", lambda x: x.quantile(0.75)),
-        平均單桶消耗稀釋劑=("添加重量", "mean")
-    ).reset_index()
+# Use only the currently filtered data for PS2G12933.
+optimal_spec_df = filter_df[
+    (filter_df["Paint_Code"] == target_paint_code)
+    & (filter_df["黏度(秒)_1"] > 0)
+].copy()
 
-    # 3. Chỉ lấy các màu sơn có lịch sử >= 10 mẻ (để dữ liệu đàm phán có độ tin cậy cao)
-    purchasing_spec = purchasing_spec[purchasing_spec["歷史有效批數"] >= 10].copy()
+if optimal_spec_df.empty:
+    st.info(
+        f"⚠️ 目前篩選條件下無 {target_paint_code} 的有效資料，"
+        "無法產生建議進料黏度分析。"
+    )
+else:
+    historical_batches = int(
+        optimal_spec_df["Batch_ID"].nunique()
+    )
 
-    if purchasing_spec.empty:
-        st.info("⚠️ 目前篩選條件下的色號歷史批數不足 (需 >= 10 批)，無法產生具統計意義的採購規格建議。")
+    if historical_batches < 10:
+        st.info(
+            f"⚠️ {target_paint_code} 目前僅有 "
+            f"{historical_batches} 個有效歷史批次，"
+            "建議至少累積 10 批後再建立試驗進料黏度範圍。"
+        )
     else:
-        # 4. Làm tròn và định dạng lại bảng dữ liệu
-        purchasing_spec["建議進料下限 (s)"] = purchasing_spec["實際使用黏度_P25"].round(1)
-        purchasing_spec["產線實際中位數 (s)"] = purchasing_spec["實際使用黏度_中位數"].round(1)
-        purchasing_spec["建議進料上限 (s)"] = purchasing_spec["實際使用黏度_P75"].round(1)
-        purchasing_spec["預估節省溶劑 (kg/桶)"] = purchasing_spec["平均單桶消耗稀釋劑"].round(2)
+        # -----------------------------------------------------
+        # 20.1 Statistical values
+        # -----------------------------------------------------
+        current_before_p25 = float(
+            optimal_spec_df["黏度(秒)"].quantile(0.25)
+        )
+        current_before_median = float(
+            optimal_spec_df["黏度(秒)"].median()
+        )
+        current_before_p75 = float(
+            optimal_spec_df["黏度(秒)"].quantile(0.75)
+        )
 
-        final_purchasing_report = purchasing_spec[[
-            "Vendor", 
-            "Paint_Code", 
-            "歷史有效批數", 
-            "建議進料下限 (s)", 
-            "產線實際中位數 (s)", 
-            "建議進料上限 (s)",
-            "預估節省溶劑 (kg/桶)"
-        ]].sort_values(by=["Vendor", "Paint_Code"])
+        recommended_p25 = float(
+            optimal_spec_df["黏度(秒)_1"].quantile(0.25)
+        )
+        recommended_median = float(
+            optimal_spec_df["黏度(秒)_1"].median()
+        )
+        recommended_p75 = float(
+            optimal_spec_df["黏度(秒)_1"].quantile(0.75)
+        )
 
-        # 5. Hiển thị bảng trên UI Streamlit
+        average_solvent_per_bucket = float(
+            optimal_spec_df["添加重量"].mean()
+        )
+        total_historical_solvent = float(
+            optimal_spec_df["添加重量"].sum()
+        )
+        median_temperature = float(
+            optimal_spec_df["溫度"].median()
+        ) if optimal_spec_df["溫度"].notna().any() else np.nan
+
+        # -----------------------------------------------------
+        # 20.2 Table 4
+        # -----------------------------------------------------
+        st.markdown("#### 表4　PS2G12933 建議試驗進料黏度")
+
+        ps2g12933_report = pd.DataFrame(
+            [
+                {
+                    "色號": target_paint_code,
+                    "歷史有效批數": historical_batches,
+                    "目前添加前黏度P25 (s)": round(
+                        current_before_p25, 1
+                    ),
+                    "目前添加前黏度中位數 (s)": round(
+                        current_before_median, 1
+                    ),
+                    "目前添加前黏度P75 (s)": round(
+                        current_before_p75, 1
+                    ),
+                    "建議進料下限 (s)": round(
+                        recommended_p25, 1
+                    ),
+                    "建議目標值 (s)": round(
+                        recommended_median, 1
+                    ),
+                    "建議進料上限 (s)": round(
+                        recommended_p75, 1
+                    ),
+                    "預估節省溶劑 (kg/桶)": round(
+                        average_solvent_per_bucket, 2
+                    ),
+                    "歷史稀釋劑總用量 (kg)": round(
+                        total_historical_solvent, 1
+                    ),
+                    "參考溫度中位數 (°C)": (
+                        round(median_temperature, 1)
+                        if pd.notna(median_temperature)
+                        else np.nan
+                    ),
+                }
+            ]
+        )
+
         st.dataframe(
-            final_purchasing_report,
+            ps2g12933_report,
             column_config={
-                "Vendor": "供應商",
-                "Paint_Code": "色號",
-                "歷史有效批數": st.column_config.NumberColumn("歷史有效批數", format="%d"),
-                "建議進料下限 (s)": st.column_config.NumberColumn("建議進料下限 (s)", format="%.1f"),
-                "產線實際中位數 (s)": st.column_config.NumberColumn("產線實際中位數 (s)", format="%.1f"),
-                "建議進料上限 (s)": st.column_config.NumberColumn("建議進料上限 (s)", format="%.1f"),
-                "預估節省溶劑 (kg/桶)": st.column_config.NumberColumn("預估節省溶劑 (kg/桶)", format="%.2f"),
+                "色號": st.column_config.TextColumn(
+                    "色號",
+                    width="medium",
+                ),
+                "歷史有效批數": st.column_config.NumberColumn(
+                    "歷史有效批數",
+                    format="%d",
+                ),
+                "目前添加前黏度P25 (s)": st.column_config.NumberColumn(
+                    "目前添加前黏度P25 (s)",
+                    format="%.1f",
+                ),
+                "目前添加前黏度中位數 (s)": st.column_config.NumberColumn(
+                    "目前添加前黏度中位數 (s)",
+                    format="%.1f",
+                ),
+                "目前添加前黏度P75 (s)": st.column_config.NumberColumn(
+                    "目前添加前黏度P75 (s)",
+                    format="%.1f",
+                ),
+                "建議進料下限 (s)": st.column_config.NumberColumn(
+                    "建議進料下限 (s)",
+                    format="%.1f",
+                ),
+                "建議目標值 (s)": st.column_config.NumberColumn(
+                    "建議目標值 (s)",
+                    format="%.1f",
+                ),
+                "建議進料上限 (s)": st.column_config.NumberColumn(
+                    "建議進料上限 (s)",
+                    format="%.1f",
+                ),
+                "預估節省溶劑 (kg/桶)": st.column_config.NumberColumn(
+                    "預估節省溶劑 (kg/桶)",
+                    format="%.2f",
+                ),
+                "歷史稀釋劑總用量 (kg)": st.column_config.NumberColumn(
+                    "歷史稀釋劑總用量 (kg)",
+                    format="%.1f",
+                ),
+                "參考溫度中位數 (°C)": st.column_config.NumberColumn(
+                    "參考溫度中位數 (°C)",
+                    format="%.1f",
+                ),
             },
             use_container_width=True,
-            hide_index=True
+            hide_index=True,
         )
 
         st.caption(
-            "📍 **應用說明**：建議要求供應商將出廠黏度控制在上述「進料下限」與「進料上限」之間。"
-            "一旦進料黏度達標，產線即可省下「預估節省溶劑」的成本，並免去人工調配的工時與異常風險。"
+            "建議目標值採用歷史添加後黏度中位數；"
+            "建議試驗範圍採用添加後黏度 P25～P75。"
+            "本結果屬試驗參考值，正式規格仍須經供應商試配及現場驗證。"
         )
 
-        # 6. Nút xuất file CSV cho bộ phận Mua hàng
-        purchasing_csv = dataframe_to_csv_bytes(final_purchasing_report)
-        st.download_button(
-            label="下載免加稀釋劑採購規格建議表 CSV",
-            data=purchasing_csv,
-            file_name="Direct_to_Line_Purchasing_Spec.csv",
-            mime="text/csv"
+        # -----------------------------------------------------
+        # 20.3 Figure 3 — Current vs recommended interval
+        # -----------------------------------------------------
+        st.markdown(
+            "#### 圖3　PS2G12933目前黏度與建議試驗進料範圍比較"
         )
-else:
-    st.info("無有效黏度數據可進行採購規格計算。")
+
+        fig_recommended_input = go.Figure()
+
+        # Current incoming viscosity P25-P75.
+        fig_recommended_input.add_trace(
+            go.Scatter(
+                x=[
+                    current_before_p25,
+                    current_before_p75,
+                ],
+                y=[
+                    "目前添加前黏度",
+                    "目前添加前黏度",
+                ],
+                mode="lines",
+                line=dict(
+                    color="#D97706",
+                    width=16,
+                ),
+                name="目前添加前黏度 P25–P75",
+                hovertemplate=(
+                    "目前添加前黏度範圍："
+                    f"{current_before_p25:.1f}–"
+                    f"{current_before_p75:.1f} s"
+                    "<extra></extra>"
+                ),
+            )
+        )
+
+        fig_recommended_input.add_trace(
+            go.Scatter(
+                x=[current_before_median],
+                y=["目前添加前黏度"],
+                mode="markers+text",
+                marker=dict(
+                    size=16,
+                    color="#92400E",
+                    symbol="diamond",
+                    line=dict(
+                        color="white",
+                        width=1.5,
+                    ),
+                ),
+                text=[
+                    f"{current_before_median:.1f} s"
+                ],
+                textposition="top center",
+                textfont=dict(
+                    size=13,
+                    color="#78350F",
+                ),
+                name="目前黏度中位數",
+                hovertemplate=(
+                    "目前添加前黏度中位數："
+                    f"{current_before_median:.1f} s"
+                    "<extra></extra>"
+                ),
+            )
+        )
+
+        # Recommended trial input viscosity P25-P75.
+        fig_recommended_input.add_trace(
+            go.Scatter(
+                x=[
+                    recommended_p25,
+                    recommended_p75,
+                ],
+                y=[
+                    "建議試驗進料黏度",
+                    "建議試驗進料黏度",
+                ],
+                mode="lines",
+                line=dict(
+                    color="#2563EB",
+                    width=16,
+                ),
+                name="建議試驗進料黏度 P25–P75",
+                hovertemplate=(
+                    "建議試驗進料範圍："
+                    f"{recommended_p25:.1f}–"
+                    f"{recommended_p75:.1f} s"
+                    "<extra></extra>"
+                ),
+            )
+        )
+
+        fig_recommended_input.add_trace(
+            go.Scatter(
+                x=[recommended_median],
+                y=["建議試驗進料黏度"],
+                mode="markers+text",
+                marker=dict(
+                    size=17,
+                    color="#1D4ED8",
+                    symbol="diamond",
+                    line=dict(
+                        color="white",
+                        width=1.5,
+                    ),
+                ),
+                text=[
+                    f"{recommended_median:.1f} s"
+                ],
+                textposition="bottom center",
+                textfont=dict(
+                    size=13,
+                    color="#1D4ED8",
+                ),
+                name="建議目標值",
+                hovertemplate=(
+                    "建議目標值："
+                    f"{recommended_median:.1f} s"
+                    "<extra></extra>"
+                ),
+            )
+        )
+
+        # Range labels at both ends.
+        fig_recommended_input.add_annotation(
+            x=recommended_p25,
+            y="建議試驗進料黏度",
+            text=f"下限 {recommended_p25:.1f}",
+            showarrow=False,
+            yshift=28,
+            font=dict(
+                size=12,
+                color="#1D4ED8",
+            ),
+            bgcolor="rgba(255,255,255,0.92)",
+        )
+
+        fig_recommended_input.add_annotation(
+            x=recommended_p75,
+            y="建議試驗進料黏度",
+            text=f"上限 {recommended_p75:.1f}",
+            showarrow=False,
+            yshift=28,
+            font=dict(
+                size=12,
+                color="#1D4ED8",
+            ),
+            bgcolor="rgba(255,255,255,0.92)",
+        )
+
+        fig_recommended_input.update_xaxes(
+            title="黏度 (秒)",
+            showgrid=True,
+            gridcolor="#D6DCE5",
+            gridwidth=1,
+            showline=True,
+            linecolor="#4B5563",
+            linewidth=1.5,
+            mirror=True,
+            ticks="outside",
+            ticklen=6,
+            zeroline=False,
+        )
+
+        fig_recommended_input.update_yaxes(
+            title="比較項目",
+            categoryorder="array",
+            categoryarray=[
+                "建議試驗進料黏度",
+                "目前添加前黏度",
+            ],
+            showgrid=True,
+            gridcolor="#E5E7EB",
+            gridwidth=1,
+            showline=True,
+            linecolor="#4B5563",
+            linewidth=1.5,
+            mirror=True,
+            ticks="outside",
+            ticklen=6,
+        )
+
+        x_min = min(
+            current_before_p25,
+            recommended_p25,
+        )
+        x_max = max(
+            current_before_p75,
+            recommended_p75,
+        )
+        x_padding = max(
+            (x_max - x_min) * 0.12,
+            5,
+        )
+
+        fig_recommended_input.update_layout(
+            title=(
+                f"<b>{target_paint_code}目前黏度與"
+                "建議試驗進料範圍比較</b>"
+                "<br><sup>"
+                "橘色＝目前添加前黏度P25–P75；"
+                "藍色＝建議試驗進料黏度P25–P75；"
+                "菱形＝中位數"
+                "</sup>"
+            ),
+            height=500,
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            margin=dict(
+                l=180,
+                r=55,
+                t=135,
+                b=85,
+            ),
+            xaxis_range=[
+                x_min - x_padding,
+                x_max + x_padding,
+            ],
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.05,
+                xanchor="right",
+                x=1,
+                bgcolor="rgba(255,255,255,0.92)",
+                bordercolor="#CBD5E1",
+                borderwidth=1,
+            ),
+            font=dict(
+                family=(
+                    "Arial, Microsoft JhengHei, "
+                    "sans-serif"
+                ),
+                size=12,
+                color="#374151",
+            ),
+        )
+
+        st.plotly_chart(
+            fig_recommended_input,
+            use_container_width=True,
+        )
+
+        st.markdown(
+            f"""
+**分析結果：** {target_paint_code} 歷史添加後黏度之
+P25～P75為 **{recommended_p25:.1f}～{recommended_p75:.1f} s**，
+中位數為 **{recommended_median:.1f} s**。
+建議先以此範圍進行小批量試驗，並以現場免加稀釋劑直接生產為目標。
+"""
+        )
+
+        st.warning(
+            "試驗期間仍須同步確認塗裝黏度、膜厚、光澤及成品品質；"
+            "試驗結果穩定後，再評估納入正式進料黏度管制標準。"
+        )
+
+        # -----------------------------------------------------
+        # 20.4 CSV export
+        # -----------------------------------------------------
+        purchasing_csv = dataframe_to_csv_bytes(
+            ps2g12933_report
+        )
+
+        st.download_button(
+            label="下載 PS2G12933 建議進料黏度表 CSV",
+            data=purchasing_csv,
+            file_name=(
+                "PS2G12933_Recommended_"
+                "Input_Viscosity.csv"
+            ),
+            mime="text/csv",
+            on_click="ignore",
+        )
