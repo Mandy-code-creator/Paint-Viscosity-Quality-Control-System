@@ -265,37 +265,72 @@ def apply_professional_layout(fig, title_text=None, subtitle_text=None, height=N
 
 
 def create_top10_usage_ratio_png(summary_df, filter_details):
-    """Create the Top 10 usage/ratio chart for Word export with clean labels.
+    """Create a Word-export chart matching the Streamlit chart.
 
-    Layout rules:
-    1. Paint values are placed inside tall blue bars.
-    2. Solvent values stay above the short yellow bars.
-    3. Ratio labels are placed above the line points with alternating
-       horizontal offsets and white backgrounds.
-    4. Extra top space is reserved so labels never touch the chart border.
+    Export rules:
+    1. Keep Paint and Solvent bars separately for every year.
+    2. Show every non-zero bar value.
+    3. Do not draw yearly solvent-ratio points.
+    4. Draw only one weighted overall-period ratio for each Paint Code.
+    5. Use a two-level x-axis: Year above Paint Code.
     """
-    fig, ax1 = plt.subplots(figsize=(11.2, 6.3), dpi=180)
+    fig, ax1 = plt.subplots(figsize=(12.8, 6.8), dpi=180)
 
     if summary_df is None or summary_df.empty:
         ax1.text(
-            0.5, 0.5, "No data available",
-            ha="center", va="center", fontsize=12, color="black"
+            0.5,
+            0.5,
+            "No data available",
+            ha="center",
+            va="center",
+            fontsize=12,
+            color="black",
         )
         ax1.set_axis_off()
     else:
         chart_df = summary_df.copy().reset_index(drop=True)
-        x = np.arange(len(chart_df))
-        bar_width = 0.36
+
+        chart_df["Paint_Code"] = (
+            chart_df["Paint_Code"].astype(str)
+        )
+        chart_df["Analysis_Year"] = (
+            chart_df["Analysis_Year"].astype(str)
+        )
+
+        chart_df["_Year_Number"] = pd.to_numeric(
+            chart_df["Analysis_Year"],
+            errors="coerce",
+        )
+
+        paint_code_order = (
+            chart_df["Paint_Code"]
+            .drop_duplicates()
+            .tolist()
+        )
+        paint_order_map = {
+            code: index
+            for index, code in enumerate(paint_code_order)
+        }
+
+        chart_df["_Paint_Order"] = (
+            chart_df["Paint_Code"].map(paint_order_map)
+        )
+        chart_df = chart_df.sort_values(
+            ["_Paint_Order", "_Year_Number"]
+        ).reset_index(drop=True)
+
+        x = np.arange(len(chart_df), dtype=float)
+        bar_width = 0.34
 
         paint_values = pd.to_numeric(
-            chart_df["Total_Paint_kg"], errors="coerce"
+            chart_df["Total_Paint_kg"],
+            errors="coerce",
         ).fillna(0)
+
         solvent_values = pd.to_numeric(
-            chart_df["Total_Solvent_kg"], errors="coerce"
+            chart_df["Total_Solvent_kg"],
+            errors="coerce",
         ).fillna(0)
-        ratio_values = pd.to_numeric(
-            chart_df["Weighted_Ratio_Percent"], errors="coerce"
-        )
 
         paint_bars = ax1.bar(
             x - bar_width / 2,
@@ -304,9 +339,10 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
             label="Paint (kg)",
             color="#5B8FF9",
             edgecolor="white",
-            linewidth=0.8,
+            linewidth=0.7,
             zorder=3,
         )
+
         solvent_bars = ax1.bar(
             x + bar_width / 2,
             solvent_values,
@@ -314,43 +350,108 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
             label="Solvent (kg)",
             color="#F6BD16",
             edgecolor="white",
-            linewidth=0.8,
+            linewidth=0.7,
             zorder=3,
         )
 
+        # -----------------------------------------------------
+        # Weighted overall-period ratio by Paint Code
+        # -----------------------------------------------------
+        overall_rows = []
+
+        for paint_code, group_df in chart_df.groupby(
+            "Paint_Code",
+            sort=False,
+        ):
+            total_paint = float(
+                pd.to_numeric(
+                    group_df["Total_Paint_kg"],
+                    errors="coerce",
+                ).fillna(0).sum()
+            )
+            total_solvent = float(
+                pd.to_numeric(
+                    group_df["Total_Solvent_kg"],
+                    errors="coerce",
+                ).fillna(0).sum()
+            )
+
+            base_paint = total_paint - total_solvent
+            overall_ratio = (
+                total_solvent / base_paint * 100
+                if base_paint > 0
+                else np.nan
+            )
+
+            group_indices = group_df.index.to_numpy(dtype=float)
+            group_center = float(group_indices.mean())
+
+            overall_rows.append(
+                {
+                    "Paint_Code": paint_code,
+                    "X_Center": group_center,
+                    "Overall_Ratio": overall_ratio,
+                }
+            )
+
+        overall_df = pd.DataFrame(overall_rows)
+
         ax2 = ax1.twinx()
         ax2.plot(
-            x,
-            ratio_values,
+            overall_df["X_Center"],
+            overall_df["Overall_Ratio"],
             marker="o",
-            markersize=6,
+            markersize=6.5,
             linewidth=2.4,
-            color="#10A9E2",
-            label="Solvent Ratio (%)",
-            zorder=5,
+            color="#0F766E",
+            label="Overall Period Ratio (%)",
+            zorder=6,
         )
 
-        max_weight = max(float(max(paint_values.max(), solvent_values.max())), 1.0)
-        max_ratio = max(float(ratio_values.max()), 1.0)
+        max_weight = max(
+            float(
+                max(
+                    paint_values.max(),
+                    solvent_values.max(),
+                )
+            ),
+            1.0,
+        )
 
-        weight_upper = max_weight * 1.24
-        ratio_upper = max(5.0, max_ratio * 1.42)
+        ratio_values = pd.to_numeric(
+            overall_df["Overall_Ratio"],
+            errors="coerce",
+        )
+        max_ratio = max(
+            float(ratio_values.max())
+            if ratio_values.notna().any()
+            else 1.0,
+            1.0,
+        )
 
-        ax1.set_ylim(0, weight_upper)
-        ax2.set_ylim(0, ratio_upper)
+        ax1.set_ylim(0, max_weight * 1.28)
+        ax2.set_ylim(0, max(5.0, max_ratio * 1.30))
 
-        # ---------------------------------------------------------
-        # PAINT LABELS
-        # Place all paint values inside the blue bars using black text
-        # on a white background box. This remains readable in Word/PDF
-        # and avoids blending into the blue bar.
-        # ---------------------------------------------------------
+        # -----------------------------------------------------
+        # Display every non-zero Paint value.
+        # Tall bars: label inside. Short bars: label above.
+        # -----------------------------------------------------
         for bar in paint_bars:
             value = float(bar.get_height())
-            x_center = bar.get_x() + bar.get_width() / 2
 
-            if value >= max_weight * 0.12:
-                label_y = value - max(value * 0.08, max_weight * 0.018)
+            if value <= 0:
+                continue
+
+            x_center = (
+                bar.get_x()
+                + bar.get_width() / 2
+            )
+
+            if value >= max_weight * 0.10:
+                label_y = value - max(
+                    value * 0.06,
+                    max_weight * 0.012,
+                )
                 ax1.annotate(
                     f"{value:,.0f}",
                     xy=(x_center, label_y),
@@ -358,134 +459,187 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
                     textcoords="offset points",
                     ha="center",
                     va="top",
-                    fontsize=8.0,
+                    fontsize=7.6,
                     color="black",
                     fontweight="bold",
-                    rotation=0,
                     bbox=dict(
-                        boxstyle="round,pad=0.16",
+                        boxstyle="round,pad=0.12",
                         facecolor="white",
                         edgecolor="none",
-                        alpha=0.92,
+                        alpha=0.90,
                     ),
                     clip_on=True,
-                    zorder=7,
+                    zorder=8,
                 )
             else:
                 ax1.annotate(
                     f"{value:,.0f}",
                     xy=(x_center, value),
-                    xytext=(0, 5),
+                    xytext=(0, 4),
                     textcoords="offset points",
                     ha="center",
                     va="bottom",
-                    fontsize=8.0,
+                    fontsize=7.5,
                     color="black",
-                    bbox=dict(
-                        boxstyle="round,pad=0.14",
-                        facecolor="white",
-                        edgecolor="none",
-                        alpha=0.92,
-                    ),
+                    fontweight="bold",
                     clip_on=False,
-                    zorder=7,
+                    zorder=8,
                 )
 
-        # ---------------------------------------------------------
-        # SOLVENT LABELS
-        # ---------------------------------------------------------
+        # -----------------------------------------------------
+        # Display every non-zero Solvent value.
+        # Never print 0 labels.
+        # -----------------------------------------------------
         for bar in solvent_bars:
             value = float(bar.get_height())
-            x_center = bar.get_x() + bar.get_width() / 2
+
+            if value <= 0:
+                continue
+
+            x_center = (
+                bar.get_x()
+                + bar.get_width() / 2
+            )
 
             ax1.annotate(
                 f"{value:,.0f}",
                 xy=(x_center, value),
-                xytext=(0, 5),
+                xytext=(0, 4),
                 textcoords="offset points",
                 ha="center",
                 va="bottom",
-                fontsize=8.0,
-                color="black",
+                fontsize=7.2,
+                color="#6B4A00",
                 clip_on=False,
-                zorder=6,
-            )
-
-        # ---------------------------------------------------------
-        # RATIO LABELS
-        # When yearly data are present, show only the latest available
-        # year for each paint code. All other values remain visible in
-        # the interactive app and detail table.
-        # ---------------------------------------------------------
-        label_indices = list(range(len(chart_df)))
-        if "Analysis_Year" in chart_df.columns:
-            temp_label_df = chart_df.copy()
-            temp_label_df["_Year_Number"] = pd.to_numeric(
-                temp_label_df["Analysis_Year"], errors="coerce"
-            )
-            label_indices = (
-                temp_label_df
-                .sort_values(["Paint_Code", "_Year_Number"])
-                .groupby("Paint_Code", dropna=False)
-                .tail(1)
-                .index
-                .tolist()
-            )
-
-        for label_rank, i in enumerate(label_indices):
-            ratio = ratio_values.iloc[i]
-            if pd.isna(ratio):
-                continue
-
-            x_offset = -7 if label_rank % 2 == 0 else 7
-            y_offset = 15 if label_rank % 2 == 0 else -18
-            va = "bottom" if y_offset > 0 else "top"
-
-            ax2.annotate(
-                f"{ratio:.2f}%",
-                xy=(x[i], ratio),
-                xytext=(x_offset, y_offset),
-                textcoords="offset points",
-                ha="center",
-                va=va,
-                fontsize=8.5,
-                fontweight="bold",
-                color="black",
-                bbox=dict(
-                    boxstyle="round,pad=0.18",
-                    facecolor="white",
-                    edgecolor="none",
-                    alpha=0.96,
-                ),
-                annotation_clip=False,
                 zorder=8,
             )
 
-        ax1.set_xticks(x)
-        if "Analysis_Year" in chart_df.columns:
-            x_tick_labels = [
-                f"{paint_code}\n{year_value}"
-                for paint_code, year_value in zip(
-                    chart_df["Paint_Code"].astype(str),
-                    chart_df["Analysis_Year"].astype(str),
-                )
-            ]
-        else:
-            x_tick_labels = chart_df["Paint_Code"].astype(str).tolist()
+        # -----------------------------------------------------
+        # Overall-ratio labels: alternate above/below so labels
+        # remain readable in Word.
+        # -----------------------------------------------------
+        for index, row in overall_df.iterrows():
+            ratio = row["Overall_Ratio"]
 
+            if pd.isna(ratio):
+                continue
+
+            y_offset = 12 if index % 2 == 0 else -15
+            vertical_alignment = (
+                "bottom" if y_offset > 0 else "top"
+            )
+
+            ax2.annotate(
+                f"{ratio:.2f}%",
+                xy=(row["X_Center"], ratio),
+                xytext=(0, y_offset),
+                textcoords="offset points",
+                ha="center",
+                va=vertical_alignment,
+                fontsize=8.2,
+                fontweight="bold",
+                color="#0F5F59",
+                bbox=dict(
+                    boxstyle="round,pad=0.14",
+                    facecolor="white",
+                    edgecolor="none",
+                    alpha=0.94,
+                ),
+                annotation_clip=False,
+                zorder=9,
+            )
+
+        # -----------------------------------------------------
+        # Two-level x-axis
+        # First level: year at every annual position.
+        # Second level: Paint Code centered under its year group.
+        # -----------------------------------------------------
+        ax1.set_xticks(x)
         ax1.set_xticklabels(
-            x_tick_labels,
-            fontsize=8.0 if len(chart_df) > 15 else 8.8,
+            chart_df["Analysis_Year"].tolist(),
+            fontsize=7.8,
             color="black",
             rotation=0,
         )
-        ax1.set_xlabel("Paint Code", fontsize=11, color="black", labelpad=10)
-        ax1.set_ylabel("Weight (kg)", fontsize=11, color="black")
-        ax2.set_ylabel("Solvent Ratio (%)", fontsize=11, color="black")
 
-        ax1.grid(axis="y", color="#E5E7EB", linewidth=0.8, zorder=1)
-        ax1.tick_params(axis="both", colors="black", labelsize=9.5)
-        ax2.tick_params(axis="y", colors="black", labelsize=9.5)
+        xaxis_transform = blended_transform_factory(
+            ax1.transData,
+            ax1.transAxes,
+        )
+
+        for group_index, (
+            paint_code,
+            group_df,
+        ) in enumerate(
+            chart_df.groupby(
+                "Paint_Code",
+                sort=False,
+            )
+        ):
+            group_positions = group_df.index.to_numpy(
+                dtype=float
+            )
+            group_center = float(group_positions.mean())
+
+            ax1.text(
+                group_center,
+                -0.145,
+                str(paint_code),
+                transform=xaxis_transform,
+                ha="center",
+                va="top",
+                fontsize=7.7,
+                color="black",
+                clip_on=False,
+            )
+
+            if group_index > 0:
+                separator_x = (
+                    float(group_positions.min())
+                    - 0.5
+                )
+                ax1.axvline(
+                    separator_x,
+                    ymin=-0.08,
+                    ymax=0.0,
+                    color="#9CA3AF",
+                    linewidth=0.7,
+                    clip_on=False,
+                )
+
+        ax1.set_xlabel(
+            "Paint Code / Analysis Year",
+            fontsize=10.5,
+            color="black",
+            labelpad=34,
+        )
+        ax1.set_ylabel(
+            "Weight (kg)",
+            fontsize=10.5,
+            color="black",
+        )
+        ax2.set_ylabel(
+            "Solvent Ratio (%)",
+            fontsize=10.5,
+            color="black",
+        )
+
+        ax1.grid(
+            axis="y",
+            color="#E5E7EB",
+            linewidth=0.8,
+            zorder=1,
+        )
+        ax1.tick_params(
+            axis="both",
+            colors="black",
+            labelsize=8.8,
+        )
+        ax2.tick_params(
+            axis="y",
+            colors="black",
+            labelsize=8.8,
+        )
         ax1.set_facecolor("white")
 
         for spine in ax1.spines.values():
@@ -499,35 +653,47 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
         ax2.spines["left"].set_visible(False)
         ax2.spines["bottom"].set_visible(False)
 
-        handles1, labels1 = ax1.get_legend_handles_labels()
-        handles2, labels2 = ax2.get_legend_handles_labels()
+        handles1, labels1 = (
+            ax1.get_legend_handles_labels()
+        )
+        handles2, labels2 = (
+            ax2.get_legend_handles_labels()
+        )
+
         legend = ax1.legend(
             handles1 + handles2,
             labels1 + labels2,
             loc="upper center",
-            bbox_to_anchor=(0.5, 1.13),
+            bbox_to_anchor=(0.5, 1.12),
             ncol=3,
             frameon=False,
-            fontsize=9.5,
+            fontsize=9.0,
         )
-        for txt in legend.get_texts():
-            txt.set_color("black")
+
+        for legend_text in legend.get_texts():
+            legend_text.set_color("black")
 
     fig.patch.set_facecolor("white")
-    fig.subplots_adjust(left=0.08, right=0.92, bottom=0.16, top=0.86)
+    fig.subplots_adjust(
+        left=0.075,
+        right=0.92,
+        bottom=0.25,
+        top=0.84,
+    )
 
-    buf = io.BytesIO()
+    buffer = io.BytesIO()
     fig.savefig(
-        buf,
+        buffer,
         format="png",
         bbox_inches="tight",
         facecolor="white",
         dpi=220,
-        pad_inches=0.12,
+        pad_inches=0.14,
     )
     plt.close(fig)
-    buf.seek(0)
-    return buf
+    buffer.seek(0)
+    return buffer
+
 
 def create_viscosity_history_png(chart_df):
     """Create the Tab 2 dumbbell viscosity chart for Word export."""
@@ -2613,7 +2779,7 @@ with export_col1:
                     figure_title = doc.add_paragraph()
                     figure_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     figure_title_run = figure_title.add_run(
-                        "Figure 1. Paint & Solvent Usage vs. Solvent Ratio by Year"
+                        "Figure 1. Annual Paint & Solvent Usage with Overall Period Solvent Ratio"
                     )
                     figure_title_run.bold = True
                     figure_title_run.font.size = Pt(11)
