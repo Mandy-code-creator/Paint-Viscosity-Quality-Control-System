@@ -1088,6 +1088,7 @@ with tab_ranking:
 
             # One ratio line per year avoids drawing a misleading connection
             # from the final year of one paint code to the first year of the next.
+            # Labels are added separately and selectively to prevent overlap.
             ratio_line_colors = [
                 "#00AEEF", "#2563EB", "#7C3AED", "#059669",
                 "#DC2626", "#EA580C", "#0891B2", "#4F46E5",
@@ -1096,42 +1097,60 @@ with tab_ranking:
                 summary_df["Analysis_Year"].astype(str).unique().tolist(),
                 key=lambda value: int(value),
             )
+            latest_year = max(available_years, key=int)
+
+            # Presentation rules:
+            # 1. Keep every value available in hover.
+            # 2. Show all labels for the latest year.
+            # 3. For prior years, show labels only when the point is materially
+            #    different from the latest-year value for the same paint code.
+            # 4. Alternate label positions by year to reduce collisions.
+            LABEL_DIFFERENCE_THRESHOLD = 0.75
+            latest_ratio_by_code = (
+                summary_df[
+                    summary_df["Analysis_Year"].astype(str) == str(latest_year)
+                ]
+                .set_index("Paint_Code")["Weighted_Ratio_Percent"]
+                .to_dict()
+            )
+
+            label_position_cycle = [
+                "top center",
+                "bottom center",
+                "top left",
+                "bottom right",
+            ]
 
             for year_index, year_value in enumerate(available_years):
                 year_df = summary_df[
                     summary_df["Analysis_Year"].astype(str) == str(year_value)
                 ].copy()
-                year_df = year_df.sort_values("_Paint_Order")
+                year_df = year_df.sort_values("_Paint_Order").reset_index(drop=True)
 
                 year_x = [
                     year_df["Paint_Code"].astype(str).tolist(),
                     year_df["Analysis_Year"].astype(str).tolist(),
                 ]
+                line_color = ratio_line_colors[
+                    year_index % len(ratio_line_colors)
+                ]
 
+                # Draw only lines and markers. Full values remain available on hover.
                 fig_dual.add_trace(
                     go.Scatter(
                         x=year_x,
                         y=year_df["Weighted_Ratio_Percent"],
                         name=f"Solvent Ratio {year_value} (%)",
-                        mode="lines+markers+text",
+                        mode="lines+markers",
                         line=dict(
-                            color=ratio_line_colors[
-                                year_index % len(ratio_line_colors)
-                            ],
-                            width=2.6,
+                            color=line_color,
+                            width=2.5,
                         ),
                         marker=dict(
                             size=8,
-                            color=ratio_line_colors[
-                                year_index % len(ratio_line_colors)
-                            ],
+                            color=line_color,
                             line=dict(width=0.8, color="white"),
                         ),
-                        text=year_df["Weighted_Ratio_Percent"].map(
-                            lambda value: f"{value:.2f}%" if pd.notna(value) else ""
-                        ),
-                        textposition="top center",
-                        textfont=dict(size=9, color="black"),
                         yaxis="y2",
                         customdata=np.column_stack([
                             year_df["Paint_Code"],
@@ -1147,6 +1166,52 @@ with tab_ranking:
                             "Solvent Ratio: %{y:.2f}%"
                             "<extra></extra>"
                         ),
+                    )
+                )
+
+                # Add only useful labels rather than labeling every point.
+                label_text = []
+                for _, row in year_df.iterrows():
+                    ratio_value = pd.to_numeric(
+                        row["Weighted_Ratio_Percent"], errors="coerce"
+                    )
+                    paint_code = str(row["Paint_Code"])
+
+                    if pd.isna(ratio_value):
+                        label_text.append("")
+                        continue
+
+                    if str(year_value) == str(latest_year):
+                        show_label = True
+                    else:
+                        latest_ratio = pd.to_numeric(
+                            latest_ratio_by_code.get(paint_code, np.nan),
+                            errors="coerce",
+                        )
+                        show_label = (
+                            pd.isna(latest_ratio)
+                            or abs(float(ratio_value) - float(latest_ratio))
+                            >= LABEL_DIFFERENCE_THRESHOLD
+                        )
+
+                    label_text.append(
+                        f"{float(ratio_value):.2f}%" if show_label else ""
+                    )
+
+                fig_dual.add_trace(
+                    go.Scatter(
+                        x=year_x,
+                        y=year_df["Weighted_Ratio_Percent"],
+                        mode="text",
+                        text=label_text,
+                        textposition=label_position_cycle[
+                            year_index % len(label_position_cycle)
+                        ],
+                        textfont=dict(size=9, color="#111827"),
+                        yaxis="y2",
+                        showlegend=False,
+                        hoverinfo="skip",
+                        cliponaxis=False,
                     )
                 )
 
@@ -1204,15 +1269,16 @@ with tab_ranking:
                 legend=dict(
                     orientation="h",
                     yanchor="bottom",
-                    y=1.03,
-                    xanchor="right",
-                    x=1,
+                    y=1.045,
+                    xanchor="center",
+                    x=0.5,
+                    font=dict(size=10),
                 ),
                 barmode="group",
                 bargap=0.20,
                 bargroupgap=0.08,
-                height=700,
-                margin=dict(l=80, r=90, t=145, b=110),
+                height=720,
+                margin=dict(l=80, r=90, t=165, b=120),
                 plot_bgcolor="white",
                 paper_bgcolor="white",
                 font=dict(color="black"),
