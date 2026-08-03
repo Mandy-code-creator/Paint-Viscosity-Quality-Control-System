@@ -997,13 +997,13 @@ with tab3:
 
 
 # =========================================================
-# TAB 4: MASTER SHOP FLOOR SOP (V3.0 ROBUST SAFE-DEMAND MODEL)
+# TAB 4: MASTER SHOP FLOOR SOP (V4.0 MONOTONIC SAFE-DEMAND MODEL)
 # =========================================================
 with tab4:
-    st.markdown("### 🖨️ 現場 SOP (V3.0 穩健安全需求模型)")
+    st.markdown("### 🖨️ 現場 SOP (V4.0 單調安全需求模型)")
 
     st.info(
-        "V3.0 將『模型估算需求』與『現場可執行建議』分開呈現。"
+        "V4.0 將『模型估算需求』與『現場可執行建議』分開呈現，並加入目標黏度單調性控制。"
         "模型估算值僅供工程判斷；現場 SOP 的安全總需求與剩餘可加比例，"
         "均不得超過累積添加警戒比例。若模型需求超過停止比例，系統會直接標示為不適合自動稀釋。"
     )
@@ -1038,7 +1038,7 @@ with tab4:
         temp_df["Worker_Viscosity_Zone"] = temp_df["黏度(秒)"].apply(worker_zone)
         high_visc_mask = temp_df["黏度(秒)"] > 130
         temp_df.loc[high_visc_mask, "Worker_Viscosity_Zone"] = (
-            "130-" + system_max_visc.loc[high_visc_mask].round(1).astype(str)
+            "130-" + system_max_visc.loc[high_visc_mask].round(0).astype("Int64").astype(str)
         )
         return temp_df
 
@@ -1111,8 +1111,23 @@ with tab4:
     sat_df = pd.DataFrame(saturation_summary)
 
     # -----------------------------------------------------
-    # 4. 依「初始區間 + 目標區間」建立穩健參考統計
+    # 4. 建立統一參考效率與目標區間統計
     # -----------------------------------------------------
+    # 同一個「樹脂 × 位置 × 供應商 × 稀釋劑 × 初始黏度區間」
+    # 一律使用相同的代表稀釋效率，避免不同目標區間因樣本波動
+    # 出現「降黏較少，估算添加比例反而較高」的不合理結果。
+    zone_reference = (
+        matrix_df.groupby(group_cols_initial, observed=False)
+        .agg(
+            Zone_Ref_Sensitivity=("Sensitivity", "median"),
+            Zone_Sensitivity_P25=("Sensitivity", lambda x: x.quantile(0.25)),
+            Zone_Sensitivity_P75=("Sensitivity", lambda x: x.quantile(0.75)),
+            Zone_Adjustment_Records=("塗料批號", "size"),
+            Zone_Paint_Batches=("塗料批號", "nunique"),
+        )
+        .reset_index()
+    )
+
     group_cols_target = [
         "Resin",
         "Position_UI",
@@ -1127,7 +1142,6 @@ with tab4:
         .agg(
             Adjustment_Records=("塗料批號", "size"),
             Paint_Batches=("塗料批號", "nunique"),
-            Ref_Sensitivity=("Sensitivity", "median"),
             Historical_Ratio_Median=("Solvent_Ratio_Percent", "median"),
             Historical_Ratio_P25=(
                 "Solvent_Ratio_Percent",
@@ -1143,6 +1157,12 @@ with tab4:
             Temperature_P75=("溫度", lambda x: x.quantile(0.75)),
         )
         .reset_index()
+    )
+
+    worker_sop = worker_sop.merge(
+        zone_reference,
+        on=group_cols_initial,
+        how="left",
     )
 
     worker_sop = worker_sop[
@@ -1197,13 +1217,13 @@ with tab4:
 
     worker_sop = worker_sop[
         (worker_sop["Expected_Delta_V"] > 0)
-        & (worker_sop["Ref_Sensitivity"] > 0)
+        & (worker_sop["Zone_Ref_Sensitivity"] > 0)
     ].copy()
 
-    # 物理模型：預計降黏幅度 ÷ 歷史中位稀釋效率
+    # 物理模型：預計降黏幅度 ÷ 同一初始黏度區間的統一代表效率
     worker_sop["Physics_Ratio"] = (
         worker_sop["Expected_Delta_V"]
-        / worker_sop["Ref_Sensitivity"].replace(0, np.nan)
+        / worker_sop["Zone_Ref_Sensitivity"].replace(0, np.nan)
     )
 
     # 歷史資料權重：5筆為25%，10筆為50%，16筆以上最高80%。
@@ -1234,6 +1254,34 @@ with tab4:
         worker_sop["Model_Estimated_Total_Ratio"]
         .replace([np.inf, -np.inf], np.nan)
         .clip(lower=0)
+    )
+
+    # -----------------------------------------------------
+    # 5.1 單調性控制
+    # -----------------------------------------------------
+    # 在其他條件相同時，目標黏度越低，所需降黏幅度越大，
+    # 模型估算需求比例不得反而降低。
+    monotonic_group_cols = group_cols_initial.copy()
+    worker_sop["_Target_Order"] = worker_sop["Target_Viscosity_Zone"].apply(
+        get_final_zone_order
+    )
+    worker_sop = worker_sop.sort_values(
+        monotonic_group_cols + ["_Target_Order"],
+        ascending=[True, True, True, True, True, False],
+        kind="stable",
+    ).copy()
+
+    worker_sop["Model_Ratio_Before_Monotonic"] = worker_sop[
+        "Model_Estimated_Total_Ratio"
+    ]
+    worker_sop["Model_Estimated_Total_Ratio"] = (
+        worker_sop.groupby(monotonic_group_cols, dropna=False)[
+            "Model_Estimated_Total_Ratio"
+        ].cummax()
+    )
+    worker_sop["Monotonic_Adjusted"] = (
+        worker_sop["Model_Estimated_Total_Ratio"]
+        > worker_sop["Model_Ratio_Before_Monotonic"] + 1e-9
     )
 
     # 合併警戒與停止比例
@@ -1333,6 +1381,21 @@ with tab4:
         axis=1,
     )
 
+    # 再次套用單調性檢查：目標黏度越低，第一次建議比例不得降低。
+    worker_sop["First_Add_Ratio"] = (
+        worker_sop.groupby(monotonic_group_cols, dropna=False)[
+            "First_Add_Ratio"
+        ].cummax()
+    )
+    worker_sop["First_Add_Ratio"] = np.minimum(
+        worker_sop["First_Add_Ratio"],
+        worker_sop["Saturation_Warning_Ratio"] * 0.80,
+    )
+    worker_sop["First_Add_Ratio"] = np.minimum(
+        worker_sop["First_Add_Ratio"],
+        worker_sop["Safe_Total_Ratio"],
+    )
+
     # 僅顯示警戒值以下仍可使用的安全空間，不再顯示理論剩餘需求。
     worker_sop["Safe_Remaining_Ratio"] = np.maximum(
         worker_sop["Safe_Total_Ratio"] - worker_sop["First_Add_Ratio"],
@@ -1343,7 +1406,7 @@ with tab4:
         lambda row: format_range(
             row["Final_Visc_Lower"],
             row["Final_Visc_Upper"],
-            decimals=1,
+            decimals=0,
         ),
         axis=1,
     )
@@ -1352,7 +1415,7 @@ with tab4:
         lambda row: format_range(
             row["Temperature_P25"],
             row["Temperature_P75"],
-            decimals=1,
+            decimals=0,
         ),
         axis=1,
     )
