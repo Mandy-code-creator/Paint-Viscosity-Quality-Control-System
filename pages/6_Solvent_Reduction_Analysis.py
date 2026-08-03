@@ -959,6 +959,28 @@ with tab_ranking:
         "solvent use, and weighted solvent ratio on one chart."
     )
 
+    # Label display is intentionally conservative.
+    # Hover always contains every value; visible labels are optional.
+    label_col1, label_col2 = st.columns([1.4, 2.6])
+    ratio_label_mode = label_col1.selectbox(
+        "Ratio Label Display",
+        [
+            "Hover Only (Recommended)",
+            "Latest Year - Top 3 Paint Codes",
+            "Latest Year - All Paint Codes",
+        ],
+        index=0,
+        key="tab1_ratio_label_mode",
+        help=(
+            "Hover Only gives the cleanest management chart. "
+            "Other options show only the latest available year, never every yearly point."
+        ),
+    )
+    label_col2.caption(
+        "All annual solvent-ratio values remain available in hover and in the table below. "
+        "Visible labels are limited to prevent overlapping text."
+    )
+
     ranking_source_df = filter_df.copy()
     ranking_source_df["Analysis_Year"] = pd.to_numeric(
         ranking_source_df["Analysis_Year"], errors="coerce"
@@ -1040,7 +1062,9 @@ with tab_ranking:
                     name="Paint (kg)",
                     marker_color="#5B8FF9",
                     yaxis="y1",
-                    text=summary_df["Total_Paint_kg"].map(lambda x: f"{x:,.0f}"),
+                    text=summary_df["Total_Paint_kg"].map(
+                        lambda x: f"{x:,.0f}" if pd.notna(x) and x >= summary_df["Total_Paint_kg"].max() * 0.18 else ""
+                    ),
                     textposition="inside",
                     insidetextanchor="end",
                     textfont=dict(size=9, color="#111827"),
@@ -1068,7 +1092,9 @@ with tab_ranking:
                     name="Solvent (kg)",
                     marker_color="#F6BD16",
                     yaxis="y1",
-                    text=summary_df["Total_Solvent_kg"].map(lambda x: f"{x:,.0f}"),
+                    text=summary_df["Total_Solvent_kg"].map(
+                        lambda x: f"{x:,.0f}" if pd.notna(x) and x >= summary_df["Total_Solvent_kg"].max() * 0.12 else ""
+                    ),
                     textposition="outside",
                     textfont=dict(size=9, color="#111827"),
                     customdata=np.column_stack([
@@ -1144,10 +1170,10 @@ with tab_ranking:
                 )
 
             # ---------------------------------------------------------
-            # ---------------------------------------------------------
-            # CLEAN LABEL LAYER (FIXED OVERLAP)
-            # Dùng annotations để tạo nền trắng (bgcolor) che các đường line,
-            # giúp nhãn tỷ lệ dung môi không bị đường kẻ cắt ngang.
+            # OPTIONAL CLEAN LABEL LAYER
+            # Default = hover only. This fully prevents label collision.
+            # When enabled, labels are restricted to the latest available
+            # year and are placed only on selected paint codes.
             # ---------------------------------------------------------
             latest_label_df = (
                 summary_df
@@ -1163,29 +1189,69 @@ with tab_ranking:
                 .reset_index(drop=True)
             )
 
-            for index, row in latest_label_df.iterrows():
-                val = row["Weighted_Ratio_Percent"]
-                if pd.isna(val):
-                    continue
-                
-                # So le nhãn lên/xuống để tránh bị đè nếu các điểm ở gần nhau
-                y_offset = 18 if index % 2 == 0 else -18
-                y_anchor = "bottom" if index % 2 == 0 else "top"
-                
-                fig_dual.add_annotation(
-                    x=[str(row["Paint_Code"]), str(row["Analysis_Year"])],
-                    y=val,
-                    yref="y2",
-                    text=f"<b>{val:.2f}%</b>",
-                    showarrow=False,
-                    yanchor=y_anchor,
-                    yshift=y_offset,
-                    font=dict(size=9.5, color="#111827"),
-                    bgcolor="rgba(255, 255, 255, 0.92)", # Nền trắng trong suốt che đường line
-                    bordercolor="#D1D5DB",
-                    borderwidth=1,
-                    borderpad=3
+            if ratio_label_mode == "Latest Year - Top 3 Paint Codes":
+                # Select Top 3 using total solvent consumption across all years.
+                top_label_codes = (
+                    top10_overall_df
+                    .sort_values("Total_Solvent_kg", ascending=False)
+                    .head(3)["Paint_Code"]
+                    .astype(str)
+                    .tolist()
                 )
+                label_df = latest_label_df[
+                    latest_label_df["Paint_Code"].astype(str).isin(top_label_codes)
+                ].copy()
+            elif ratio_label_mode == "Latest Year - All Paint Codes":
+                label_df = latest_label_df.copy()
+            else:
+                label_df = pd.DataFrame()
+
+            if not label_df.empty:
+                label_df = label_df.sort_values("_Paint_Order").reset_index(drop=True)
+
+                # Use four offset slots. Because only latest-year points are labelled,
+                # these offsets are sufficient without covering neighbouring values.
+                offset_slots = [
+                    (0, 18, "bottom"),
+                    (0, -20, "top"),
+                    (-10, 26, "bottom"),
+                    (10, -28, "top"),
+                ]
+
+                for label_index, row in label_df.iterrows():
+                    ratio_value = pd.to_numeric(
+                        row["Weighted_Ratio_Percent"], errors="coerce"
+                    )
+                    if pd.isna(ratio_value):
+                        continue
+
+                    x_shift, y_shift, y_anchor = offset_slots[
+                        label_index % len(offset_slots)
+                    ]
+
+                    fig_dual.add_annotation(
+                        x=[str(row["Paint_Code"]), str(row["Analysis_Year"])],
+                        y=float(ratio_value),
+                        xref="x",
+                        yref="y2",
+                        text=f"{float(ratio_value):.2f}%",
+                        showarrow=True,
+                        arrowhead=0,
+                        ax=x_shift,
+                        ay=-y_shift,
+                        xshift=0,
+                        yshift=0,
+                        xanchor="center",
+                        yanchor=y_anchor,
+                        font=dict(size=9, color="#111827"),
+                        bgcolor="rgba(255,255,255,0.97)",
+                        bordercolor="#9CA3AF",
+                        borderwidth=0.7,
+                        borderpad=2,
+                        arrowcolor="#9CA3AF",
+                        arrowwidth=0.7,
+                        opacity=0.98,
+                    )
 
             ratio_max = pd.to_numeric(
                 summary_df["Weighted_Ratio_Percent"], errors="coerce"
@@ -1251,12 +1317,12 @@ with tab_ranking:
                 barmode="group",
                 bargap=0.20,
                 bargroupgap=0.08,
-                height=720,
-                margin=dict(l=80, r=90, t=165, b=120),
+                height=760,
+                margin=dict(l=80, r=95, t=175, b=130),
                 plot_bgcolor="white",
                 paper_bgcolor="white",
                 font=dict(color="black"),
-                hovermode="closest",
+                hovermode="x unified",
                 uniformtext_minsize=8,
                 uniformtext_mode="hide",
             )
