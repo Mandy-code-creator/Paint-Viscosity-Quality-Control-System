@@ -265,38 +265,28 @@ def apply_professional_layout(fig, title_text=None, subtitle_text=None, height=N
 
 
 def create_top10_usage_ratio_png(summary_df, filter_details):
-    """Create a Word-export chart matching the Streamlit chart.
+    """Create a Word-export chart with clear Paint Code/year grouping.
 
-    Export rules:
-    1. Keep Paint and Solvent bars separately for every year.
-    2. Show every non-zero bar value.
-    3. Do not draw yearly solvent-ratio points.
-    4. Draw only one weighted overall-period ratio for each Paint Code.
-    5. Use a two-level x-axis: Year above Paint Code.
+    Design:
+    - Paint and Solvent remain separated by year.
+    - Extra spacing is inserted between Paint Codes.
+    - Each Paint Code group has a light background band.
+    - Every non-zero bar value is shown.
+    - Only the weighted overall-period solvent ratio is drawn.
     """
-    fig, ax1 = plt.subplots(figsize=(12.8, 6.8), dpi=180)
-
     if summary_df is None or summary_df.empty:
+        fig, ax1 = plt.subplots(figsize=(12.8, 6.8), dpi=180)
         ax1.text(
-            0.5,
-            0.5,
-            "No data available",
-            ha="center",
-            va="center",
-            fontsize=12,
-            color="black",
+            0.5, 0.5, "No data available",
+            ha="center", va="center",
+            fontsize=12, color="black",
         )
         ax1.set_axis_off()
     else:
         chart_df = summary_df.copy().reset_index(drop=True)
 
-        chart_df["Paint_Code"] = (
-            chart_df["Paint_Code"].astype(str)
-        )
-        chart_df["Analysis_Year"] = (
-            chart_df["Analysis_Year"].astype(str)
-        )
-
+        chart_df["Paint_Code"] = chart_df["Paint_Code"].astype(str)
+        chart_df["Analysis_Year"] = chart_df["Analysis_Year"].astype(str)
         chart_df["_Year_Number"] = pd.to_numeric(
             chart_df["Analysis_Year"],
             errors="coerce",
@@ -319,7 +309,55 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
             ["_Paint_Order", "_Year_Number"]
         ).reset_index(drop=True)
 
-        x = np.arange(len(chart_df), dtype=float)
+        # -----------------------------------------------------
+        # Build custom x positions:
+        # - wider spacing between years
+        # - clearly larger spacing between Paint Codes
+        # -----------------------------------------------------
+        year_step = 1.15
+        group_gap = 1.15
+
+        x_positions = []
+        group_meta = []
+        current_x = 0.0
+
+        for group_index, (paint_code, group_df) in enumerate(
+            chart_df.groupby("Paint_Code", sort=False)
+        ):
+            row_indices = group_df.index.tolist()
+            group_x = []
+
+            for local_index, row_index in enumerate(row_indices):
+                x_value = current_x + local_index * year_step
+                x_positions.append((row_index, x_value))
+                group_x.append(x_value)
+
+            group_meta.append(
+                {
+                    "Paint_Code": paint_code,
+                    "Start": min(group_x),
+                    "End": max(group_x),
+                    "Center": float(np.mean(group_x)),
+                    "Row_Indices": row_indices,
+                }
+            )
+
+            current_x = max(group_x) + year_step + group_gap
+
+        x_map = dict(x_positions)
+        chart_df["_X"] = chart_df.index.map(x_map).astype(float)
+        x = chart_df["_X"].to_numpy(dtype=float)
+
+        # Width grows with the number of annual positions.
+        figure_width = max(
+            13.5,
+            min(22.0, 0.58 * len(chart_df) + 5.5),
+        )
+        fig, ax1 = plt.subplots(
+            figsize=(figure_width, 7.2),
+            dpi=180,
+        )
+
         bar_width = 0.34
 
         paint_values = pd.to_numeric(
@@ -331,6 +369,16 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
             chart_df["Total_Solvent_kg"],
             errors="coerce",
         ).fillna(0)
+
+        # Alternating group bands make each Paint Code easy to identify.
+        for group_index, group in enumerate(group_meta):
+            if group_index % 2 == 0:
+                ax1.axvspan(
+                    group["Start"] - 0.52,
+                    group["End"] + 0.52,
+                    color="#F8FAFC",
+                    zorder=0,
+                )
 
         paint_bars = ax1.bar(
             x - bar_width / 2,
@@ -359,10 +407,12 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
         # -----------------------------------------------------
         overall_rows = []
 
-        for paint_code, group_df in chart_df.groupby(
-            "Paint_Code",
-            sort=False,
-        ):
+        for group in group_meta:
+            paint_code = group["Paint_Code"]
+            group_df = chart_df[
+                chart_df["Paint_Code"] == paint_code
+            ]
+
             total_paint = float(
                 pd.to_numeric(
                     group_df["Total_Paint_kg"],
@@ -383,13 +433,10 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
                 else np.nan
             )
 
-            group_indices = group_df.index.to_numpy(dtype=float)
-            group_center = float(group_indices.mean())
-
             overall_rows.append(
                 {
                     "Paint_Code": paint_code,
-                    "X_Center": group_center,
+                    "X_Center": group["Center"],
                     "Overall_Ratio": overall_ratio,
                 }
             )
@@ -409,12 +456,7 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
         )
 
         max_weight = max(
-            float(
-                max(
-                    paint_values.max(),
-                    solvent_values.max(),
-                )
-            ),
+            float(max(paint_values.max(), solvent_values.max())),
             1.0,
         )
 
@@ -429,44 +471,33 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
             1.0,
         )
 
-        ax1.set_ylim(0, max_weight * 1.28)
-        ax2.set_ylim(0, max(5.0, max_ratio * 1.30))
+        ax1.set_ylim(0, max_weight * 1.32)
+        ax2.set_ylim(0, max(5.0, max_ratio * 1.32))
 
-        # -----------------------------------------------------
-        # Display every non-zero Paint value.
-        # Tall bars: label inside. Short bars: label above.
-        # -----------------------------------------------------
+        # Paint labels: inside tall bars, above short bars.
         for bar in paint_bars:
             value = float(bar.get_height())
-
             if value <= 0:
                 continue
 
-            x_center = (
-                bar.get_x()
-                + bar.get_width() / 2
-            )
+            x_center = bar.get_x() + bar.get_width() / 2
 
-            if value >= max_weight * 0.10:
-                label_y = value - max(
-                    value * 0.06,
-                    max_weight * 0.012,
-                )
+            if value >= max_weight * 0.12:
                 ax1.annotate(
                     f"{value:,.0f}",
-                    xy=(x_center, label_y),
-                    xytext=(0, 0),
+                    xy=(x_center, value),
+                    xytext=(0, -10),
                     textcoords="offset points",
                     ha="center",
                     va="top",
-                    fontsize=7.6,
+                    fontsize=7.5,
                     color="black",
                     fontweight="bold",
                     bbox=dict(
-                        boxstyle="round,pad=0.12",
+                        boxstyle="round,pad=0.10",
                         facecolor="white",
                         edgecolor="none",
-                        alpha=0.90,
+                        alpha=0.88,
                     ),
                     clip_on=True,
                     zorder=8,
@@ -479,28 +510,20 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
                     textcoords="offset points",
                     ha="center",
                     va="bottom",
-                    fontsize=7.5,
+                    fontsize=7.2,
                     color="black",
                     fontweight="bold",
                     clip_on=False,
                     zorder=8,
                 )
 
-        # -----------------------------------------------------
-        # Display every non-zero Solvent value.
-        # Never print 0 labels.
-        # -----------------------------------------------------
+        # Solvent labels: above each non-zero bar.
         for bar in solvent_bars:
             value = float(bar.get_height())
-
             if value <= 0:
                 continue
 
-            x_center = (
-                bar.get_x()
-                + bar.get_width() / 2
-            )
-
+            x_center = bar.get_x() + bar.get_width() / 2
             ax1.annotate(
                 f"{value:,.0f}",
                 xy=(x_center, value),
@@ -508,23 +531,19 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
                 textcoords="offset points",
                 ha="center",
                 va="bottom",
-                fontsize=7.2,
+                fontsize=7.0,
                 color="#6B4A00",
                 clip_on=False,
                 zorder=8,
             )
 
-        # -----------------------------------------------------
-        # Overall-ratio labels: alternate above/below so labels
-        # remain readable in Word.
-        # -----------------------------------------------------
+        # One ratio label per Paint Code; alternate vertically.
         for index, row in overall_df.iterrows():
             ratio = row["Overall_Ratio"]
-
             if pd.isna(ratio):
                 continue
 
-            y_offset = 12 if index % 2 == 0 else -15
+            y_offset = 13 if index % 2 == 0 else -17
             vertical_alignment = (
                 "bottom" if y_offset > 0 else "top"
             )
@@ -536,23 +555,23 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
                 textcoords="offset points",
                 ha="center",
                 va=vertical_alignment,
-                fontsize=8.2,
+                fontsize=8.0,
                 fontweight="bold",
                 color="#0F5F59",
                 bbox=dict(
                     boxstyle="round,pad=0.14",
                     facecolor="white",
                     edgecolor="none",
-                    alpha=0.94,
+                    alpha=0.95,
                 ),
                 annotation_clip=False,
                 zorder=9,
             )
 
         # -----------------------------------------------------
-        # Two-level x-axis
-        # First level: year at every annual position.
-        # Second level: Paint Code centered under its year group.
+        # Two-level x-axis:
+        # Year at each annual position;
+        # Paint Code centered under its complete year group.
         # -----------------------------------------------------
         ax1.set_xticks(x)
         ax1.set_xticklabels(
@@ -561,57 +580,61 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
             color="black",
             rotation=0,
         )
+        ax1.tick_params(axis="x", pad=4)
 
         xaxis_transform = blended_transform_factory(
             ax1.transData,
             ax1.transAxes,
         )
 
-        for group_index, (
-            paint_code,
-            group_df,
-        ) in enumerate(
-            chart_df.groupby(
-                "Paint_Code",
-                sort=False,
-            )
-        ):
-            group_positions = group_df.index.to_numpy(
-                dtype=float
-            )
-            group_center = float(group_positions.mean())
-
+        for group_index, group in enumerate(group_meta):
             ax1.text(
-                group_center,
-                -0.145,
-                str(paint_code),
+                group["Center"],
+                -0.155,
+                group["Paint_Code"],
                 transform=xaxis_transform,
                 ha="center",
                 va="top",
-                fontsize=7.7,
+                fontsize=7.8,
+                fontweight="bold",
                 color="black",
                 clip_on=False,
             )
 
-            if group_index > 0:
+            if group_index < len(group_meta) - 1:
+                next_group = group_meta[group_index + 1]
                 separator_x = (
-                    float(group_positions.min())
-                    - 0.5
-                )
+                    group["End"] + next_group["Start"]
+                ) / 2
+
                 ax1.axvline(
                     separator_x,
-                    ymin=-0.08,
-                    ymax=0.0,
-                    color="#9CA3AF",
-                    linewidth=0.7,
+                    ymin=-0.095,
+                    ymax=1.0,
+                    color="#CBD5E1",
+                    linewidth=0.8,
+                    linestyle="-",
+                    zorder=1,
                     clip_on=False,
                 )
 
+        # Add a small "Year" caption directly below year labels.
+        ax1.text(
+            0.5,
+            -0.095,
+            "Analysis Year",
+            transform=ax1.transAxes,
+            ha="center",
+            va="top",
+            fontsize=8.4,
+            color="#475569",
+        )
+
         ax1.set_xlabel(
-            "Paint Code / Analysis Year",
+            "Paint Code",
             fontsize=10.5,
             color="black",
-            labelpad=34,
+            labelpad=40,
         )
         ax1.set_ylabel(
             "Weight (kg)",
@@ -631,7 +654,7 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
             zorder=1,
         )
         ax1.tick_params(
-            axis="both",
+            axis="y",
             colors="black",
             labelsize=8.8,
         )
@@ -653,12 +676,8 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
         ax2.spines["left"].set_visible(False)
         ax2.spines["bottom"].set_visible(False)
 
-        handles1, labels1 = (
-            ax1.get_legend_handles_labels()
-        )
-        handles2, labels2 = (
-            ax2.get_legend_handles_labels()
-        )
+        handles1, labels1 = ax1.get_legend_handles_labels()
+        handles2, labels2 = ax2.get_legend_handles_labels()
 
         legend = ax1.legend(
             handles1 + handles2,
@@ -673,11 +692,16 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
         for legend_text in legend.get_texts():
             legend_text.set_color("black")
 
+        ax1.set_xlim(
+            group_meta[0]["Start"] - 0.75,
+            group_meta[-1]["End"] + 0.75,
+        )
+
     fig.patch.set_facecolor("white")
     fig.subplots_adjust(
-        left=0.075,
-        right=0.92,
-        bottom=0.25,
+        left=0.06,
+        right=0.93,
+        bottom=0.27,
         top=0.84,
     )
 
@@ -688,7 +712,7 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
         bbox_inches="tight",
         facecolor="white",
         dpi=220,
-        pad_inches=0.14,
+        pad_inches=0.16,
     )
     plt.close(fig)
     buffer.seek(0)
