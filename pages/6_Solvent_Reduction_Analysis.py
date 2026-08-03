@@ -104,10 +104,11 @@ else:
     date_part = pd.Series(pd.NaT, index=df.index)
     df["_Analysis_Date"] = pd.NaT
 
-# Year used for the multi-year comparison chart.
-# Keep it nullable so records with missing dates remain available in other tabs,
-# while Tab 1 can clearly exclude them from year-by-year comparison.
-df["Analysis_Year"] = df["_Analysis_Date"].dt.year.astype("Int64")
+df["Analysis_Year"] = np.where(
+    df["_Analysis_Date"].notna(),
+    df["_Analysis_Date"].dt.year.astype("Int64").astype(str),
+    "Unknown",
+)
 
 if time_col:
     time_text = (
@@ -265,94 +266,37 @@ def apply_professional_layout(fig, title_text=None, subtitle_text=None, height=N
 
 
 def create_top10_usage_ratio_png(summary_df, filter_details):
-    """Create a clear management chart for Word export.
+    """Create the Top 10 usage/ratio chart for Word export with clean labels.
 
-    The app can still show annual detail, but the Word chart is simplified
-    to one Paint bar, one Solvent bar and one overall-period ratio point
-    per Paint Code so the text remains large and readable on A4.
+    Layout rules:
+    1. Paint values are placed inside tall blue bars.
+    2. Solvent values stay above the short yellow bars.
+    3. Ratio labels are placed above the line points with alternating
+       horizontal offsets and white backgrounds.
+    4. Extra top space is reserved so labels never touch the chart border.
     """
-    fig, ax1 = plt.subplots(figsize=(13.2, 7.2), dpi=220)
+    fig, ax1 = plt.subplots(figsize=(11.2, 6.3), dpi=180)
 
     if summary_df is None or summary_df.empty:
         ax1.text(
-            0.5,
-            0.5,
-            "No data available",
-            ha="center",
-            va="center",
-            fontsize=16,
-            color="black",
+            0.5, 0.5, "No data available",
+            ha="center", va="center", fontsize=12, color="black"
         )
         ax1.set_axis_off()
-
     else:
-        chart_df = summary_df.copy()
-        chart_df["Paint_Code"] = chart_df["Paint_Code"].astype(str)
-
-        # -----------------------------------------------------
-        # Aggregate all selected years into one row per Paint Code.
-        # This keeps the Word chart large, clean and management-friendly.
-        # -----------------------------------------------------
-        overall_df = (
-            chart_df
-            .groupby("Paint_Code", as_index=False)
-            .agg(
-                Total_Paint_kg=(
-                    "Total_Paint_kg",
-                    "sum",
-                ),
-                Total_Solvent_kg=(
-                    "Total_Solvent_kg",
-                    "sum",
-                ),
-            )
-        )
-
-        overall_df["Base_Paint_kg"] = (
-            overall_df["Total_Paint_kg"]
-            - overall_df["Total_Solvent_kg"]
-        )
-
-        overall_df["Overall_Ratio_Percent"] = np.where(
-            overall_df["Base_Paint_kg"] > 0,
-            (
-                overall_df["Total_Solvent_kg"]
-                / overall_df["Base_Paint_kg"]
-                * 100
-            ),
-            np.nan,
-        )
-
-        # Keep the existing Paint Code order from summary_df.
-        paint_order = (
-            chart_df["Paint_Code"]
-            .drop_duplicates()
-            .tolist()
-        )
-        order_map = {
-            code: index
-            for index, code in enumerate(paint_order)
-        }
-
-        overall_df["_Order"] = (
-            overall_df["Paint_Code"].map(order_map)
-        )
-        overall_df = overall_df.sort_values(
-            "_Order"
-        ).reset_index(drop=True)
-
-        x = np.arange(len(overall_df), dtype=float)
-        bar_width = 0.34
+        chart_df = summary_df.copy().reset_index(drop=True)
+        x = np.arange(len(chart_df))
+        bar_width = 0.36
 
         paint_values = pd.to_numeric(
-            overall_df["Total_Paint_kg"],
-            errors="coerce",
+            chart_df["Total_Paint_kg"], errors="coerce"
         ).fillna(0)
-
         solvent_values = pd.to_numeric(
-            overall_df["Total_Solvent_kg"],
-            errors="coerce",
+            chart_df["Total_Solvent_kg"], errors="coerce"
         ).fillna(0)
+        ratio_values = pd.to_numeric(
+            chart_df["Weighted_Ratio_Percent"], errors="coerce"
+        )
 
         paint_bars = ax1.bar(
             x - bar_width / 2,
@@ -364,7 +308,6 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
             linewidth=0.8,
             zorder=3,
         )
-
         solvent_bars = ax1.bar(
             x + bar_width / 2,
             solvent_values,
@@ -379,63 +322,55 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
         ax2 = ax1.twinx()
         ax2.plot(
             x,
-            overall_df["Overall_Ratio_Percent"],
+            ratio_values,
             marker="o",
-            markersize=7.5,
-            linewidth=2.6,
-            color="#0EA5E9",
+            markersize=6,
+            linewidth=2.4,
+            color="#10A9E2",
             label="Solvent Ratio (%)",
-            zorder=6,
+            zorder=5,
         )
 
-        max_weight = max(
-            float(max(paint_values.max(), solvent_values.max())),
-            1.0,
-        )
+        max_weight = max(float(max(paint_values.max(), solvent_values.max())), 1.0)
+        max_ratio = max(float(ratio_values.max()), 1.0)
 
-        ratio_values = pd.to_numeric(
-            overall_df["Overall_Ratio_Percent"],
-            errors="coerce",
-        )
-        max_ratio = max(
-            float(ratio_values.max())
-            if ratio_values.notna().any()
-            else 1.0,
-            1.0,
-        )
+        weight_upper = max_weight * 1.24
+        ratio_upper = max(5.0, max_ratio * 1.42)
 
-        ax1.set_ylim(0, max_weight * 1.24)
-        ax2.set_ylim(0, max(5.0, max_ratio * 1.28))
+        ax1.set_ylim(0, weight_upper)
+        ax2.set_ylim(0, ratio_upper)
 
-        # -----------------------------------------------------
-        # Large labels for every non-zero Paint bar.
-        # -----------------------------------------------------
+        # ---------------------------------------------------------
+        # PAINT LABELS
+        # Place all paint values inside the blue bars using black text
+        # on a white background box. This remains readable in Word/PDF
+        # and avoids blending into the blue bar.
+        # ---------------------------------------------------------
         for bar in paint_bars:
             value = float(bar.get_height())
-            if value <= 0:
-                continue
-
             x_center = bar.get_x() + bar.get_width() / 2
 
             if value >= max_weight * 0.12:
+                label_y = value - max(value * 0.08, max_weight * 0.018)
                 ax1.annotate(
                     f"{value:,.0f}",
-                    xy=(x_center, value),
-                    xytext=(0, -12),
+                    xy=(x_center, label_y),
+                    xytext=(0, 0),
                     textcoords="offset points",
                     ha="center",
                     va="top",
-                    fontsize=10.5,
+                    fontsize=8.0,
                     color="black",
                     fontweight="bold",
+                    rotation=0,
                     bbox=dict(
-                        boxstyle="round,pad=0.12",
+                        boxstyle="round,pad=0.16",
                         facecolor="white",
                         edgecolor="none",
                         alpha=0.92,
                     ),
                     clip_on=True,
-                    zorder=8,
+                    zorder=7,
                 )
             else:
                 ax1.annotate(
@@ -445,19 +380,23 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
                     textcoords="offset points",
                     ha="center",
                     va="bottom",
-                    fontsize=10.0,
+                    fontsize=8.0,
                     color="black",
-                    fontweight="bold",
+                    bbox=dict(
+                        boxstyle="round,pad=0.14",
+                        facecolor="white",
+                        edgecolor="none",
+                        alpha=0.92,
+                    ),
                     clip_on=False,
-                    zorder=8,
+                    zorder=7,
                 )
 
-        # Large labels for every non-zero Solvent bar.
+        # ---------------------------------------------------------
+        # SOLVENT LABELS
+        # ---------------------------------------------------------
         for bar in solvent_bars:
             value = float(bar.get_height())
-            if value <= 0:
-                continue
-
             x_center = bar.get_x() + bar.get_width() / 2
 
             ax1.annotate(
@@ -467,457 +406,341 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
                 textcoords="offset points",
                 ha="center",
                 va="bottom",
-                fontsize=9.5,
-                color="#6B4A00",
-                fontweight="bold",
+                fontsize=8.0,
+                color="black",
                 clip_on=False,
-                zorder=8,
+                zorder=6,
             )
 
-        # Large percentage labels above each ratio point.
-        for index, ratio in enumerate(
-            overall_df["Overall_Ratio_Percent"]
-        ):
+        # ---------------------------------------------------------
+        # RATIO LABELS
+        # Keep all percentage labels outside the bars.
+        # Use alternating horizontal shifts to avoid crowding.
+        # ---------------------------------------------------------
+        for i, ratio in enumerate(ratio_values):
             if pd.isna(ratio):
                 continue
 
-            y_offset = 12 if index % 2 == 0 else 10
+            # Wider alternating offset for neighbouring labels.
+            if i % 3 == 0:
+                x_offset = -10
+            elif i % 3 == 1:
+                x_offset = 0
+            else:
+                x_offset = 10
+
+            # Standard position above the point.
+            y_offset = 15
+
+            # For very low ratio points, move the label slightly higher
+            # so it does not touch the paint-bar top or x-axis area.
+            if float(ratio) <= ratio_upper * 0.36:
+                y_offset = 18
 
             ax2.annotate(
                 f"{ratio:.2f}%",
-                xy=(x[index], ratio),
-                xytext=(0, y_offset),
+                xy=(x[i], ratio),
+                xytext=(x_offset, y_offset),
                 textcoords="offset points",
                 ha="center",
                 va="bottom",
-                fontsize=10.5,
+                fontsize=8.8,
                 fontweight="bold",
                 color="black",
                 bbox=dict(
-                    boxstyle="round,pad=0.12",
+                    boxstyle="round,pad=0.20",
                     facecolor="white",
                     edgecolor="none",
-                    alpha=0.95,
+                    alpha=0.97,
+                ),
+                arrowprops=dict(
+                    arrowstyle="-",
+                    color="#10A9E2",
+                    linewidth=0.65,
+                    shrinkA=2,
+                    shrinkB=4,
                 ),
                 annotation_clip=False,
-                zorder=9,
+                zorder=8,
             )
 
         ax1.set_xticks(x)
         ax1.set_xticklabels(
-            overall_df["Paint_Code"].tolist(),
-            fontsize=10.5,
+            chart_df["Paint_Code"].astype(str),
+            fontsize=8.8,
             color="black",
-            rotation=0,
         )
+        ax1.set_xlabel("Paint Code", fontsize=11, color="black", labelpad=10)
+        ax1.set_ylabel("Weight (kg)", fontsize=11, color="black")
+        ax2.set_ylabel("Solvent Ratio (%)", fontsize=11, color="black")
 
-        ax1.set_xlabel(
-            "Paint Code",
-            fontsize=13,
-            fontweight="bold",
-            color="black",
-            labelpad=12,
-        )
-        ax1.set_ylabel(
-            "Weight (kg)",
-            fontsize=13,
-            fontweight="bold",
-            color="black",
-        )
-        ax2.set_ylabel(
-            "Solvent Ratio (%)",
-            fontsize=13,
-            fontweight="bold",
-            color="black",
-        )
-
-        ax1.grid(
-            axis="y",
-            color="#D9E1EA",
-            linewidth=1.0,
-            zorder=1,
-        )
-        ax1.tick_params(
-            axis="y",
-            colors="black",
-            labelsize=11,
-        )
-        ax2.tick_params(
-            axis="y",
-            colors="black",
-            labelsize=11,
-        )
+        ax1.grid(axis="y", color="#E5E7EB", linewidth=0.8, zorder=1)
+        ax1.tick_params(axis="both", colors="black", labelsize=9.5)
+        ax2.tick_params(axis="y", colors="black", labelsize=9.5)
+        ax1.set_facecolor("white")
 
         for spine in ax1.spines.values():
             spine.set_visible(True)
             spine.set_color("#111827")
-            spine.set_linewidth(1.2)
+            spine.set_linewidth(1.0)
 
         ax2.spines["right"].set_color("#111827")
-        ax2.spines["right"].set_linewidth(1.2)
+        ax2.spines["right"].set_linewidth(1.0)
         ax2.spines["top"].set_visible(False)
         ax2.spines["left"].set_visible(False)
         ax2.spines["bottom"].set_visible(False)
 
         handles1, labels1 = ax1.get_legend_handles_labels()
         handles2, labels2 = ax2.get_legend_handles_labels()
-
         legend = ax1.legend(
             handles1 + handles2,
             labels1 + labels2,
             loc="upper center",
-            bbox_to_anchor=(0.5, 1.12),
+            bbox_to_anchor=(0.5, 1.13),
             ncol=3,
             frameon=False,
-            fontsize=11.5,
+            fontsize=9.5,
         )
-
-        for legend_text in legend.get_texts():
-            legend_text.set_color("black")
-            legend_text.set_fontweight("bold")
-
-        ax1.set_xlim(-0.7, len(overall_df) - 0.3)
-        ax1.set_facecolor("white")
+        for txt in legend.get_texts():
+            txt.set_color("black")
 
     fig.patch.set_facecolor("white")
-    fig.subplots_adjust(
-        left=0.07,
-        right=0.93,
-        bottom=0.17,
-        top=0.84,
-    )
+    fig.subplots_adjust(left=0.08, right=0.92, bottom=0.16, top=0.86)
 
-    buffer = io.BytesIO()
+    buf = io.BytesIO()
     fig.savefig(
-        buffer,
+        buf,
         format="png",
         bbox_inches="tight",
         facecolor="white",
-        dpi=260,
-        pad_inches=0.18,
+        dpi=220,
+        pad_inches=0.12,
     )
     plt.close(fig)
-    buffer.seek(0)
-    return buffer
+    buf.seek(0)
+    return buf
 
-
-def create_top10_usage_ratio_by_year_png(summary_df, filter_details):
-    """Create a compact annual Paint/Solvent matrix for Word export.
-
-    Rows are Paint Codes.
-    Each year contains two columns: Paint (kg) and Solvent (kg).
-    Every cell displays the actual value; missing data is shown as "—".
-    Paint and Solvent use separate color scales so both remain visible.
-    """
-    if summary_df is None or summary_df.empty:
-        fig, ax = plt.subplots(figsize=(13.2, 5.0), dpi=220)
+def create_annual_usage_matrix_png(matrix_df, filter_details):
+    """Create annual Paint / Solvent / Ratio matrix for Word export."""
+    if matrix_df is None or matrix_df.empty:
+        fig, ax = plt.subplots(figsize=(12.5, 4.5), dpi=220)
         ax.text(
             0.5,
             0.5,
-            "No data available",
+            "No annual matrix data available",
             ha="center",
             va="center",
-            fontsize=16,
+            fontsize=15,
             color="black",
         )
         ax.set_axis_off()
-
-        buffer = io.BytesIO()
-        fig.savefig(
-            buffer,
-            format="png",
-            bbox_inches="tight",
-            facecolor="white",
-            dpi=260,
-            pad_inches=0.18,
+    else:
+        work_df = matrix_df.copy()
+        paint_codes = work_df["Paint_Code"].drop_duplicates().astype(str).tolist()
+        years = sorted(
+            work_df["Analysis_Year"]
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist(),
+            key=lambda value: int(value) if str(value).isdigit() else 9999,
         )
-        plt.close(fig)
-        buffer.seek(0)
-        return buffer
 
-    chart_df = summary_df.copy()
-    chart_df["Paint_Code"] = chart_df["Paint_Code"].astype(str)
-    chart_df["Analysis_Year"] = chart_df["Analysis_Year"].astype(str)
+        complete_index = pd.MultiIndex.from_product(
+            [paint_codes, years],
+            names=["Paint_Code", "Analysis_Year"],
+        )
 
-    paint_codes = (
-        chart_df["Paint_Code"]
-        .drop_duplicates()
-        .tolist()
-    )
-    years = sorted(
-        chart_df["Analysis_Year"]
-        .dropna()
-        .astype(str)
-        .unique()
-        .tolist(),
-        key=lambda value: int(value),
-    )
+        work_df = (
+            work_df
+            .set_index(["Paint_Code", "Analysis_Year"])
+            .reindex(complete_index)
+            .reset_index()
+        )
 
-    complete_index = pd.MultiIndex.from_product(
-        [paint_codes, years],
-        names=["Paint_Code", "Analysis_Year"],
-    )
+        metrics = [
+            ("Total_Paint_kg", "Paint\n(kg)", "Blues"),
+            ("Total_Solvent_kg", "Solvent\n(kg)", "YlOrBr"),
+            ("Weighted_Ratio_Percent", "Ratio\n(%)", "PuBuGn"),
+        ]
 
-    matrix_df = (
-        chart_df
-        .set_index(["Paint_Code", "Analysis_Year"])
-        .reindex(complete_index)
-        .reset_index()
-    )
+        n_rows = len(paint_codes)
+        n_cols = len(years) * len(metrics)
 
-    matrix_df["Total_Paint_kg"] = pd.to_numeric(
-        matrix_df["Total_Paint_kg"],
-        errors="coerce",
-    )
-    matrix_df["Total_Solvent_kg"] = pd.to_numeric(
-        matrix_df["Total_Solvent_kg"],
-        errors="coerce",
-    )
+        fig_width = max(12.0, min(19.0, 1.55 * n_cols + 4.5))
+        fig_height = max(5.5, min(11.0, 0.62 * n_rows + 3.4))
+        fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=220)
 
-    paint_pivot = matrix_df.pivot(
-        index="Paint_Code",
-        columns="Analysis_Year",
-        values="Total_Paint_kg",
-    ).reindex(
-        index=paint_codes,
-        columns=years,
-    )
+        ax.set_xlim(0, n_cols)
+        ax.set_ylim(0, n_rows)
+        ax.invert_yaxis()
+        ax.set_facecolor("white")
 
-    solvent_pivot = matrix_df.pivot(
-        index="Paint_Code",
-        columns="Analysis_Year",
-        values="Total_Solvent_kg",
-    ).reindex(
-        index=paint_codes,
-        columns=years,
-    )
+        maxima = {}
+        for column_name, _, _ in metrics:
+            values = pd.to_numeric(work_df[column_name], errors="coerce")
+            max_value = values.max()
+            maxima[column_name] = (
+                float(max_value)
+                if pd.notna(max_value) and max_value > 0
+                else 1.0
+            )
 
-    n_rows = len(paint_codes)
-    n_cols = len(years) * 2
+        for row_index, paint_code in enumerate(paint_codes):
+            for year_index, year_value in enumerate(years):
+                row_match = work_df[
+                    (work_df["Paint_Code"].astype(str) == str(paint_code))
+                    & (work_df["Analysis_Year"].astype(str) == str(year_value))
+                ]
 
-    figure_width = max(
-        11.5,
-        min(16.5, 2.05 * len(years) + 6.5),
-    )
-    figure_height = max(
-        5.8,
-        min(10.5, 0.58 * n_rows + 3.4),
-    )
+                row_data = row_match.iloc[0] if not row_match.empty else None
 
-    fig, ax = plt.subplots(
-        figsize=(figure_width, figure_height),
-        dpi=220,
-    )
-
-    ax.set_xlim(0, n_cols)
-    ax.set_ylim(0, n_rows)
-    ax.invert_yaxis()
-    ax.set_aspect("auto")
-    ax.set_facecolor("white")
-
-    paint_max = pd.to_numeric(
-        paint_pivot.stack(),
-        errors="coerce",
-    ).max()
-    solvent_max = pd.to_numeric(
-        solvent_pivot.stack(),
-        errors="coerce",
-    ).max()
-
-    paint_max = (
-        float(paint_max)
-        if pd.notna(paint_max) and paint_max > 0
-        else 1.0
-    )
-    solvent_max = (
-        float(solvent_max)
-        if pd.notna(solvent_max) and solvent_max > 0
-        else 1.0
-    )
-
-    paint_cmap = plt.get_cmap("Blues")
-    solvent_cmap = plt.get_cmap("YlOrBr")
-
-    def cell_color(value, metric):
-        if pd.isna(value) or float(value) <= 0:
-            return "#F3F4F6"
-
-        if metric == "Paint":
-            normalized = min(float(value) / paint_max, 1.0)
-            return paint_cmap(0.20 + normalized * 0.62)
-
-        normalized = min(float(value) / solvent_max, 1.0)
-        return solvent_cmap(0.18 + normalized * 0.66)
-
-    for row_index, paint_code in enumerate(paint_codes):
-        for year_index, year_value in enumerate(years):
-            values = [
-                (
-                    paint_pivot.loc[paint_code, year_value],
-                    "Paint",
-                ),
-                (
-                    solvent_pivot.loc[paint_code, year_value],
-                    "Solvent",
-                ),
-            ]
-
-            for metric_index, (value, metric) in enumerate(values):
-                col_index = year_index * 2 + metric_index
-                facecolor = cell_color(value, metric)
-
-                rect = plt.Rectangle(
-                    (col_index, row_index),
-                    1,
-                    1,
-                    facecolor=facecolor,
-                    edgecolor="white",
-                    linewidth=1.4,
-                )
-                ax.add_patch(rect)
-
-                if pd.isna(value) or float(value) <= 0:
-                    label = "—"
-                    text_color = "#6B7280"
-                    font_weight = "normal"
-                else:
-                    label = f"{float(value):,.0f}"
-                    normalized = (
-                        float(value) / paint_max
-                        if metric == "Paint"
-                        else float(value) / solvent_max
+                for metric_index, (column_name, _, cmap_name) in enumerate(metrics):
+                    col_index = year_index * len(metrics) + metric_index
+                    value = (
+                        pd.to_numeric(row_data[column_name], errors="coerce")
+                        if row_data is not None
+                        else np.nan
                     )
-                    text_color = (
-                        "white"
-                        if normalized >= 0.58
-                        else "#111827"
+
+                    if pd.isna(value) or float(value) <= 0:
+                        facecolor = "#F3F4F6"
+                        label = "—"
+                        text_color = "#6B7280"
+                        font_weight = "normal"
+                    else:
+                        normalized = min(
+                            float(value) / maxima[column_name],
+                            1.0,
+                        )
+                        cmap = plt.get_cmap(cmap_name)
+                        facecolor = cmap(0.18 + normalized * 0.68)
+                        label = (
+                            f"{float(value):.2f}%"
+                            if column_name == "Weighted_Ratio_Percent"
+                            else f"{float(value):,.0f}"
+                        )
+                        text_color = (
+                            "white" if normalized >= 0.58 else "#111827"
+                        )
+                        font_weight = "bold"
+
+                    rect = plt.Rectangle(
+                        (col_index, row_index),
+                        1,
+                        1,
+                        facecolor=facecolor,
+                        edgecolor="white",
+                        linewidth=1.3,
                     )
-                    font_weight = "bold"
+                    ax.add_patch(rect)
 
-                ax.text(
-                    col_index + 0.5,
-                    row_index + 0.5,
-                    label,
-                    ha="center",
-                    va="center",
-                    fontsize=10.2,
-                    fontweight=font_weight,
-                    color=text_color,
-                )
+                    ax.text(
+                        col_index + 0.5,
+                        row_index + 0.5,
+                        label,
+                        ha="center",
+                        va="center",
+                        fontsize=9.8,
+                        fontweight=font_weight,
+                        color=text_color,
+                    )
 
-    for year_index in range(1, len(years)):
-        separator_x = year_index * 2
-        ax.plot(
-            [separator_x, separator_x],
-            [0, n_rows],
-            color="#64748B",
-            linewidth=1.4,
-            zorder=5,
-        )
+        # Strong separator between years.
+        for year_index in range(1, len(years)):
+            separator_x = year_index * len(metrics)
+            ax.plot(
+                [separator_x, separator_x],
+                [0, n_rows],
+                color="#475569",
+                linewidth=1.5,
+                zorder=5,
+            )
 
-    ax.set_yticks(
-        np.arange(n_rows) + 0.5
-    )
-    ax.set_yticklabels(
-        paint_codes,
-        fontsize=10.5,
-        fontweight="bold",
-        color="black",
-    )
-    ax.tick_params(
-        axis="y",
-        length=0,
-        pad=8,
-    )
-
-    ax.set_xticks(
-        np.arange(n_cols) + 0.5
-    )
-    metric_labels = []
-    for _ in years:
-        metric_labels.extend(
-            ["Paint\n(kg)", "Solvent\n(kg)"]
-        )
-
-    ax.set_xticklabels(
-        metric_labels,
-        fontsize=9.8,
-        fontweight="bold",
-        color="black",
-    )
-    ax.xaxis.tick_top()
-    ax.tick_params(
-        axis="x",
-        length=0,
-        pad=7,
-    )
-
-    header_transform = blended_transform_factory(
-        ax.transData,
-        ax.transAxes,
-    )
-
-    for year_index, year_value in enumerate(years):
-        center_x = year_index * 2 + 1.0
-        ax.text(
-            center_x,
-            1.105,
-            str(year_value),
-            transform=header_transform,
-            ha="center",
-            va="bottom",
-            fontsize=12.5,
+        ax.set_yticks(np.arange(n_rows) + 0.5)
+        ax.set_yticklabels(
+            paint_codes,
+            fontsize=10.5,
             fontweight="bold",
-            color="#111827",
-            clip_on=False,
+            color="black",
+        )
+        ax.tick_params(axis="y", length=0, pad=8)
+
+        ax.set_xticks(np.arange(n_cols) + 0.5)
+        metric_labels = []
+        for _ in years:
+            metric_labels.extend([label for _, label, _ in metrics])
+        ax.set_xticklabels(
+            metric_labels,
+            fontsize=9.3,
+            fontweight="bold",
+            color="black",
+        )
+        ax.xaxis.tick_top()
+        ax.tick_params(axis="x", length=0, pad=7)
+
+        header_transform = blended_transform_factory(
+            ax.transData,
+            ax.transAxes,
         )
 
-        ax.plot(
-            [
-                year_index * 2 + 0.14,
-                year_index * 2 + 1.86,
-            ],
-            [1.075, 1.075],
-            transform=header_transform,
+        for year_index, year_value in enumerate(years):
+            group_start = year_index * len(metrics)
+            group_center = group_start + len(metrics) / 2
+
+            ax.text(
+                group_center,
+                1.115,
+                str(year_value),
+                transform=header_transform,
+                ha="center",
+                va="bottom",
+                fontsize=12.5,
+                fontweight="bold",
+                color="#111827",
+                clip_on=False,
+            )
+
+            ax.plot(
+                [group_start + 0.12, group_start + len(metrics) - 0.12],
+                [1.082, 1.082],
+                transform=header_transform,
+                color="#475569",
+                linewidth=1.2,
+                clip_on=False,
+            )
+
+        border = plt.Rectangle(
+            (0, 0),
+            n_cols,
+            n_rows,
+            fill=False,
+            edgecolor="#334155",
+            linewidth=1.4,
+        )
+        ax.add_patch(border)
+
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        ax.text(
+            0.0,
+            -0.09,
+            "Blue: Paint usage  |  Orange: Solvent usage  |  Green: Solvent ratio  |  —: No data",
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+            fontsize=9.5,
             color="#475569",
-            linewidth=1.2,
-            clip_on=False,
         )
 
-    border = plt.Rectangle(
-        (0, 0),
-        n_cols,
-        n_rows,
-        fill=False,
-        edgecolor="#334155",
-        linewidth=1.4,
-    )
-    ax.add_patch(border)
-
-    for spine in ax.spines.values():
-        spine.set_visible(False)
-
-    ax.set_xlabel("")
-    ax.set_ylabel("")
-
-    ax.text(
-        0.0,
-        -0.085,
-        "Blue intensity: Paint usage   |   Orange intensity: Solvent usage   |   — : No data",
-        transform=ax.transAxes,
-        ha="left",
-        va="top",
-        fontsize=9.6,
-        color="#475569",
-    )
-
-    fig.patch.set_facecolor("white")
-    fig.subplots_adjust(
-        left=0.17,
-        right=0.985,
-        bottom=0.13,
-        top=0.78,
-    )
+        fig.patch.set_facecolor("white")
+        fig.subplots_adjust(
+            left=0.16,
+            right=0.99,
+            bottom=0.14,
+            top=0.77,
+        )
 
     buffer = io.BytesIO()
     fig.savefig(
@@ -1356,532 +1179,303 @@ tab_ranking, tab_detail, tab_line, tab_pilot = st.tabs([
 
 # ----- TAB 1: RANKING -----
 with tab_ranking:
-    st.subheader("1. Paint Code Solvent Consumption by Year (Top 10)")
-    st.caption(
-        "Top 10 paint codes are selected using total solvent consumption across the full selected period. "
-        "The same paint codes are then split by year so management can compare annual paint use, "
-        "solvent use, and weighted solvent ratio on one chart. "
-        "Years without records are still displayed with zero-height bars and no ratio point."
-    )
+    st.subheader("1. Paint Code Solvent Consumption (Top 10)")
 
-    # Label display is intentionally conservative.
-    # Hover always contains every value; visible labels are optional.
-    label_col1, label_col2 = st.columns([1.4, 2.6])
-    ratio_label_mode = label_col1.selectbox(
-        "Ratio Label Display",
-        [
-            "Yearly Highest & Lowest (Recommended)",
-            "Hover Only",
-            "Latest Year - Top 3 Paint Codes",
-        ],
-        index=0,
-        key="tab1_ratio_label_mode",
-        help=(
-            "Yearly Highest & Lowest highlights only the maximum and minimum solvent ratio "
-            "within each year. All other values remain available in hover and the table."
-        ),
+    full_summary_df = build_summary(
+        filter_df,
+        ["Vendor", "Resin", "Position_UI", "Paint_Code", "Solvent_Type"],
     )
-    label_col2.caption(
-        "Yearly ratio markers use different colors, and dotted lines connect years only within the same paint code. "
-        "The black diamond line shows the weighted overall solvent ratio across all three years for each paint code."
+    summary_df = (
+        full_summary_df
+        .sort_values("Total_Solvent_kg", ascending=False)
+        .head(10)
+        .reset_index(drop=True)
     )
+    summary_df.insert(0, "Rank", np.arange(1, len(summary_df) + 1))
 
-    ranking_source_df = filter_df.copy()
-    ranking_source_df["Analysis_Year"] = pd.to_numeric(
-        ranking_source_df["Analysis_Year"], errors="coerce"
-    ).astype("Int64")
-    ranking_source_df = ranking_source_df[
-        ranking_source_df["Analysis_Year"].notna()
-    ].copy()
-
-    if ranking_source_df.empty:
-        st.info(
-            "No valid dated records are available for year-by-year comparison "
-            "under the selected filters."
-        )
-        summary_df = pd.DataFrame()
+    if summary_df.empty:
+        st.info("No paint-code summary is available for the selected filters.")
     else:
-        ranking_source_df["Analysis_Year"] = (
-            ranking_source_df["Analysis_Year"].astype(int).astype(str)
+        # One combined chart replaces the previous duplicate usage and ratio charts.
+        fig_dual = go.Figure()
+
+        fig_dual.add_trace(go.Bar(
+            x=summary_df["Paint_Code"],
+            y=summary_df["Total_Paint_kg"],
+            name="Paint (kg)",
+            marker_color="#5B8FF9",
+            yaxis="y1",
+            text=summary_df["Total_Paint_kg"].apply(lambda x: f"{x:,.0f}"),
+            textposition="auto",
+        ))
+
+        fig_dual.add_trace(go.Bar(
+            x=summary_df["Paint_Code"],
+            y=summary_df["Total_Solvent_kg"],
+            name="Solvent (kg)",
+            marker_color="#F6BD16",
+            yaxis="y1",
+            text=summary_df["Total_Solvent_kg"].apply(lambda x: f"{x:,.0f}"),
+            textposition="auto",
+        ))
+
+        fig_dual.add_trace(go.Scatter(
+            x=summary_df["Paint_Code"],
+            y=summary_df["Weighted_Ratio_Percent"],
+            name="Solvent Ratio (%)",
+            mode="lines+markers",
+            line=dict(color="DeepSkyBlue", width=3),
+            marker=dict(size=8),
+            yaxis="y2",
+        ))
+
+        for _, row in summary_df.iterrows():
+            fig_dual.add_annotation(
+                x=row["Paint_Code"],
+                y=row["Weighted_Ratio_Percent"],
+                text=f"<b>{row['Weighted_Ratio_Percent']:.2f}%</b>",
+                xref="x",
+                yref="y2",
+                showarrow=False,
+                yshift=18,
+                font=dict(color="black", size=12),
+                bgcolor="rgba(255,255,255,0.85)",
+                borderpad=2,
+            )
+
+        ratio_max = summary_df["Weighted_Ratio_Percent"].max()
+        ratio_upper = max(5.0, float(ratio_max) * 1.25) if pd.notna(ratio_max) else 5.0
+
+        fig_dual.update_layout(
+            title=(
+                "Paint & Solvent Usage vs. Solvent Ratio"
+                f"<br><sup>Filters Applied: {filter_details}</sup>"
+            ),
+            xaxis=dict(title="Paint Code"),
+            yaxis=dict(title="Weight (kg)", side="left", showgrid=False),
+            yaxis2=dict(
+                title="Solvent Ratio (%)",
+                overlaying="y",
+                side="right",
+                showgrid=False,
+                range=[0, ratio_upper],
+            ),
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1,
+            ),
+            height=600,
+            uniformtext_minsize=8,
+            uniformtext_mode="hide",
+            barmode="group",
         )
+        st.plotly_chart(fig_dual, use_container_width=True)
+        exported_figs["4. Top 10 Usage and Ratio"] = fig_dual
 
-        # 1. Select Top 10 by total solvent use across all available years.
-        overall_summary_df = build_summary(
-            ranking_source_df,
-            ["Vendor", "Resin", "Position_UI", "Paint_Code", "Solvent_Type"],
-        )
+        # -----------------------------------------------------
+        # Annual Paint / Solvent / Ratio matrix
+        # -----------------------------------------------------
+        st.markdown("---")
+        st.subheader("Annual Paint, Solvent and Solvent Ratio Matrix")
 
-        top10_overall_df = (
-            overall_summary_df
-            .sort_values("Total_Solvent_kg", ascending=False)
-            .head(10)
-            .reset_index(drop=True)
-        )
-
-        top10_codes = top10_overall_df["Paint_Code"].astype(str).tolist()
-        paint_order_map = {
-            paint_code: rank
-            for rank, paint_code in enumerate(top10_codes)
-        }
-
-        top10_source_df = ranking_source_df[
-            ranking_source_df["Paint_Code"].astype(str).isin(top10_codes)
+        top10_codes = summary_df["Paint_Code"].astype(str).tolist()
+        annual_source_df = filter_df[
+            filter_df["Paint_Code"].astype(str).isin(top10_codes)
         ].copy()
 
-        # 2. Recalculate each Top 10 paint code separately for each year.
-        summary_df = build_summary(
-            top10_source_df,
+        annual_matrix_df = build_summary(
+            annual_source_df,
             ["Paint_Code", "Analysis_Year"],
         )
 
-        # -----------------------------------------------------
-        # COMPLETE PAINT CODE × YEAR GRID
-        # Every Top 10 paint code must display every available
-        # analysis year, even when no record exists in that year.
-        # Missing-year bars are shown as zero; the ratio remains
-        # blank (NaN) so no false 0% line point is drawn.
-        # -----------------------------------------------------
-        all_analysis_years = sorted(
-            ranking_source_df["Analysis_Year"]
+        complete_years = sorted(
+            filter_df["Analysis_Year"]
             .dropna()
             .astype(str)
             .unique()
             .tolist(),
-            key=lambda value: int(value),
+            key=lambda value: int(value) if str(value).isdigit() else 9999,
         )
 
         complete_index = pd.MultiIndex.from_product(
-            [
-                top10_codes,
-                all_analysis_years,
-            ],
-            names=[
-                "Paint_Code",
-                "Analysis_Year",
-            ],
+            [top10_codes, complete_years],
+            names=["Paint_Code", "Analysis_Year"],
         )
 
-        summary_df = (
-            summary_df
-            .set_index(
-                [
-                    "Paint_Code",
-                    "Analysis_Year",
-                ]
-            )
+        annual_matrix_df = (
+            annual_matrix_df
+            .set_index(["Paint_Code", "Analysis_Year"])
             .reindex(complete_index)
             .reset_index()
         )
 
-        # Quantities/counts become zero when the year has no data.
-        zero_fill_columns = [
-            "Adjustment_Records",
-            "Historical_Batches",
-            "Total_Paint_kg",
-            "Total_Solvent_kg",
-            "Median_Paint_kg",
-            "Median_Solvent_kg",
-            "Production_Lines",
-        ]
-        for column_name in zero_fill_columns:
-            if column_name in summary_df.columns:
-                summary_df[column_name] = pd.to_numeric(
-                    summary_df[column_name],
-                    errors="coerce",
-                ).fillna(0)
-
-        # Keep analytical fields blank for missing years.
-        # This avoids presenting a fabricated 0% solvent ratio.
-        analytical_columns = [
-            "Median_Ratio_Percent",
-            "Median_Before_Viscosity",
-            "Median_After_Viscosity",
-            "Median_Viscosity_Drop",
-            "Median_Dilution_Efficiency",
-            "Weighted_Ratio_Percent",
-        ]
-        for column_name in analytical_columns:
-            if column_name in summary_df.columns:
-                summary_df[column_name] = pd.to_numeric(
-                    summary_df[column_name],
-                    errors="coerce",
-                )
-
-        summary_df["Data_Status"] = np.where(
-            summary_df["Adjustment_Records"] > 0,
-            "Available",
-            "No Data",
-        )
-
-        summary_df["_Paint_Order"] = (
-            summary_df["Paint_Code"].astype(str).map(paint_order_map)
-        )
-        summary_df["_Year_Order"] = pd.to_numeric(
-            summary_df["Analysis_Year"], errors="coerce"
-        )
-        summary_df = summary_df.sort_values(
-            ["_Paint_Order", "_Year_Order"]
-        ).reset_index(drop=True)
-        summary_df.insert(
-            0,
-            "Rank",
-            summary_df["Paint_Code"].astype(str).map(paint_order_map).add(1),
-        )
-
-        if summary_df.empty:
-            st.info("No yearly paint-code summary is available for the selected filters.")
-        else:
-            # Two-level x-axis: Paint Code -> Year.
-            multi_x = [
-                summary_df["Paint_Code"].astype(str).tolist(),
-                summary_df["Analysis_Year"].astype(str).tolist(),
-            ]
-
-            fig_dual = go.Figure()
-
-            fig_dual.add_trace(
-                go.Bar(
-                    x=multi_x,
-                    y=summary_df["Total_Paint_kg"],
-                    name="Paint (kg)",
-                    marker_color="#7EA6F8",
-                    opacity=0.78,
-                    yaxis="y1",
-                    text=summary_df["Total_Paint_kg"].map(
-                        lambda value: (
-                            f"{value:,.0f}"
-                            if pd.notna(value) and value > 0
-                            else ""
-                        )
-                    ),
-                    textposition="inside",
-                    insidetextanchor="end",
-                    textangle=0,
-                    textfont=dict(
-                        size=9,
-                        color="#111827",
-                    ),
-                    cliponaxis=False,
-                    customdata=np.column_stack([
-                        summary_df["Paint_Code"],
-                        summary_df["Analysis_Year"],
-                        summary_df["Adjustment_Records"],
-                        summary_df["Historical_Batches"],
-                        summary_df["Data_Status"],
-                    ]),
-                    hovertemplate=(
-                        "<b>Paint Code: %{customdata[0]}</b><br>"
-                        "Year: %{customdata[1]}<br>"
-                        "Status: %{customdata[4]}<br>"
-                        "Paint: %{y:,.0f} kg<br>"
-                        "Records: %{customdata[2]:,.0f}<br>"
-                        "Batches: %{customdata[3]:,.0f}"
-                        "<extra></extra>"
-                    ),
-                )
-            )
-
-            fig_dual.add_trace(
-                go.Bar(
-                    x=multi_x,
-                    y=summary_df["Total_Solvent_kg"],
-                    name="Solvent (kg)",
-                    marker_color="#F5B82E",
-                    opacity=0.92,
-                    yaxis="y1",
-                    text=summary_df["Total_Solvent_kg"].map(
-                        lambda value: (
-                            f"{value:,.0f}"
-                            if pd.notna(value) and value > 0
-                            else ""
-                        )
-                    ),
-                    textposition="outside",
-                    textangle=0,
-                    textfont=dict(
-                        size=8.5,
-                        color="#7A4E00",
-                    ),
-                    cliponaxis=False,
-                    customdata=np.column_stack([
-                        summary_df["Paint_Code"],
-                        summary_df["Analysis_Year"],
-                        summary_df["Data_Status"],
-                    ]),
-                    hovertemplate=(
-                        "<b>Paint Code: %{customdata[0]}</b><br>"
-                        "Year: %{customdata[1]}<br>"
-                        "Status: %{customdata[2]}<br>"
-                        "Solvent: %{y:,.0f} kg"
-                        "<extra></extra>"
-                    ),
-                )
-            )
-
-            # One ratio line per year avoids drawing a misleading connection
-            # from the final year of one paint code to the first year of the next.
-            # All values remain available in hover. To keep the chart readable,
-            # only one percentage label is shown for each paint code: the latest
-            # available year for that paint code.
-            # ---------------------------------------------------------
-            # YEARLY RATIO SERIES REMOVED
-            # Keep only annual Paint/Solvent bars and one overall-period
-            # solvent-ratio line for each Paint Code.
-            # ---------------------------------------------------------
-
-            # ---------------------------------------------------------
-            # 3. OVERALL 3-YEAR WEIGHTED SOLVENT RATIO
-            # Formula:
-            # total solvent of all years / total base paint of all years
-            # × 100%.
-            # This is not the arithmetic mean of yearly percentages.
-            # ---------------------------------------------------------
-            overall_ratio_df = (
-                top10_source_df
-                .groupby("Paint_Code", as_index=False)
-                .agg(
-                    Base_Paint_All_Years=(
-                        "Base_Paint_Weight_kg",
-                        "sum",
-                    ),
-                    Total_Solvent_All_Years=(
-                        "添加重量",
-                        "sum",
-                    ),
-                )
-            )
-
-            overall_ratio_df["Total_Paint_All_Years"] = (
-                overall_ratio_df["Base_Paint_All_Years"]
-                + overall_ratio_df["Total_Solvent_All_Years"]
-            )
-
-            overall_ratio_df["Overall_3Y_Ratio_Percent"] = np.where(
-                overall_ratio_df["Base_Paint_All_Years"] > 0,
-                (
-                    overall_ratio_df["Total_Solvent_All_Years"]
-                    / overall_ratio_df["Base_Paint_All_Years"]
-                    * 100
-                ),
-                np.nan,
-            )
-
-            overall_ratio_df["_Paint_Order"] = (
-                overall_ratio_df["Paint_Code"]
-                .astype(str)
-                .map(
-                    {
-                        str(code): index
-                        for index, code in enumerate(top10_codes)
-                    }
-                )
-            )
-
-            overall_ratio_df = overall_ratio_df.sort_values(
-                "_Paint_Order"
-            ).reset_index(drop=True)
-
-            # Available years are still required for:
-            # 1. placing the overall-ratio point at the center year;
-            # 2. displaying the selected year range in the chart subtitle.
-            available_years = sorted(
-                summary_df["Analysis_Year"]
-                .dropna()
-                .astype(str)
-                .unique()
-                .tolist(),
-                key=lambda value: int(value),
-            )
-
-            # Place the overall point at the center year of each paint-code group.
-            center_year = (
-                available_years[len(available_years) // 2]
-                if available_years
-                else ""
-            )
-
-            overall_label_positions = [
-                "top center"
-                for _ in range(len(overall_ratio_df))
-            ]
-
-            overall_ratio_text = overall_ratio_df[
-                "Overall_3Y_Ratio_Percent"
-            ].map(
-                lambda value: (
-                    f"{value:.2f}%"
-                    if pd.notna(value)
-                    else ""
-                )
-            )
-
-            fig_dual.add_trace(
-                go.Scatter(
-                    x=[
-                        overall_ratio_df["Paint_Code"]
-                        .astype(str)
-                        .tolist(),
-                        [center_year] * len(overall_ratio_df),
-                    ],
-                    y=overall_ratio_df["Overall_3Y_Ratio_Percent"],
-                    mode="lines+markers+text",
-                    name="Overall Period Ratio (%)",
-                    line=dict(
-                        color="#0F766E",
-                        width=2.8,
-                    ),
-                    marker=dict(
-                        size=9,
-                        color="#0F766E",
-                        symbol="diamond",
-                        line=dict(
-                            width=1.2,
-                            color="white",
-                        ),
-                    ),
-                    text=overall_ratio_text,
-                    textposition=overall_label_positions,
-                    textfont=dict(
-                        size=10,
-                        color="#111827",
-                        family="Arial Black",
-                    ),
-                    cliponaxis=False,
-                    yaxis="y2",
-                    connectgaps=False,
-                    customdata=np.column_stack([
-                        overall_ratio_df["Paint_Code"],
-                        overall_ratio_df["Total_Paint_All_Years"],
-                        overall_ratio_df["Total_Solvent_All_Years"],
-                        overall_ratio_df["Base_Paint_All_Years"],
-                    ]),
-                    hovertemplate=(
-                        "<b>Overall Period Ratio</b><br>"
-                        "Paint Code: %{customdata[0]}<br>"
-                        "Total Paint: %{customdata[1]:,.0f} kg<br>"
-                        "Total Solvent: %{customdata[2]:,.0f} kg<br>"
-                        "Base Paint: %{customdata[3]:,.0f} kg<br>"
-                        "Overall Ratio: %{y:.2f}%"
-                        "<extra></extra>"
-                    ),
-                )
-            )
-
-            ratio_max = pd.to_numeric(
-                overall_ratio_df["Overall_3Y_Ratio_Percent"],
-                errors="coerce",
-            ).max()
-            ratio_upper = (
-                max(5.0, float(ratio_max) * 1.35)
-                if pd.notna(ratio_max)
-                else 5.0
-            )
-            available_years_text = ", ".join(available_years)
-
-            fig_dual.update_layout(
-                title=dict(
-                    text=(
-                        "<b>Annual Paint & Solvent Usage with Overall Period Solvent Ratio</b>"
-                        f"<br><sup>Years: {available_years_text} | "
-                        f"Filters Applied: {filter_details}</sup>"
-                    ),
-                    x=0.01,
-                    xanchor="left",
-                ),
-                xaxis=dict(
-                    title="Paint Code / Analysis Year",
-                    type="multicategory",
-                    showgrid=False,
-                    showline=True,
-                    linecolor="#111827",
-                    linewidth=1.2,
-                    mirror=True,
-                    tickfont=dict(color="black", size=9), # GIẢM XUỐNG 8.5 ĐỂ KHÔNG BỊ CHỒNG CHỮ
-                    tickangle=0, 
-                ),
-                
-                yaxis=dict(
-                    title="Weight (kg)",
-                    side="left",
-                    showgrid=True,
-                    gridcolor="#E5E7EB",
-                    showline=True,
-                    linecolor="#111827",
-                    linewidth=1.2,
-                    mirror=True,
-                    rangemode="tozero",
-                ),
-                yaxis2=dict(
-                    title="Solvent Ratio (%)",
-                    overlaying="y",
-                    side="right",
-                    showgrid=False,
-                    showline=True,
-                    linecolor="#111827",
-                    linewidth=1.2,
-                    range=[0, ratio_upper],
-                ),
-                legend=dict(
-                    orientation="h",
-                    yanchor="bottom",
-                    y=1.025,
-                    xanchor="center",
-                    x=0.5,
-                    font=dict(size=9.5),
-                    bgcolor="rgba(255,255,255,0.96)",
-                ),
-                barmode="group",
-                bargap=0.24,
-                bargroupgap=0.10,
-                height=820,
-                margin=dict(l=90, r=110, t=175, b=155),
-                plot_bgcolor="white",
-                paper_bgcolor="white",
-                font=dict(color="black"),
-                hovermode="closest",
-                uniformtext=dict(
-                    minsize=7,
-                    mode="show",
-                ),
-            )
-
-            st.caption(
-                "Every non-zero annual Paint and Solvent bar is labeled directly. "
-                "The overall-period solvent ratio is displayed above each teal marker."
-            )
-            st.plotly_chart(fig_dual, use_container_width=True)
-            exported_figs["4. Top 10 Usage and Ratio by Year"] = fig_dual
-
-            ranking_display = summary_df[[
-                "Rank",
-                "Paint_Code",
-                "Analysis_Year",
+        matrix_long = annual_matrix_df.melt(
+            id_vars=["Paint_Code", "Analysis_Year"],
+            value_vars=[
                 "Total_Paint_kg",
                 "Total_Solvent_kg",
                 "Weighted_Ratio_Percent",
-                "Adjustment_Records",
-                "Historical_Batches",
-                "Data_Status",
-            ]].rename(columns={
-                "Paint_Code": "Paint Code",
-                "Analysis_Year": "Year",
-                "Total_Paint_kg": "Total Paint (kg)",
-                "Total_Solvent_kg": "Total Solvent (kg)",
-                "Weighted_Ratio_Percent": "Solvent Ratio (%)",
-                "Adjustment_Records": "Records",
-                "Historical_Batches": "Batches",
-                "Data_Status": "Data Status",
-            })
+            ],
+            var_name="Metric",
+            value_name="Value",
+        )
 
-            st.dataframe(
-                ranking_display.style.format({
-                    "Total Paint (kg)": "{:,.0f}",
-                    "Total Solvent (kg)": "{:,.0f}",
-                    "Solvent Ratio (%)": "{:.2f}",
-                }),
-                use_container_width=True,
-                hide_index=True,
+        matrix_long["Metric"] = matrix_long["Metric"].map(
+            {
+                "Total_Paint_kg": "Paint (kg)",
+                "Total_Solvent_kg": "Solvent (kg)",
+                "Weighted_Ratio_Percent": "Solvent Ratio (%)",
+            }
+        )
+
+        matrix_long["Column_Label"] = (
+            matrix_long["Analysis_Year"].astype(str)
+            + "<br>"
+            + matrix_long["Metric"]
+        )
+
+        metric_color_map = {
+            "Paint (kg)": "Blues",
+            "Solvent (kg)": "YlOrBr",
+            "Solvent Ratio (%)": "PuBuGn",
+        }
+
+        # Normalize within each metric so Paint, Solvent and Ratio
+        # remain visually comparable despite different units.
+        matrix_long["Normalized"] = np.nan
+        for metric_name, metric_df in matrix_long.groupby("Metric"):
+            metric_values = pd.to_numeric(
+                metric_df["Value"],
+                errors="coerce",
             )
+            metric_max = metric_values.max()
+            if pd.notna(metric_max) and metric_max > 0:
+                matrix_long.loc[metric_df.index, "Normalized"] = (
+                    metric_values / metric_max
+                )
+
+        pivot_color = matrix_long.pivot(
+            index="Paint_Code",
+            columns="Column_Label",
+            values="Normalized",
+        ).reindex(index=top10_codes)
+
+        pivot_text = matrix_long.pivot(
+            index="Paint_Code",
+            columns="Column_Label",
+            values="Value",
+        ).reindex(index=top10_codes)
+
+        ordered_columns = []
+        for year_value in complete_years:
+            ordered_columns.extend([
+                f"{year_value}<br>Paint (kg)",
+                f"{year_value}<br>Solvent (kg)",
+                f"{year_value}<br>Solvent Ratio (%)",
+            ])
+
+        pivot_color = pivot_color.reindex(columns=ordered_columns)
+        pivot_text = pivot_text.reindex(columns=ordered_columns)
+
+        text_matrix = []
+        for paint_code in pivot_text.index:
+            row_labels = []
+            for column_name in pivot_text.columns:
+                value = pivot_text.loc[paint_code, column_name]
+                if pd.isna(value) or float(value) <= 0:
+                    row_labels.append("—")
+                elif "Ratio" in column_name:
+                    row_labels.append(f"{float(value):.2f}%")
+                else:
+                    row_labels.append(f"{float(value):,.0f}")
+            text_matrix.append(row_labels)
+
+        fig_matrix = go.Figure(
+            data=go.Heatmap(
+                z=pivot_color.values,
+                x=pivot_color.columns.tolist(),
+                y=pivot_color.index.tolist(),
+                text=text_matrix,
+                texttemplate="<b>%{text}</b>",
+                textfont=dict(size=11, color="#111827"),
+                colorscale=[
+                    [0.0, "#F3F4F6"],
+                    [0.33, "#DBEAFE"],
+                    [0.66, "#FDE68A"],
+                    [1.0, "#99F6E4"],
+                ],
+                zmin=0,
+                zmax=1,
+                showscale=False,
+                hovertemplate=(
+                    "<b>Paint Code: %{y}</b><br>"
+                    "%{x}<br>"
+                    "Value: %{text}"
+                    "<extra></extra>"
+                ),
+                xgap=3,
+                ygap=3,
+            )
+        )
+
+        fig_matrix.update_layout(
+            title=dict(
+                text=(
+                    "Annual Paint, Solvent and Solvent Ratio Matrix"
+                    f"<br><sup>Filters Applied: {filter_details}</sup>"
+                ),
+                x=0.5,
+                xanchor="center",
+            ),
+            height=max(520, 58 * len(top10_codes) + 180),
+            margin=dict(l=120, r=40, t=120, b=110),
+            xaxis=dict(
+                side="top",
+                tickangle=0,
+                tickfont=dict(size=10, color="#111827"),
+                showgrid=False,
+            ),
+            yaxis=dict(
+                autorange="reversed",
+                tickfont=dict(size=11, color="#111827"),
+                showgrid=False,
+            ),
+            paper_bgcolor="white",
+            plot_bgcolor="white",
+        )
+
+        st.plotly_chart(fig_matrix, use_container_width=True)
+        exported_figs["4B. Annual Usage Matrix"] = fig_matrix
+
+        ranking_display = summary_df[[
+            "Rank",
+            "Paint_Code",
+            "Total_Paint_kg",
+            "Total_Solvent_kg",
+            "Weighted_Ratio_Percent",
+            "Adjustment_Records",
+            "Historical_Batches",
+        ]].rename(columns={
+            "Paint_Code": "Paint Code",
+            "Total_Paint_kg": "Total Paint (kg)",
+            "Total_Solvent_kg": "Total Solvent (kg)",
+            "Weighted_Ratio_Percent": "Solvent Ratio (%)",
+            "Adjustment_Records": "Records",
+            "Historical_Batches": "Batches",
+        })
+
+        st.dataframe(
+            ranking_display.style.format({
+                "Total Paint (kg)": "{:,.2f}",
+                "Total Solvent (kg)": "{:,.2f}",
+                "Solvent Ratio (%)": "{:.2f}",
+            }),
+            use_container_width=True,
+            hide_index=True,
+        )
 
 # ----- TAB 2: PAINT CODE HISTORY -----
 with tab_detail:
@@ -2586,9 +2180,8 @@ with tab_pilot:
         # =========================================================
         st.markdown("### 表2　主要色號穩定性評估結果")
         st.caption(
-            "Each annual Paint and Solvent bar displays its value directly. "
-            "The teal line shows the weighted overall-period solvent ratio for each Paint Code; "
-            "ratio labels alternate above and below the markers to reduce overlap."
+            "依累積稀釋劑添加量由高至低，僅列示前10個主要色號；"
+            "各指標同時呈現實際數值及穩定性分級。"
         )
 
         stability_class_map = {
@@ -3017,7 +2610,7 @@ with export_col1:
                     figure_title = doc.add_paragraph()
                     figure_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     figure_title_run = figure_title.add_run(
-                        "Figure 1. Paint & Solvent Usage with Overall Period Solvent Ratio"
+                        "Figure 1. Paint & Solvent Usage vs. Solvent Ratio"
                     )
                     figure_title_run.bold = True
                     figure_title_run.font.size = Pt(11)
@@ -3037,45 +2630,41 @@ with export_col1:
                     picture_p.paragraph_format.space_after = Pt(2)
                     picture_p.add_run().add_picture(top10_chart_buffer, width=Inches(10.2))
 
-                    # -------------------------------------------------
-                    # Figure 2: annual detail by Paint Code and year
-                    # -------------------------------------------------
-                    doc.add_page_break()
+                    if 'annual_matrix_df' in locals() and not annual_matrix_df.empty:
+                        doc.add_page_break()
+                        doc.add_heading(
+                            "2. Annual Paint, Solvent and Solvent Ratio Matrix",
+                            level=1,
+                        )
 
-                    yearly_heading = doc.add_heading(
-                        "2. Annual Paint and Solvent Matrix",
-                        level=1,
-                    )
+                        matrix_title = doc.add_paragraph()
+                        matrix_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        matrix_title_run = matrix_title.add_run(
+                            "Figure 2. Annual Paint, Solvent and Solvent Ratio Matrix"
+                        )
+                        matrix_title_run.bold = True
+                        matrix_title_run.font.size = Pt(12)
 
-                    yearly_title = doc.add_paragraph()
-                    yearly_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    yearly_title_run = yearly_title.add_run(
-                        "Figure 2. Annual Paint & Solvent Usage Matrix by Paint Code and Year"
-                    )
-                    yearly_title_run.bold = True
-                    yearly_title_run.font.size = Pt(12)
+                        matrix_filter = doc.add_paragraph()
+                        matrix_filter.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        matrix_filter_run = matrix_filter.add_run(
+                            f"Filters Applied: {filter_details}"
+                        )
+                        matrix_filter_run.italic = True
+                        matrix_filter_run.font.size = Pt(9.5)
 
-                    yearly_filter = doc.add_paragraph()
-                    yearly_filter.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    yearly_filter_run = yearly_filter.add_run(
-                        f"Filters Applied: {filter_details}"
-                    )
-                    yearly_filter_run.italic = True
-                    yearly_filter_run.font.size = Pt(9.5)
-
-                    yearly_chart_buffer = create_top10_usage_ratio_by_year_png(
-                        summary_df,
-                        filter_details,
-                    )
-
-                    yearly_picture_p = doc.add_paragraph()
-                    yearly_picture_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    yearly_picture_p.paragraph_format.space_before = Pt(2)
-                    yearly_picture_p.paragraph_format.space_after = Pt(2)
-                    yearly_picture_p.add_run().add_picture(
-                        yearly_chart_buffer,
-                        width=Inches(10.2),
-                    )
+                        matrix_buffer = create_annual_usage_matrix_png(
+                            annual_matrix_df,
+                            filter_details,
+                        )
+                        matrix_picture = doc.add_paragraph()
+                        matrix_picture.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        matrix_picture.paragraph_format.space_before = Pt(2)
+                        matrix_picture.paragraph_format.space_after = Pt(2)
+                        matrix_picture.add_run().add_picture(
+                            matrix_buffer,
+                            width=Inches(10.2),
+                        )
                 else:
                     doc.add_paragraph("No Top 10 usage data is available for export.")
 
