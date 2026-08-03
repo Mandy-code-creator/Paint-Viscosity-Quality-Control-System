@@ -997,21 +997,15 @@ with tab3:
 
 
 # =========================================================
-# TAB 4: MASTER SHOP FLOOR SOP (V2.0 DELTA VISCOSITY MODEL)
+# TAB 4: MASTER SHOP FLOOR SOP (V3.0 ROBUST SAFE-DEMAND MODEL)
 # =========================================================
 with tab4:
-    st.markdown("### 🖨️ 現場 SOP (V2.0 物理降幅模型)")
+    st.markdown("### 🖨️ 現場 SOP (V3.0 穩健安全需求模型)")
 
-    st.warning(
-        "操作方式：先確認目前黏度區間，再選擇欲達到的目標黏度區間，"
-        "依建議添加比例一次加料，攪拌5分鐘後重新量測。"
-        "建議添加比例不得超過警戒比例，累積添加不得達到停止比例。"
-    )
-
-    st.caption(
-        "註：系統已升級至 V2.0 (Delta Viscosity Model)。\n"
-        "系統先透過「(初始黏度 - 目標黏度) ÷ 稀釋效率」計算預估累積總需求，"
-        "再另外套用單次步進與警戒限制，產生第一次安全添加比例。兩者用途不同，不可混為同一數值。"
+    st.info(
+        "V3.0 將『模型估算需求』與『現場可執行建議』分開呈現。"
+        "模型估算值僅供工程判斷；現場 SOP 的安全總需求與剩餘可加比例，"
+        "均不得超過累積添加警戒比例。若模型需求超過停止比例，系統會直接標示為不適合自動稀釋。"
     )
 
     matrix_df = valid_df.copy()
@@ -1021,267 +1015,542 @@ with tab4:
         st.stop()
 
     # -----------------------------------------------------
-    # 1. 建立初始黏度區間 (Initial Viscosity Zones)
+    # 1. 建立初始黏度區間
     # -----------------------------------------------------
     def create_worker_viscosity_zone(df):
         temp_df = df.copy()
         group_cols = ["Resin", "Position_UI", "Vendor", "Solvent_Type"]
         system_max_visc = temp_df.groupby(group_cols)["黏度(秒)"].transform("max")
-        
+
         def worker_zone(viscosity):
-            if pd.isna(viscosity): return "Unknown"
-            if viscosity <= 70: return "<=70"
-            elif viscosity <= 90: return "71-90"
-            elif viscosity <= 110: return "91-110"
-            elif viscosity <= 130: return "111-130"
+            if pd.isna(viscosity):
+                return "Unknown"
+            if viscosity <= 70:
+                return "<=70"
+            if viscosity <= 90:
+                return "71-90"
+            if viscosity <= 110:
+                return "91-110"
+            if viscosity <= 130:
+                return "111-130"
             return ">130"
 
         temp_df["Worker_Viscosity_Zone"] = temp_df["黏度(秒)"].apply(worker_zone)
         high_visc_mask = temp_df["黏度(秒)"] > 130
-        temp_df.loc[high_visc_mask, "Worker_Viscosity_Zone"] = "130-" + system_max_visc.loc[high_visc_mask].round(1).astype(str)
+        temp_df.loc[high_visc_mask, "Worker_Viscosity_Zone"] = (
+            "130-" + system_max_visc.loc[high_visc_mask].round(1).astype(str)
+        )
         return temp_df
 
     # -----------------------------------------------------
-    # 2. 建立目標黏度區間 (Target Viscosity Zones)
+    # 2. 建立目標黏度區間
     # -----------------------------------------------------
     def create_final_viscosity_zone(value):
-        if pd.isna(value) or value <= 0: return "Unknown"
+        if pd.isna(value) or value <= 0:
+            return "Unknown"
         upper = int(np.ceil(float(value) / 10.0) * 10)
         lower = max(1, upper - 9)
         return f"{lower}~{upper}"
 
     def get_final_zone_order(zone):
-        try: return int(str(zone).split("~")[0])
-        except Exception: return 9999
+        try:
+            return int(str(zone).split("~")[0])
+        except Exception:
+            return 9999
 
     matrix_df = create_worker_viscosity_zone(matrix_df)
-    matrix_df["Target_Viscosity_Zone"] = matrix_df["黏度(秒)_1"].apply(create_final_viscosity_zone)
+    matrix_df["Target_Viscosity_Zone"] = matrix_df["黏度(秒)_1"].apply(
+        create_final_viscosity_zone
+    )
 
     matrix_df = matrix_df[
-        (matrix_df["Worker_Viscosity_Zone"] != "Unknown") & 
-        (matrix_df["Target_Viscosity_Zone"] != "Unknown")
+        (matrix_df["Worker_Viscosity_Zone"] != "Unknown")
+        & (matrix_df["Target_Viscosity_Zone"] != "Unknown")
     ].copy()
 
     # -----------------------------------------------------
-    # 3. 物理飽和分析 (Physical Saturation Analysis by Initial Zone)
+    # 3. 依初始黏度區間建立警戒與停止比例
     # -----------------------------------------------------
     saturation_summary = []
-    group_cols_initial = ["Resin", "Position_UI", "Vendor", "Solvent_Type", "Worker_Viscosity_Zone"]
+    group_cols_initial = [
+        "Resin",
+        "Position_UI",
+        "Vendor",
+        "Solvent_Type",
+        "Worker_Viscosity_Zone",
+    ]
     initial_keys = matrix_df[group_cols_initial].drop_duplicates()
 
     for _, key_row in initial_keys.iterrows():
         zone_df = matrix_df[
-            (matrix_df["Resin"] == key_row["Resin"]) & 
-            (matrix_df["Position_UI"] == key_row["Position_UI"]) &
-            (matrix_df["Vendor"] == key_row["Vendor"]) & 
-            (matrix_df["Solvent_Type"] == key_row["Solvent_Type"]) &
-            (matrix_df["Worker_Viscosity_Zone"] == key_row["Worker_Viscosity_Zone"])
+            (matrix_df["Resin"] == key_row["Resin"])
+            & (matrix_df["Position_UI"] == key_row["Position_UI"])
+            & (matrix_df["Vendor"] == key_row["Vendor"])
+            & (matrix_df["Solvent_Type"] == key_row["Solvent_Type"])
+            & (
+                matrix_df["Worker_Viscosity_Zone"]
+                == key_row["Worker_Viscosity_Zone"]
+            )
         ].copy()
-        
+
         sat_result = build_saturation_profile(zone_df)
         safe_limits = get_safety_limits(zone_df, sat_result)
-        
-        saturation_summary.append({
-            "Resin": key_row["Resin"], "Position_UI": key_row["Position_UI"],
-            "Vendor": key_row["Vendor"], "Solvent_Type": key_row["Solvent_Type"],
-            "Worker_Viscosity_Zone": key_row["Worker_Viscosity_Zone"],
-            "Phys_Sat_Warning": safe_limits["warning_ratio"],
-            "Phys_Sat_Stop": safe_limits["stop_ratio"]
-        })
+
+        saturation_summary.append(
+            {
+                "Resin": key_row["Resin"],
+                "Position_UI": key_row["Position_UI"],
+                "Vendor": key_row["Vendor"],
+                "Solvent_Type": key_row["Solvent_Type"],
+                "Worker_Viscosity_Zone": key_row["Worker_Viscosity_Zone"],
+                "Phys_Sat_Warning": safe_limits["warning_ratio"],
+                "Phys_Sat_Stop": safe_limits["stop_ratio"],
+            }
+        )
 
     sat_df = pd.DataFrame(saturation_summary)
 
     # -----------------------------------------------------
-    # 4. 依據「初始 + 目標」雙重分組計算基礎統計值
+    # 4. 依「初始區間 + 目標區間」建立穩健參考統計
     # -----------------------------------------------------
     group_cols_target = [
-        "Resin", "Position_UI", "Vendor", "Solvent_Type", 
-        "Worker_Viscosity_Zone", "Target_Viscosity_Zone"
+        "Resin",
+        "Position_UI",
+        "Vendor",
+        "Solvent_Type",
+        "Worker_Viscosity_Zone",
+        "Target_Viscosity_Zone",
     ]
 
     worker_sop = (
         matrix_df.groupby(group_cols_target, observed=False)
         .agg(
             Adjustment_Records=("塗料批號", "size"),
-            Ref_Sensitivity=("Sensitivity", "median"), # Critical factor for V2.0
-            Final_Visc_Lower=("黏度(秒)_1", get_spc_lower_bound), 
-            Final_Visc_Upper=("黏度(秒)_1", get_spc_upper_bound), 
+            Paint_Batches=("塗料批號", "nunique"),
+            Ref_Sensitivity=("Sensitivity", "median"),
+            Historical_Ratio_Median=("Solvent_Ratio_Percent", "median"),
+            Historical_Ratio_P25=(
+                "Solvent_Ratio_Percent",
+                lambda x: x.quantile(0.25),
+            ),
+            Historical_Ratio_P75=(
+                "Solvent_Ratio_Percent",
+                lambda x: x.quantile(0.75),
+            ),
+            Final_Visc_Lower=("黏度(秒)_1", get_spc_lower_bound),
+            Final_Visc_Upper=("黏度(秒)_1", get_spc_upper_bound),
             Temperature_P25=("溫度", lambda x: x.quantile(0.25)),
-            Temperature_P75=("溫度", lambda x: x.quantile(0.75))
-        ).reset_index()
+            Temperature_P75=("溫度", lambda x: x.quantile(0.75)),
+        )
+        .reset_index()
     )
 
-    worker_sop = worker_sop[worker_sop["Adjustment_Records"] >= MIN_REFERENCE_RECORDS].copy()
+    worker_sop = worker_sop[
+        worker_sop["Adjustment_Records"] >= MIN_REFERENCE_RECORDS
+    ].copy()
+
+    if worker_sop.empty:
+        st.warning(
+            f"各初始與目標黏度組合均少於 {MIN_REFERENCE_RECORDS} 筆有效紀錄，"
+            "目前無法建立可靠 SOP。"
+        )
+        st.stop()
 
     # -----------------------------------------------------
-    # 5. V2.0 DELTA VISCOSITY ALGORITHM (物理降幅核心計算)
+    # 5. V3.0 穩健安全需求模型
     # -----------------------------------------------------
     def get_zone_center(zone_str, zone_type="initial"):
         if zone_type == "initial":
             z = str(zone_str)
-            if z == "<=70": return 60.0
-            elif z == "71-90": return 80.5
-            elif z == "91-110": return 100.5
-            elif z == "111-130": return 120.5
-            elif z.startswith("130-"):
-                try: return (130 + float(z.split("-")[1])) / 2
-                except: return 140.0
-            elif z == ">130": return 140.0
-        else: # target (e.g. 31~40)
+            if z == "<=70":
+                return 60.0
+            if z == "71-90":
+                return 80.5
+            if z == "91-110":
+                return 100.5
+            if z == "111-130":
+                return 120.5
+            if z.startswith("130-"):
+                try:
+                    return (130.0 + float(z.split("-")[1])) / 2.0
+                except Exception:
+                    return 140.0
+            if z == ">130":
+                return 140.0
+        else:
             try:
-                parts = str(zone_str).split("~")
-                return (float(parts[0]) + float(parts[1])) / 2
-            except: return np.nan
+                lower, upper = str(zone_str).split("~")
+                return (float(lower) + float(upper)) / 2.0
+            except Exception:
+                return np.nan
         return np.nan
 
-    # 擷取區間中心值
-    worker_sop["Initial_Center"] = worker_sop["Worker_Viscosity_Zone"].apply(lambda x: get_zone_center(x, "initial"))
-    worker_sop["Target_Center"] = worker_sop["Target_Viscosity_Zone"].apply(lambda x: get_zone_center(x, "target"))
-    
-    # 計算預期降幅 Delta V
-    worker_sop["Expected_Delta_V"] = worker_sop["Initial_Center"] - worker_sop["Target_Center"]
+    worker_sop["Initial_Center"] = worker_sop["Worker_Viscosity_Zone"].apply(
+        lambda x: get_zone_center(x, "initial")
+    )
+    worker_sop["Target_Center"] = worker_sop["Target_Viscosity_Zone"].apply(
+        lambda x: get_zone_center(x, "target")
+    )
+    worker_sop["Expected_Delta_V"] = (
+        worker_sop["Initial_Center"] - worker_sop["Target_Center"]
+    )
 
-    # 過濾掉不合理的降幅 (例如目標比初始還高)
-    worker_sop = worker_sop[worker_sop["Expected_Delta_V"] > 0].copy()
+    worker_sop = worker_sop[
+        (worker_sop["Expected_Delta_V"] > 0)
+        & (worker_sop["Ref_Sensitivity"] > 0)
+    ].copy()
 
-    # 計算物理理論比例 = 降幅 / 稀釋效率
-    worker_sop["Theoretical_Ratio"] = worker_sop["Expected_Delta_V"] / worker_sop["Ref_Sensitivity"]
+    # 物理模型：預計降黏幅度 ÷ 歷史中位稀釋效率
+    worker_sop["Physics_Ratio"] = (
+        worker_sop["Expected_Delta_V"]
+        / worker_sop["Ref_Sensitivity"].replace(0, np.nan)
+    )
 
-    # 合併物理飽和極限 (來自初始塗料屬性，而非目標經驗)
-    worker_sop = worker_sop.merge(sat_df, on=group_cols_initial, how="left")
+    # 歷史資料權重：5筆為25%，10筆為50%，16筆以上最高80%。
+    # 保留至少20%的物理模型權重，避免少數歷史操作習慣完全主導結果。
+    worker_sop["Historical_Weight"] = np.minimum(
+        worker_sop["Adjustment_Records"] / 20.0,
+        0.80,
+    )
 
-    # 警戒極限 = 物理飽和警戒 (若無資料則用 1.3 倍理論值)
-    worker_sop["Saturation_Warning_Ratio"] = worker_sop["Phys_Sat_Warning"].fillna(worker_sop["Theoretical_Ratio"] * 1.3)
+    valid_history = (
+        worker_sop["Historical_Ratio_Median"].notna()
+        & np.isfinite(worker_sop["Historical_Ratio_Median"])
+        & (worker_sop["Historical_Ratio_Median"] > 0)
+    )
 
-    # 停止極限 = 物理飽和停止 (若無資料則用 1.5 倍理論值)
-    worker_sop["Saturation_Stop_Ratio"] = worker_sop["Phys_Sat_Stop"].fillna(worker_sop["Theoretical_Ratio"] * 1.5)
-    
-    # 確保停止極限 >= 警戒極限
-    worker_sop["Saturation_Stop_Ratio"] = np.maximum(worker_sop["Saturation_Stop_Ratio"], worker_sop["Saturation_Warning_Ratio"])
+    worker_sop["Model_Estimated_Total_Ratio"] = np.where(
+        valid_history,
+        (
+            worker_sop["Historical_Weight"]
+            * worker_sop["Historical_Ratio_Median"]
+            + (1.0 - worker_sop["Historical_Weight"])
+            * worker_sop["Physics_Ratio"]
+        ),
+        worker_sop["Physics_Ratio"],
+    )
+
+    worker_sop["Model_Estimated_Total_Ratio"] = (
+        worker_sop["Model_Estimated_Total_Ratio"]
+        .replace([np.inf, -np.inf], np.nan)
+        .clip(lower=0)
+    )
+
+    # 合併警戒與停止比例
+    worker_sop = worker_sop.merge(
+        sat_df,
+        on=group_cols_initial,
+        how="left",
+    )
+
+    # 若無法辨識物理飽和點，採歷史分布作為備援：P90警戒、P95停止。
+    fallback_warning = worker_sop["Historical_Ratio_P75"]
+    fallback_stop = np.maximum(
+        worker_sop["Historical_Ratio_P75"],
+        worker_sop["Historical_Ratio_Median"] * 1.10,
+    )
+
+    worker_sop["Saturation_Warning_Ratio"] = (
+        worker_sop["Phys_Sat_Warning"]
+        .where(worker_sop["Phys_Sat_Warning"] > 0, fallback_warning)
+    )
+    worker_sop["Saturation_Stop_Ratio"] = (
+        worker_sop["Phys_Sat_Stop"]
+        .where(worker_sop["Phys_Sat_Stop"] > 0, fallback_stop)
+    )
+
+    worker_sop["Saturation_Warning_Ratio"] = worker_sop[
+        "Saturation_Warning_Ratio"
+    ].fillna(worker_sop["Model_Estimated_Total_Ratio"])
+
+    worker_sop["Saturation_Stop_Ratio"] = worker_sop[
+        "Saturation_Stop_Ratio"
+    ].fillna(worker_sop["Saturation_Warning_Ratio"])
+
+    worker_sop["Saturation_Stop_Ratio"] = np.maximum(
+        worker_sop["Saturation_Stop_Ratio"],
+        worker_sop["Saturation_Warning_Ratio"],
+    )
+
+    # 現場安全總需求不得超過警戒比例。
+    worker_sop["Safe_Total_Ratio"] = np.minimum(
+        worker_sop["Model_Estimated_Total_Ratio"],
+        worker_sop["Saturation_Warning_Ratio"],
+    )
+
+    worker_sop["Target_Feasibility"] = np.select(
+        [
+            worker_sop["Model_Estimated_Total_Ratio"]
+            > worker_sop["Saturation_Stop_Ratio"],
+            worker_sop["Model_Estimated_Total_Ratio"]
+            > worker_sop["Saturation_Warning_Ratio"],
+        ],
+        [
+            "超出停止比例－不建議以自動加料達成",
+            "超出警戒比例－SOP僅建議至警戒值",
+        ],
+        default="正常範圍－可分段執行",
+    )
 
     # -----------------------------------------------------
-    # 5.1 區分「預估總需求」與「第一次安全添加」
+    # 5.1 第一次安全添加比例
     # -----------------------------------------------------
-    # 預估累積總需求：反映不同目標黏度所需的完整降黏需求。
-    # 目標越低、需要下降的黏度越大，預估累積需求比例應越高。
-    worker_sop["Estimated_Total_Ratio"] = worker_sop["Theoretical_Ratio"].clip(lower=0)
-
-    # 第一次添加比例採「累進分段」控制，不再套用固定 3% 上限。
-    # 目的：消除 6% 與 12% 分界處的反向跳降，確保總需求增加時，
-    # 第一次建議添加比例不會反而下降。
-    # 規則：
-    # 1. 前 6% 需求：按 100% 納入第一次添加。
-    # 2. 6% 至 12% 的超出部分：按 70% 納入第一次添加。
-    # 3. 超過 12% 的超出部分：按 60% 納入第一次添加。
-    # 4. 最終仍不得超過警戒比例的 80%。
     def calculate_worker_first_add_ratio(row):
-        total_ratio = pd.to_numeric(row.get("Estimated_Total_Ratio"), errors="coerce")
-        warning_ratio = pd.to_numeric(row.get("Saturation_Warning_Ratio"), errors="coerce")
+        safe_total = pd.to_numeric(row.get("Safe_Total_Ratio"), errors="coerce")
+        warning_ratio = pd.to_numeric(
+            row.get("Saturation_Warning_Ratio"), errors="coerce"
+        )
 
-        if pd.isna(total_ratio) or not np.isfinite(total_ratio) or total_ratio <= 0:
+        if pd.isna(safe_total) or not np.isfinite(safe_total) or safe_total <= 0:
             return 0.0
 
-        # Marginal tiering: only the portion within each tier uses that tier's factor.
-        if total_ratio <= 6.0:
-            demand_based_ratio = total_ratio
-        elif total_ratio <= 12.0:
-            demand_based_ratio = 6.0 + (total_ratio - 6.0) * 0.70
+        # 累進分段：需求越高，第一次添加比例仍單調增加，但增幅逐步降低。
+        if safe_total <= 6.0:
+            demand_based_ratio = safe_total
+        elif safe_total <= 12.0:
+            demand_based_ratio = 6.0 + (safe_total - 6.0) * 0.70
         else:
-            demand_based_ratio = 6.0 + (12.0 - 6.0) * 0.70 + (total_ratio - 12.0) * 0.60
+            demand_based_ratio = (
+                6.0
+                + (12.0 - 6.0) * 0.70
+                + (safe_total - 12.0) * 0.60
+            )
 
-        # Fail-safe: cap the first addition at 80% of the warning ratio.
-        if pd.isna(warning_ratio) or not np.isfinite(warning_ratio) or warning_ratio <= 0:
+        # 第一次添加最多到警戒比例的80%，保留回饋量測空間。
+        if (
+            pd.isna(warning_ratio)
+            or not np.isfinite(warning_ratio)
+            or warning_ratio <= 0
+        ):
             warning_safety_limit = demand_based_ratio
         else:
             warning_safety_limit = warning_ratio * 0.80
 
-        return max(0.0, min(demand_based_ratio, warning_safety_limit))
+        return max(0.0, min(demand_based_ratio, warning_safety_limit, safe_total))
 
     worker_sop["First_Add_Ratio"] = worker_sop.apply(
         calculate_worker_first_add_ratio,
-        axis=1
+        axis=1,
     )
 
-    # 第一次添加後仍可能需要的預估比例。
-    # 實際第二次添加仍必須回到 Tab 2，依第一次量測結果重新計算。
-    worker_sop["Estimated_Remaining_Ratio"] = np.maximum(
-        worker_sop["Estimated_Total_Ratio"] - worker_sop["First_Add_Ratio"],
-        0.0
+    # 僅顯示警戒值以下仍可使用的安全空間，不再顯示理論剩餘需求。
+    worker_sop["Safe_Remaining_Ratio"] = np.maximum(
+        worker_sop["Safe_Total_Ratio"] - worker_sop["First_Add_Ratio"],
+        0.0,
     )
 
-    # -----------------------------------------------------
-    # 6. Format Data & UI Output 
-    # -----------------------------------------------------
     worker_sop["Historical_Final_Visc_Range"] = worker_sop.apply(
-        lambda row: format_range(row["Final_Visc_Lower"], row["Final_Visc_Upper"], decimals=1), axis=1
+        lambda row: format_range(
+            row["Final_Visc_Lower"],
+            row["Final_Visc_Upper"],
+            decimals=1,
+        ),
+        axis=1,
     )
 
     worker_sop["Historical_Temp_Range"] = worker_sop.apply(
-        lambda row: format_range(row["Temperature_P25"], row["Temperature_P75"], decimals=1), axis=1
+        lambda row: format_range(
+            row["Temperature_P25"],
+            row["Temperature_P75"],
+            decimals=1,
+        ),
+        axis=1,
     )
 
-    worker_sop["塗裝位置"] = worker_sop["Position_UI"].map({
-        "Primer": "底漆 (P)", "Top Finish": "正面漆 (TF)", "Back Finish": "背面漆 (BF)"
-    }).fillna(worker_sop["Position_UI"])
+    worker_sop["塗裝位置"] = worker_sop["Position_UI"].map(
+        {
+            "Primer": "底漆 (P)",
+            "Top Finish": "正面漆 (TF)",
+            "Back Finish": "背面漆 (BF)",
+        }
+    ).fillna(worker_sop["Position_UI"])
 
-    worker_output = worker_sop[[
-        "Resin", 
-        "塗裝位置", 
-        "Vendor", 
-        "Solvent_Type", 
-        "Worker_Viscosity_Zone",
-        "Target_Viscosity_Zone",
-        "Ref_Sensitivity",
-        "Expected_Delta_V",
-        "Estimated_Total_Ratio",
-        "First_Add_Ratio",
-        "Estimated_Remaining_Ratio",
-        "Historical_Final_Visc_Range",
-        "Historical_Temp_Range",
-        "Saturation_Warning_Ratio",
-        "Saturation_Stop_Ratio"
-    ]].copy()
+    # -----------------------------------------------------
+    # 6. 管理摘要：給主管看的決策表
+    # -----------------------------------------------------
+    management_output = worker_sop[
+        [
+            "Resin",
+            "塗裝位置",
+            "Vendor",
+            "Solvent_Type",
+            "Worker_Viscosity_Zone",
+            "Target_Viscosity_Zone",
+            "Adjustment_Records",
+            "Paint_Batches",
+            "Historical_Ratio_Median",
+            "Model_Estimated_Total_Ratio",
+            "Safe_Total_Ratio",
+            "Saturation_Warning_Ratio",
+            "Saturation_Stop_Ratio",
+            "Target_Feasibility",
+        ]
+    ].copy()
 
-    worker_output = worker_output.rename(columns={
-        "Resin": "樹脂種類", 
-        "Vendor": "塗料供應商", 
-        "Solvent_Type": "稀釋劑種類",
-        "Worker_Viscosity_Zone": "初始黏度區間", 
-        "Target_Viscosity_Zone": "目標黏度區間",
-        "Ref_Sensitivity": "參考稀釋效率",
-        "Expected_Delta_V": "預計降黏幅度(秒)",
-        "Estimated_Total_Ratio": "預估總需求比例(%)",
-        "First_Add_Ratio": "第一次建議添加比例(%)",
-        "Estimated_Remaining_Ratio": "首次後預估剩餘比例(%)",
-        "Historical_Final_Visc_Range": "歷史最終黏度範圍",
-        "Historical_Temp_Range": "歷史參考溫度範圍",
-        "Saturation_Warning_Ratio": "累積添加警戒比例(%)",
-        "Saturation_Stop_Ratio": "累積添加停止比例(%)"
-    })
+    management_output = management_output.rename(
+        columns={
+            "Resin": "樹脂種類",
+            "Vendor": "塗料供應商",
+            "Solvent_Type": "稀釋劑種類",
+            "Worker_Viscosity_Zone": "初始黏度區間",
+            "Target_Viscosity_Zone": "目標黏度區間",
+            "Adjustment_Records": "有效調整紀錄數",
+            "Paint_Batches": "歷史批數",
+            "Historical_Ratio_Median": "歷史代表添加比例(%)",
+            "Model_Estimated_Total_Ratio": "模型估算需求比例(%)",
+            "Safe_Total_Ratio": "SOP安全總需求比例(%)",
+            "Saturation_Warning_Ratio": "累積添加警戒比例(%)",
+            "Saturation_Stop_Ratio": "累積添加停止比例(%)",
+            "Target_Feasibility": "評估結果",
+        }
+    )
 
-    worker_output["_initial_order"] = worker_output["初始黏度區間"].apply(get_zone_order)
-    worker_output["_target_order"] = worker_output["目標黏度區間"].apply(get_final_zone_order)
+    management_output["_initial_order"] = management_output[
+        "初始黏度區間"
+    ].apply(get_zone_order)
+    management_output["_target_order"] = management_output[
+        "目標黏度區間"
+    ].apply(get_final_zone_order)
+    management_output = management_output.sort_values(
+        by=[
+            "樹脂種類",
+            "塗裝位置",
+            "塗料供應商",
+            "稀釋劑種類",
+            "_initial_order",
+            "_target_order",
+        ]
+    ).drop(columns=["_initial_order", "_target_order"])
 
-    worker_output = worker_output.sort_values(
-        by=["樹脂種類", "塗裝位置", "塗料供應商", "稀釋劑種類", "_initial_order", "_target_order"]
-    ).drop(columns=["_initial_order", "_target_order"]).reset_index(drop=True)
+    st.markdown("### 一、管理摘要（主管報告用）")
+    st.caption(
+        "模型估算需求用於判斷目標可行性；SOP安全總需求才是現場允許使用的累積建議值。"
+    )
 
     st.dataframe(
-        worker_output,
+        management_output,
         column_config={
             "初始黏度區間": st.column_config.TextColumn("初始黏度區間 (秒)"),
             "目標黏度區間": st.column_config.TextColumn("目標黏度區間 (秒)"),
-            "參考稀釋效率": st.column_config.NumberColumn("參考稀釋效率 (s/%)", format="%.2f"),
-            "預計降黏幅度(秒)": st.column_config.NumberColumn("預計降黏幅度 (秒)", format="%.1f"),
-            "預估總需求比例(%)": st.column_config.NumberColumn("預估總需求比例 (%)", format="%.2f"),
-            "第一次建議添加比例(%)": st.column_config.NumberColumn("第一次建議添加比例 (%)", format="%.2f"),
-            "首次後預估剩餘比例(%)": st.column_config.NumberColumn("首次後預估剩餘比例 (%)", format="%.2f"),
-            "歷史最終黏度範圍": st.column_config.TextColumn("歷史最終黏度範圍"),
-            "歷史參考溫度範圍": st.column_config.TextColumn("歷史參考溫度範圍 (°C)"),
-            "累積添加警戒比例(%)": st.column_config.NumberColumn("累積添加警戒比例(%)", format="%.2f"),
-            "累積添加停止比例(%)": st.column_config.NumberColumn("累積添加停止比例(%)", format="%.2f")
+            "有效調整紀錄數": st.column_config.NumberColumn(
+                "有效紀錄數", format="%d"
+            ),
+            "歷史批數": st.column_config.NumberColumn("歷史批數", format="%d"),
+            "歷史代表添加比例(%)": st.column_config.NumberColumn(
+                "歷史代表比例 (%)", format="%.2f"
+            ),
+            "模型估算需求比例(%)": st.column_config.NumberColumn(
+                "模型估算需求 (%)", format="%.2f"
+            ),
+            "SOP安全總需求比例(%)": st.column_config.NumberColumn(
+                "SOP安全總需求 (%)", format="%.2f"
+            ),
+            "累積添加警戒比例(%)": st.column_config.NumberColumn(
+                "警戒比例 (%)", format="%.2f"
+            ),
+            "累積添加停止比例(%)": st.column_config.NumberColumn(
+                "停止比例 (%)", format="%.2f"
+            ),
+            "評估結果": st.column_config.TextColumn("評估結果"),
         },
-        use_container_width=True, hide_index=True
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    # -----------------------------------------------------
+    # 7. 現場 SOP：只保留可操作數值
+    # -----------------------------------------------------
+    shopfloor_output = worker_sop[
+        [
+            "Resin",
+            "塗裝位置",
+            "Vendor",
+            "Solvent_Type",
+            "Worker_Viscosity_Zone",
+            "Target_Viscosity_Zone",
+            "Historical_Final_Visc_Range",
+            "First_Add_Ratio",
+            "Safe_Remaining_Ratio",
+            "Safe_Total_Ratio",
+            "Historical_Temp_Range",
+            "Saturation_Warning_Ratio",
+            "Saturation_Stop_Ratio",
+            "Target_Feasibility",
+        ]
+    ].copy()
+
+    shopfloor_output = shopfloor_output.rename(
+        columns={
+            "Resin": "樹脂種類",
+            "Vendor": "塗料供應商",
+            "Solvent_Type": "稀釋劑種類",
+            "Worker_Viscosity_Zone": "初始黏度區間",
+            "Target_Viscosity_Zone": "目標黏度區間",
+            "Historical_Final_Visc_Range": "歷史最終黏度範圍",
+            "First_Add_Ratio": "第一次建議添加比例(%)",
+            "Safe_Remaining_Ratio": "首次後安全剩餘比例(%)",
+            "Safe_Total_Ratio": "SOP安全總需求比例(%)",
+            "Historical_Temp_Range": "歷史參考溫度範圍",
+            "Saturation_Warning_Ratio": "累積添加警戒比例(%)",
+            "Saturation_Stop_Ratio": "累積添加停止比例(%)",
+            "Target_Feasibility": "操作判定",
+        }
+    )
+
+    shopfloor_output["_initial_order"] = shopfloor_output[
+        "初始黏度區間"
+    ].apply(get_zone_order)
+    shopfloor_output["_target_order"] = shopfloor_output[
+        "目標黏度區間"
+    ].apply(get_final_zone_order)
+    shopfloor_output = shopfloor_output.sort_values(
+        by=[
+            "樹脂種類",
+            "塗裝位置",
+            "塗料供應商",
+            "稀釋劑種類",
+            "_initial_order",
+            "_target_order",
+        ]
+    ).drop(columns=["_initial_order", "_target_order"])
+
+    st.markdown("---")
+    st.markdown("### 二、現場 SOP（作業人員使用）")
+    st.caption(
+        "現場僅依第一次建議添加比例執行；攪拌5分鐘後重新量測。"
+        "首次後安全剩餘比例不是一次追加量，後續必須回到 Tab 2 重新計算。"
+    )
+
+    st.dataframe(
+        shopfloor_output,
+        column_config={
+            "初始黏度區間": st.column_config.TextColumn("初始黏度區間 (秒)"),
+            "目標黏度區間": st.column_config.TextColumn("目標黏度區間 (秒)"),
+            "歷史最終黏度範圍": st.column_config.TextColumn(
+                "歷史最終黏度範圍"
+            ),
+            "第一次建議添加比例(%)": st.column_config.NumberColumn(
+                "第一次建議添加比例 (%)", format="%.2f"
+            ),
+            "首次後安全剩餘比例(%)": st.column_config.NumberColumn(
+                "首次後安全剩餘比例 (%)", format="%.2f"
+            ),
+            "SOP安全總需求比例(%)": st.column_config.NumberColumn(
+                "SOP安全總需求比例 (%)", format="%.2f"
+            ),
+            "歷史參考溫度範圍": st.column_config.TextColumn(
+                "歷史參考溫度範圍 (°C)"
+            ),
+            "累積添加警戒比例(%)": st.column_config.NumberColumn(
+                "累積添加警戒比例 (%)", format="%.2f"
+            ),
+            "累積添加停止比例(%)": st.column_config.NumberColumn(
+                "累積添加停止比例 (%)", format="%.2f"
+            ),
+            "操作判定": st.column_config.TextColumn("操作判定"),
+        },
+        use_container_width=True,
+        hide_index=True,
     )
 
     st.markdown("---")
@@ -1290,37 +1559,69 @@ with tab4:
         """
         1. 先確認樹脂、塗裝位置、供應商及稀釋劑種類。  
         2. 量測目前黏度，查詢相對應的「初始黏度區間」。  
-        3. 依製程需求選擇「目標黏度區間」。 
-        4. 「預估總需求比例」代表依目前區間降至目標區間的完整理論需求，不可直接一次全部加入。  
-        5. 「第一次建議添加比例」僅為第一次安全添加量，採累進分段計算，並受警戒比例安全上限限制。  
-        6. 添加量 = 原始塗料重量 × 第一次建議添加比例(%) ÷ 100。  
-        7. 一次添加後攪拌至少 5 分鐘，再重新量測確認。  
-        8. 若仍高於目標上限，回到 Tab 2 依實測結果與閉迴路控制邏輯計算下一次添加量。  
-        9. 累積添加比例不得超過「累積添加停止比例」。  
+        3. 依製程需求選擇「目標黏度區間」。  
+        4. 僅依「第一次建議添加比例」計算第一次添加量。  
+        5. 添加量 = 原始塗料重量 × 第一次建議添加比例(%) ÷ 100。  
+        6. 添加後攪拌至少 5 分鐘，再重新量測黏度。  
+        7. 「首次後安全剩餘比例」僅代表警戒值以下仍有的安全空間，不可直接一次加完。  
+        8. 若仍高於目標上限，回到 Tab 2，依實測結果重新計算下一次添加量。  
+        9. 若操作判定為「超出停止比例」，不得依模型估算值執行加料，需由製程工程師確認。  
         """
     )
 
     # -----------------------------------------------------
-    # 7. CSV Export
+    # 8. CSV Export
     # -----------------------------------------------------
-    export_output = worker_output.copy()
-    numeric_columns = [
-        "預計降黏幅度(秒)",
-        "預估總需求比例(%)",
-        "第一次建議添加比例(%)",
-        "首次後預估剩餘比例(%)",
+    management_export = management_output.copy()
+    management_numeric_cols = [
+        "歷史代表添加比例(%)",
+        "模型估算需求比例(%)",
+        "SOP安全總需求比例(%)",
         "累積添加警戒比例(%)",
-        "累積添加停止比例(%)"
+        "累積添加停止比例(%)",
     ]
+    for col in management_numeric_cols:
+        management_export[col] = pd.to_numeric(
+            management_export[col], errors="coerce"
+        ).round(2)
 
-    for col in numeric_columns:
-        export_output[col] = pd.to_numeric(export_output[col], errors="coerce").round(1)
+    management_csv = management_export.to_csv(
+        index=False,
+        float_format="%.2f",
+    ).encode("utf-8-sig")
 
-    csv_export = export_output.to_csv(index=False, float_format="%.1f").encode("utf-8-sig")
+    shopfloor_export = shopfloor_output.copy()
+    shopfloor_numeric_cols = [
+        "第一次建議添加比例(%)",
+        "首次後安全剩餘比例(%)",
+        "SOP安全總需求比例(%)",
+        "累積添加警戒比例(%)",
+        "累積添加停止比例(%)",
+    ]
+    for col in shopfloor_numeric_cols:
+        shopfloor_export[col] = pd.to_numeric(
+            shopfloor_export[col], errors="coerce"
+        ).round(2)
 
-    st.download_button(
-        label="下載現場歷史加料參考表 CSV",
-        data=csv_export,
-        file_name="現場歷史加料參考表_V2_Delta_Model.csv",
-        mime="text/csv"
-    )
+    shopfloor_csv = shopfloor_export.to_csv(
+        index=False,
+        float_format="%.2f",
+    ).encode("utf-8-sig")
+
+    export_col1, export_col2 = st.columns(2)
+    with export_col1:
+        st.download_button(
+            label="下載主管管理摘要 CSV",
+            data=management_csv,
+            file_name="SOP管理摘要_V3.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+    with export_col2:
+        st.download_button(
+            label="下載現場 SOP CSV",
+            data=shopfloor_csv,
+            file_name="現場稀釋劑添加SOP_V3.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
