@@ -104,6 +104,11 @@ else:
     date_part = pd.Series(pd.NaT, index=df.index)
     df["_Analysis_Date"] = pd.NaT
 
+# Year used for the multi-year comparison chart.
+# Keep it nullable so records with missing dates remain available in other tabs,
+# while Tab 1 can clearly exclude them from year-by-year comparison.
+df["Analysis_Year"] = df["_Analysis_Date"].dt.year.astype("Int64")
+
 if time_col:
     time_text = (
         df[time_col]
@@ -459,10 +464,22 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
             )
 
         ax1.set_xticks(x)
+        if "Analysis_Year" in chart_df.columns:
+            x_tick_labels = [
+                f"{paint_code}\n{year_value}"
+                for paint_code, year_value in zip(
+                    chart_df["Paint_Code"].astype(str),
+                    chart_df["Analysis_Year"].astype(str),
+                )
+            ]
+        else:
+            x_tick_labels = chart_df["Paint_Code"].astype(str).tolist()
+
         ax1.set_xticklabels(
-            chart_df["Paint_Code"].astype(str),
-            fontsize=8.8,
+            x_tick_labels,
+            fontsize=8.0 if len(chart_df) > 15 else 8.8,
             color="black",
+            rotation=0,
         )
         ax1.set_xlabel("Paint Code", fontsize=11, color="black", labelpad=10)
         ax1.set_ylabel("Weight (kg)", fontsize=11, color="black")
@@ -937,128 +954,304 @@ tab_ranking, tab_detail, tab_line, tab_pilot = st.tabs([
 
 # ----- TAB 1: RANKING -----
 with tab_ranking:
-    st.subheader("1. Paint Code Solvent Consumption (Top 10)")
-
-    full_summary_df = build_summary(
-        filter_df,
-        ["Vendor", "Resin", "Position_UI", "Paint_Code", "Solvent_Type"],
+    st.subheader("1. Paint Code Solvent Consumption by Year (Top 10)")
+    st.caption(
+        "Top 10 paint codes are selected using total solvent consumption across the full selected period. "
+        "The same paint codes are then split by year so management can compare annual paint use, "
+        "solvent use, and weighted solvent ratio on one chart."
     )
-    summary_df = (
-        full_summary_df
-        .sort_values("Total_Solvent_kg", ascending=False)
-        .head(10)
-        .reset_index(drop=True)
-    )
-    summary_df.insert(0, "Rank", np.arange(1, len(summary_df) + 1))
 
-    if summary_df.empty:
-        st.info("No paint-code summary is available for the selected filters.")
+    ranking_source_df = filter_df.copy()
+    ranking_source_df["Analysis_Year"] = pd.to_numeric(
+        ranking_source_df["Analysis_Year"], errors="coerce"
+    ).astype("Int64")
+    ranking_source_df = ranking_source_df[
+        ranking_source_df["Analysis_Year"].notna()
+    ].copy()
+
+    if ranking_source_df.empty:
+        st.info(
+            "No valid dated records are available for year-by-year comparison "
+            "under the selected filters."
+        )
+        summary_df = pd.DataFrame()
     else:
-        # One combined chart replaces the previous duplicate usage and ratio charts.
-        fig_dual = go.Figure()
+        ranking_source_df["Analysis_Year"] = (
+            ranking_source_df["Analysis_Year"].astype(int).astype(str)
+        )
 
-        fig_dual.add_trace(go.Bar(
-            x=summary_df["Paint_Code"],
-            y=summary_df["Total_Paint_kg"],
-            name="Paint (kg)",
-            marker_color="#5B8FF9",
-            yaxis="y1",
-            text=summary_df["Total_Paint_kg"].apply(lambda x: f"{x:,.0f}"),
-            textposition="auto",
-        ))
+        # 1. Select Top 10 by total solvent use across all available years.
+        overall_summary_df = build_summary(
+            ranking_source_df,
+            ["Vendor", "Resin", "Position_UI", "Paint_Code", "Solvent_Type"],
+        )
 
-        fig_dual.add_trace(go.Bar(
-            x=summary_df["Paint_Code"],
-            y=summary_df["Total_Solvent_kg"],
-            name="Solvent (kg)",
-            marker_color="#F6BD16",
-            yaxis="y1",
-            text=summary_df["Total_Solvent_kg"].apply(lambda x: f"{x:,.0f}"),
-            textposition="auto",
-        ))
+        top10_overall_df = (
+            overall_summary_df
+            .sort_values("Total_Solvent_kg", ascending=False)
+            .head(10)
+            .reset_index(drop=True)
+        )
 
-        fig_dual.add_trace(go.Scatter(
-            x=summary_df["Paint_Code"],
-            y=summary_df["Weighted_Ratio_Percent"],
-            name="Solvent Ratio (%)",
-            mode="lines+markers",
-            line=dict(color="DeepSkyBlue", width=3),
-            marker=dict(size=8),
-            yaxis="y2",
-        ))
+        top10_codes = top10_overall_df["Paint_Code"].astype(str).tolist()
+        paint_order_map = {
+            paint_code: rank
+            for rank, paint_code in enumerate(top10_codes)
+        }
 
-        for _, row in summary_df.iterrows():
-            fig_dual.add_annotation(
-                x=row["Paint_Code"],
-                y=row["Weighted_Ratio_Percent"],
-                text=f"<b>{row['Weighted_Ratio_Percent']:.2f}%</b>",
-                xref="x",
-                yref="y2",
-                showarrow=False,
-                yshift=18,
-                font=dict(color="black", size=12),
-                bgcolor="rgba(255,255,255,0.85)",
-                borderpad=2,
+        top10_source_df = ranking_source_df[
+            ranking_source_df["Paint_Code"].astype(str).isin(top10_codes)
+        ].copy()
+
+        # 2. Recalculate each Top 10 paint code separately for each year.
+        summary_df = build_summary(
+            top10_source_df,
+            ["Paint_Code", "Analysis_Year"],
+        )
+
+        summary_df["_Paint_Order"] = (
+            summary_df["Paint_Code"].astype(str).map(paint_order_map)
+        )
+        summary_df["_Year_Order"] = pd.to_numeric(
+            summary_df["Analysis_Year"], errors="coerce"
+        )
+        summary_df = summary_df.sort_values(
+            ["_Paint_Order", "_Year_Order"]
+        ).reset_index(drop=True)
+        summary_df.insert(
+            0,
+            "Rank",
+            summary_df["Paint_Code"].astype(str).map(paint_order_map).add(1),
+        )
+
+        if summary_df.empty:
+            st.info("No yearly paint-code summary is available for the selected filters.")
+        else:
+            # Two-level x-axis: Paint Code -> Year.
+            multi_x = [
+                summary_df["Paint_Code"].astype(str).tolist(),
+                summary_df["Analysis_Year"].astype(str).tolist(),
+            ]
+
+            fig_dual = go.Figure()
+
+            fig_dual.add_trace(
+                go.Bar(
+                    x=multi_x,
+                    y=summary_df["Total_Paint_kg"],
+                    name="Paint (kg)",
+                    marker_color="#5B8FF9",
+                    yaxis="y1",
+                    text=summary_df["Total_Paint_kg"].map(lambda x: f"{x:,.0f}"),
+                    textposition="inside",
+                    insidetextanchor="end",
+                    textfont=dict(size=9, color="#111827"),
+                    customdata=np.column_stack([
+                        summary_df["Paint_Code"],
+                        summary_df["Analysis_Year"],
+                        summary_df["Adjustment_Records"],
+                        summary_df["Historical_Batches"],
+                    ]),
+                    hovertemplate=(
+                        "<b>Paint Code: %{customdata[0]}</b><br>"
+                        "Year: %{customdata[1]}<br>"
+                        "Paint: %{y:,.0f} kg<br>"
+                        "Records: %{customdata[2]:,.0f}<br>"
+                        "Batches: %{customdata[3]:,.0f}"
+                        "<extra></extra>"
+                    ),
+                )
             )
 
-        ratio_max = summary_df["Weighted_Ratio_Percent"].max()
-        ratio_upper = max(5.0, float(ratio_max) * 1.25) if pd.notna(ratio_max) else 5.0
+            fig_dual.add_trace(
+                go.Bar(
+                    x=multi_x,
+                    y=summary_df["Total_Solvent_kg"],
+                    name="Solvent (kg)",
+                    marker_color="#F6BD16",
+                    yaxis="y1",
+                    text=summary_df["Total_Solvent_kg"].map(lambda x: f"{x:,.0f}"),
+                    textposition="outside",
+                    textfont=dict(size=9, color="#111827"),
+                    customdata=np.column_stack([
+                        summary_df["Paint_Code"],
+                        summary_df["Analysis_Year"],
+                    ]),
+                    hovertemplate=(
+                        "<b>Paint Code: %{customdata[0]}</b><br>"
+                        "Year: %{customdata[1]}<br>"
+                        "Solvent: %{y:,.0f} kg"
+                        "<extra></extra>"
+                    ),
+                )
+            )
 
-        fig_dual.update_layout(
-            title=(
-                "Paint & Solvent Usage vs. Solvent Ratio"
-                f"<br><sup>Filters Applied: {filter_details}</sup>"
-            ),
-            xaxis=dict(title="Paint Code"),
-            yaxis=dict(title="Weight (kg)", side="left", showgrid=False),
-            yaxis2=dict(
-                title="Solvent Ratio (%)",
-                overlaying="y",
-                side="right",
-                showgrid=False,
-                range=[0, ratio_upper],
-            ),
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1,
-            ),
-            height=600,
-            uniformtext_minsize=8,
-            uniformtext_mode="hide",
-            barmode="group",
-        )
-        st.plotly_chart(fig_dual, use_container_width=True)
-        exported_figs["4. Top 10 Usage and Ratio"] = fig_dual
+            # One ratio line per year avoids drawing a misleading connection
+            # from the final year of one paint code to the first year of the next.
+            ratio_line_colors = [
+                "#00AEEF", "#2563EB", "#7C3AED", "#059669",
+                "#DC2626", "#EA580C", "#0891B2", "#4F46E5",
+            ]
+            available_years = sorted(
+                summary_df["Analysis_Year"].astype(str).unique().tolist(),
+                key=lambda value: int(value),
+            )
 
-        ranking_display = summary_df[[
-            "Rank",
-            "Paint_Code",
-            "Total_Paint_kg",
-            "Total_Solvent_kg",
-            "Weighted_Ratio_Percent",
-            "Adjustment_Records",
-            "Historical_Batches",
-        ]].rename(columns={
-            "Paint_Code": "Paint Code",
-            "Total_Paint_kg": "Total Paint (kg)",
-            "Total_Solvent_kg": "Total Solvent (kg)",
-            "Weighted_Ratio_Percent": "Solvent Ratio (%)",
-            "Adjustment_Records": "Records",
-            "Historical_Batches": "Batches",
-        })
+            for year_index, year_value in enumerate(available_years):
+                year_df = summary_df[
+                    summary_df["Analysis_Year"].astype(str) == str(year_value)
+                ].copy()
+                year_df = year_df.sort_values("_Paint_Order")
 
-        st.dataframe(
-            ranking_display.style.format({
-                "Total Paint (kg)": "{:,.2f}",
-                "Total Solvent (kg)": "{:,.2f}",
-                "Solvent Ratio (%)": "{:.2f}",
-            }),
-            use_container_width=True,
-            hide_index=True,
-        )
+                year_x = [
+                    year_df["Paint_Code"].astype(str).tolist(),
+                    year_df["Analysis_Year"].astype(str).tolist(),
+                ]
+
+                fig_dual.add_trace(
+                    go.Scatter(
+                        x=year_x,
+                        y=year_df["Weighted_Ratio_Percent"],
+                        name=f"Solvent Ratio {year_value} (%)",
+                        mode="lines+markers+text",
+                        line=dict(
+                            color=ratio_line_colors[
+                                year_index % len(ratio_line_colors)
+                            ],
+                            width=2.6,
+                        ),
+                        marker=dict(
+                            size=8,
+                            color=ratio_line_colors[
+                                year_index % len(ratio_line_colors)
+                            ],
+                            line=dict(width=0.8, color="white"),
+                        ),
+                        text=year_df["Weighted_Ratio_Percent"].map(
+                            lambda value: f"{value:.2f}%" if pd.notna(value) else ""
+                        ),
+                        textposition="top center",
+                        textfont=dict(size=9, color="black"),
+                        yaxis="y2",
+                        customdata=np.column_stack([
+                            year_df["Paint_Code"],
+                            year_df["Analysis_Year"],
+                            year_df["Total_Paint_kg"],
+                            year_df["Total_Solvent_kg"],
+                        ]),
+                        hovertemplate=(
+                            "<b>Paint Code: %{customdata[0]}</b><br>"
+                            "Year: %{customdata[1]}<br>"
+                            "Paint: %{customdata[2]:,.0f} kg<br>"
+                            "Solvent: %{customdata[3]:,.0f} kg<br>"
+                            "Solvent Ratio: %{y:.2f}%"
+                            "<extra></extra>"
+                        ),
+                    )
+                )
+
+            ratio_max = pd.to_numeric(
+                summary_df["Weighted_Ratio_Percent"], errors="coerce"
+            ).max()
+            ratio_upper = (
+                max(5.0, float(ratio_max) * 1.35)
+                if pd.notna(ratio_max)
+                else 5.0
+            )
+            available_years_text = ", ".join(available_years)
+
+            fig_dual.update_layout(
+                title=dict(
+                    text=(
+                        "<b>Paint & Solvent Usage vs. Solvent Ratio by Year</b>"
+                        f"<br><sup>Years: {available_years_text} | "
+                        f"Filters Applied: {filter_details}</sup>"
+                    ),
+                    x=0.01,
+                    xanchor="left",
+                ),
+                xaxis=dict(
+                    title="Paint Code / Analysis Year",
+                    type="multicategory",
+                    showgrid=False,
+                    showline=True,
+                    linecolor="#111827",
+                    linewidth=1.2,
+                    mirror=True,
+                    tickfont=dict(color="black", size=10),
+                ),
+                yaxis=dict(
+                    title="Weight (kg)",
+                    side="left",
+                    showgrid=True,
+                    gridcolor="#E5E7EB",
+                    showline=True,
+                    linecolor="#111827",
+                    linewidth=1.2,
+                    mirror=True,
+                    rangemode="tozero",
+                ),
+                yaxis2=dict(
+                    title="Solvent Ratio (%)",
+                    overlaying="y",
+                    side="right",
+                    showgrid=False,
+                    showline=True,
+                    linecolor="#111827",
+                    linewidth=1.2,
+                    range=[0, ratio_upper],
+                ),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.03,
+                    xanchor="right",
+                    x=1,
+                ),
+                barmode="group",
+                bargap=0.20,
+                bargroupgap=0.08,
+                height=700,
+                margin=dict(l=80, r=90, t=145, b=110),
+                plot_bgcolor="white",
+                paper_bgcolor="white",
+                font=dict(color="black"),
+                hovermode="closest",
+                uniformtext_minsize=8,
+                uniformtext_mode="hide",
+            )
+
+            st.plotly_chart(fig_dual, use_container_width=True)
+            exported_figs["4. Top 10 Usage and Ratio by Year"] = fig_dual
+
+            ranking_display = summary_df[[
+                "Rank",
+                "Paint_Code",
+                "Analysis_Year",
+                "Total_Paint_kg",
+                "Total_Solvent_kg",
+                "Weighted_Ratio_Percent",
+                "Adjustment_Records",
+                "Historical_Batches",
+            ]].rename(columns={
+                "Paint_Code": "Paint Code",
+                "Analysis_Year": "Year",
+                "Total_Paint_kg": "Total Paint (kg)",
+                "Total_Solvent_kg": "Total Solvent (kg)",
+                "Weighted_Ratio_Percent": "Solvent Ratio (%)",
+                "Adjustment_Records": "Records",
+                "Historical_Batches": "Batches",
+            })
+
+            st.dataframe(
+                ranking_display.style.format({
+                    "Total Paint (kg)": "{:,.0f}",
+                    "Total Solvent (kg)": "{:,.0f}",
+                    "Solvent Ratio (%)": "{:.2f}",
+                }),
+                use_container_width=True,
+                hide_index=True,
+            )
 
 # ----- TAB 2: PAINT CODE HISTORY -----
 with tab_detail:
@@ -2193,7 +2386,7 @@ with export_col1:
                     figure_title = doc.add_paragraph()
                     figure_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     figure_title_run = figure_title.add_run(
-                        "Figure 1. Paint & Solvent Usage vs. Solvent Ratio"
+                        "Figure 1. Paint & Solvent Usage vs. Solvent Ratio by Year"
                     )
                     figure_title_run.bold = True
                     figure_title_run.font.size = Pt(11)
