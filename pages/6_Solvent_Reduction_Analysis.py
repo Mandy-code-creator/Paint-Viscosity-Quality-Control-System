@@ -956,7 +956,8 @@ with tab_ranking:
     st.caption(
         "Top 10 paint codes are selected using total solvent consumption across the full selected period. "
         "The same paint codes are then split by year so management can compare annual paint use, "
-        "solvent use, and weighted solvent ratio on one chart."
+        "solvent use, and weighted solvent ratio on one chart. "
+        "Years without records are still displayed with zero-height bars and no ratio point."
     )
 
     # Label display is intentionally conservative.
@@ -1029,6 +1030,85 @@ with tab_ranking:
             ["Paint_Code", "Analysis_Year"],
         )
 
+        # -----------------------------------------------------
+        # COMPLETE PAINT CODE × YEAR GRID
+        # Every Top 10 paint code must display every available
+        # analysis year, even when no record exists in that year.
+        # Missing-year bars are shown as zero; the ratio remains
+        # blank (NaN) so no false 0% line point is drawn.
+        # -----------------------------------------------------
+        all_analysis_years = sorted(
+            ranking_source_df["Analysis_Year"]
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist(),
+            key=lambda value: int(value),
+        )
+
+        complete_index = pd.MultiIndex.from_product(
+            [
+                top10_codes,
+                all_analysis_years,
+            ],
+            names=[
+                "Paint_Code",
+                "Analysis_Year",
+            ],
+        )
+
+        summary_df = (
+            summary_df
+            .set_index(
+                [
+                    "Paint_Code",
+                    "Analysis_Year",
+                ]
+            )
+            .reindex(complete_index)
+            .reset_index()
+        )
+
+        # Quantities/counts become zero when the year has no data.
+        zero_fill_columns = [
+            "Adjustment_Records",
+            "Historical_Batches",
+            "Total_Paint_kg",
+            "Total_Solvent_kg",
+            "Median_Paint_kg",
+            "Median_Solvent_kg",
+            "Production_Lines",
+        ]
+        for column_name in zero_fill_columns:
+            if column_name in summary_df.columns:
+                summary_df[column_name] = pd.to_numeric(
+                    summary_df[column_name],
+                    errors="coerce",
+                ).fillna(0)
+
+        # Keep analytical fields blank for missing years.
+        # This avoids presenting a fabricated 0% solvent ratio.
+        analytical_columns = [
+            "Median_Ratio_Percent",
+            "Median_Before_Viscosity",
+            "Median_After_Viscosity",
+            "Median_Viscosity_Drop",
+            "Median_Dilution_Efficiency",
+            "Weighted_Ratio_Percent",
+        ]
+        for column_name in analytical_columns:
+            if column_name in summary_df.columns:
+                summary_df[column_name] = pd.to_numeric(
+                    summary_df[column_name],
+                    errors="coerce",
+                )
+
+        summary_df["Data_Status"] = np.where(
+            summary_df["Adjustment_Records"] > 0,
+            "Available",
+            "No Data",
+        )
+
         summary_df["_Paint_Order"] = (
             summary_df["Paint_Code"].astype(str).map(paint_order_map)
         )
@@ -1073,10 +1153,12 @@ with tab_ranking:
                         summary_df["Analysis_Year"],
                         summary_df["Adjustment_Records"],
                         summary_df["Historical_Batches"],
+                        summary_df["Data_Status"],
                     ]),
                     hovertemplate=(
                         "<b>Paint Code: %{customdata[0]}</b><br>"
                         "Year: %{customdata[1]}<br>"
+                        "Status: %{customdata[4]}<br>"
                         "Paint: %{y:,.0f} kg<br>"
                         "Records: %{customdata[2]:,.0f}<br>"
                         "Batches: %{customdata[3]:,.0f}"
@@ -1100,10 +1182,12 @@ with tab_ranking:
                     customdata=np.column_stack([
                         summary_df["Paint_Code"],
                         summary_df["Analysis_Year"],
+                        summary_df["Data_Status"],
                     ]),
                     hovertemplate=(
                         "<b>Paint Code: %{customdata[0]}</b><br>"
                         "Year: %{customdata[1]}<br>"
+                        "Status: %{customdata[2]}<br>"
                         "Solvent: %{y:,.0f} kg"
                         "<extra></extra>"
                     ),
@@ -1157,10 +1241,12 @@ with tab_ranking:
                             year_df["Analysis_Year"],
                             year_df["Total_Paint_kg"],
                             year_df["Total_Solvent_kg"],
+                            year_df["Data_Status"],
                         ]),
                         hovertemplate=(
                             "<b>Paint Code: %{customdata[0]}</b><br>"
                             "Year: %{customdata[1]}<br>"
+                            "Status: %{customdata[4]}<br>"
                             "Paint: %{customdata[2]:,.0f} kg<br>"
                             "Solvent: %{customdata[3]:,.0f} kg<br>"
                             "Solvent Ratio: %{y:.2f}%"
@@ -1263,13 +1349,61 @@ with tab_ranking:
                     errors="coerce",
                 )
 
+                # Build a stable numeric x-position for collision detection.
+                point_order_df = (
+                    summary_df[
+                        [
+                            "Paint_Code",
+                            "Analysis_Year",
+                            "_Paint_Order",
+                            "_Year_Order",
+                        ]
+                    ]
+                    .drop_duplicates()
+                    .sort_values(
+                        ["_Paint_Order", "_Year_Order"]
+                    )
+                    .reset_index(drop=True)
+                )
+                point_order_df["_X_Order"] = np.arange(
+                    len(point_order_df),
+                    dtype=float,
+                )
+
+                label_df = label_df.merge(
+                    point_order_df[
+                        [
+                            "Paint_Code",
+                            "Analysis_Year",
+                            "_X_Order",
+                        ]
+                    ],
+                    on=[
+                        "Paint_Code",
+                        "Analysis_Year",
+                    ],
+                    how="left",
+                )
+
                 label_df = label_df.sort_values(
                     [
-                        "_Year_Number",
-                        "_Paint_Order",
+                        "_X_Order",
                         "_Extreme_Type",
                     ]
                 ).reset_index(drop=True)
+
+                # Allocate annotation lanes.
+                # Labels that are close both horizontally and vertically
+                # are pushed to different pixel offsets.
+                placed_labels = []
+                offset_lanes = [
+                    (-34, 32),
+                    (34, 32),
+                    (-42, -38),
+                    (42, -38),
+                    (0, 48),
+                    (0, -52),
+                ]
 
                 for label_index, row in label_df.iterrows():
                     ratio_value = pd.to_numeric(
@@ -1283,33 +1417,62 @@ with tab_ranking:
                     extreme_type = str(
                         row.get("_Extreme_Type", "")
                     )
+                    x_order = float(
+                        row.get("_X_Order", label_index)
+                    )
 
-                    # Highest is placed above the point;
-                    # lowest is placed below the point.
                     if extreme_type == "Highest":
                         label_text = (
                             f"▲ {int(row['Analysis_Year'])} High "
                             f"{float(ratio_value):.2f}%"
                         )
-                        y_shift = 24
-                        y_anchor = "bottom"
                         border_color = "#DC2626"
+                        preferred_lanes = [0, 1, 4, 2, 3, 5]
                     elif extreme_type == "Lowest":
                         label_text = (
                             f"▼ {int(row['Analysis_Year'])} Low "
                             f"{float(ratio_value):.2f}%"
                         )
-                        y_shift = -26
-                        y_anchor = "top"
                         border_color = "#2563EB"
+                        preferred_lanes = [2, 3, 5, 0, 1, 4]
                     else:
                         label_text = f"{float(ratio_value):.2f}%"
-                        y_shift = 22 if label_index % 2 == 0 else -24
-                        y_anchor = "bottom" if y_shift > 0 else "top"
                         border_color = "#9CA3AF"
+                        preferred_lanes = [0, 2, 1, 3, 4, 5]
 
-                    x_shift = (
-                        -8 if label_index % 2 == 0 else 8
+                    # Detect nearby labels. A collision is likely when points
+                    # are within 1.6 x slots and ratios differ by less than 0.9%.
+                    nearby_lane_ids = {
+                        item["lane_id"]
+                        for item in placed_labels
+                        if (
+                            abs(x_order - item["x_order"]) <= 1.6
+                            and abs(
+                                float(ratio_value)
+                                - item["ratio_value"]
+                            ) <= 0.9
+                        )
+                    }
+
+                    lane_id = next(
+                        (
+                            candidate
+                            for candidate in preferred_lanes
+                            if candidate not in nearby_lane_ids
+                        ),
+                        preferred_lanes[
+                            label_index % len(preferred_lanes)
+                        ],
+                    )
+
+                    ax_offset, ay_offset = offset_lanes[lane_id]
+
+                    # Plotly annotation uses ay relative to the point.
+                    # Positive ay moves the label downward.
+                    y_anchor = (
+                        "bottom"
+                        if ay_offset < 0
+                        else "top"
                     )
 
                     fig_dual.add_annotation(
@@ -1323,21 +1486,29 @@ with tab_ranking:
                         text=label_text,
                         showarrow=True,
                         arrowhead=0,
-                        ax=x_shift,
-                        ay=-y_shift,
+                        ax=ax_offset,
+                        ay=ay_offset,
                         xanchor="center",
                         yanchor=y_anchor,
                         font=dict(
-                            size=9,
+                            size=8.8,
                             color="#111827",
                         ),
-                        bgcolor="rgba(255,255,255,0.98)",
+                        bgcolor="rgba(255,255,255,0.99)",
                         bordercolor=border_color,
                         borderwidth=0.9,
                         borderpad=3,
                         arrowcolor=border_color,
                         arrowwidth=0.8,
-                        opacity=0.98,
+                        opacity=0.99,
+                    )
+
+                    placed_labels.append(
+                        {
+                            "x_order": x_order,
+                            "ratio_value": float(ratio_value),
+                            "lane_id": lane_id,
+                        }
                     )
 
             ratio_max = pd.to_numeric(
@@ -1404,8 +1575,8 @@ with tab_ranking:
                 barmode="group",
                 bargap=0.20,
                 bargroupgap=0.08,
-                height=760,
-                margin=dict(l=80, r=95, t=175, b=130),
+                height=790,
+                margin=dict(l=85, r=105, t=190, b=145),
                 plot_bgcolor="white",
                 paper_bgcolor="white",
                 font=dict(color="black"),
@@ -1426,6 +1597,7 @@ with tab_ranking:
                 "Weighted_Ratio_Percent",
                 "Adjustment_Records",
                 "Historical_Batches",
+                "Data_Status",
             ]].rename(columns={
                 "Paint_Code": "Paint Code",
                 "Analysis_Year": "Year",
@@ -1434,6 +1606,7 @@ with tab_ranking:
                 "Weighted_Ratio_Percent": "Solvent Ratio (%)",
                 "Adjustment_Records": "Records",
                 "Historical_Batches": "Batches",
+                "Data_Status": "Data Status",
             })
 
             st.dataframe(
