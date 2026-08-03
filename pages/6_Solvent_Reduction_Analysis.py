@@ -1200,130 +1200,11 @@ with tab_ranking:
             # All values remain available in hover. To keep the chart readable,
             # only one percentage label is shown for each paint code: the latest
             # available year for that paint code.
-            ratio_year_colors = {
-                "2024": "#008C95",
-                "2025": "#C84C3A",
-                "2026": "#6F42C1",
-            }
-            fallback_ratio_colors = [
-                "#2F6B3C",
-                "#A23E8C",
-                "#7A5C00",
-                "#374151",
-            ]
-
-            available_years = sorted(
-                summary_df["Analysis_Year"]
-                .dropna()
-                .astype(str)
-                .unique()
-                .tolist(),
-                key=lambda value: int(value),
-            )
-
             # ---------------------------------------------------------
-            # 1. YEARLY RATIO MARKERS
-            # Each year has its own color. No horizontal connection
-            # across different paint codes.
+            # YEARLY RATIO SERIES REMOVED
+            # Keep only annual Paint/Solvent bars and one overall-period
+            # solvent-ratio line for each Paint Code.
             # ---------------------------------------------------------
-            for year_index, year_value in enumerate(available_years):
-                year_df = summary_df[
-                    summary_df["Analysis_Year"].astype(str)
-                    == str(year_value)
-                ].copy()
-
-                year_df = year_df.sort_values(
-                    "_Paint_Order"
-                ).reset_index(drop=True)
-
-                line_color = ratio_year_colors.get(
-                    str(year_value),
-                    fallback_ratio_colors[
-                        year_index % len(fallback_ratio_colors)
-                    ],
-                )
-
-                fig_dual.add_trace(
-                    go.Scatter(
-                        x=[
-                            year_df["Paint_Code"].astype(str).tolist(),
-                            year_df["Analysis_Year"].astype(str).tolist(),
-                        ],
-                        y=year_df["Weighted_Ratio_Percent"],
-                        name=f"Ratio {year_value} (%)",
-                        mode="markers",
-                        marker=dict(
-                            size=8,
-                            color=line_color,
-                            symbol="circle",
-                            line=dict(width=1.2, color="white"),
-                        ),
-                        yaxis="y2",
-                        connectgaps=False,
-                        customdata=np.column_stack([
-                            year_df["Paint_Code"],
-                            year_df["Analysis_Year"],
-                            year_df["Total_Paint_kg"],
-                            year_df["Total_Solvent_kg"],
-                            year_df["Data_Status"],
-                        ]),
-                        hovertemplate=(
-                            "<b>Paint Code: %{customdata[0]}</b><br>"
-                            "Year: %{customdata[1]}<br>"
-                            "Status: %{customdata[4]}<br>"
-                            "Paint: %{customdata[2]:,.0f} kg<br>"
-                            "Solvent: %{customdata[3]:,.0f} kg<br>"
-                            "Solvent Ratio: %{y:.2f}%"
-                            "<extra></extra>"
-                        ),
-                    )
-                )
-
-            # ---------------------------------------------------------
-            # 2. MINI YEARLY TREND WITHIN EACH PAINT CODE
-            # Connect 2024 -> 2025 -> 2026 only inside the same code.
-            # ---------------------------------------------------------
-            for paint_code in top10_codes:
-                paint_year_df = summary_df[
-                    summary_df["Paint_Code"].astype(str)
-                    == str(paint_code)
-                ].copy()
-
-                paint_year_df = paint_year_df.sort_values(
-                    "_Year_Order"
-                )
-
-                valid_ratio_df = paint_year_df.dropna(
-                    subset=["Weighted_Ratio_Percent"]
-                )
-
-                if len(valid_ratio_df) < 2:
-                    continue
-
-                fig_dual.add_trace(
-                    go.Scatter(
-                        x=[
-                            valid_ratio_df["Paint_Code"]
-                            .astype(str)
-                            .tolist(),
-                            valid_ratio_df["Analysis_Year"]
-                            .astype(str)
-                            .tolist(),
-                        ],
-                        y=valid_ratio_df["Weighted_Ratio_Percent"],
-                        mode="lines",
-                        name="Within-code Year Trend",
-                        showlegend=False,
-                        line=dict(
-                            color="rgba(75,85,99,0.55)",
-                            width=1.2,
-                            dash="dot",
-                        ),
-                        yaxis="y2",
-                        connectgaps=False,
-                        hoverinfo="skip",
-                    )
-                )
 
             # ---------------------------------------------------------
             # 3. OVERALL 3-YEAR WEIGHTED SOLVENT RATIO
@@ -1396,12 +1277,12 @@ with tab_ranking:
                     mode="lines+markers",
                     name="Overall 3-Year Ratio (%)",
                     line=dict(
-                        color="#111827",
-                        width=2.6,
+                        color="#0F766E",
+                        width=2.8,
                     ),
                     marker=dict(
                         size=9,
-                        color="#111827",
+                        color="#0F766E",
                         symbol="diamond",
                         line=dict(width=1.2, color="white"),
                     ),
@@ -1577,7 +1458,7 @@ with tab_ranking:
             fig_dual.update_layout(
                 title=dict(
                     text=(
-                        "<b>Annual Paint & Solvent Usage, Yearly Ratios and Overall 3-Year Ratio</b>"
+                        "<b>Annual Paint & Solvent Usage with Overall Period Solvent Ratio</b>"
                         f"<br><sup>Years: {available_years_text} | "
                         f"Filters Applied: {filter_details}</sup>"
                     ),
@@ -1638,22 +1519,6 @@ with tab_ranking:
                 uniformtext_minsize=8,
                 uniformtext_mode="hide",
             )
-
-            if not yearly_extremes_table.empty:
-                st.markdown("#### Annual Solvent Ratio Extremes")
-                st.caption(
-                    "Highest and lowest weighted solvent ratio among the displayed Top 10 paint codes for each year."
-                )
-                st.dataframe(
-                    yearly_extremes_table.style.format(
-                        {
-                            "Highest Ratio (%)": "{:.2f}",
-                            "Lowest Ratio (%)": "{:.2f}",
-                        }
-                    ),
-                    use_container_width=True,
-                    hide_index=True,
-                )
 
             st.plotly_chart(fig_dual, use_container_width=True)
             exported_figs["4. Top 10 Usage and Ratio by Year"] = fig_dual
