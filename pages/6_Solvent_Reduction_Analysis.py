@@ -965,20 +965,20 @@ with tab_ranking:
     ratio_label_mode = label_col1.selectbox(
         "Ratio Label Display",
         [
-            "Hover Only (Recommended)",
+            "Yearly Highest & Lowest (Recommended)",
+            "Hover Only",
             "Latest Year - Top 3 Paint Codes",
-            "Latest Year - All Paint Codes",
         ],
         index=0,
         key="tab1_ratio_label_mode",
         help=(
-            "Hover Only gives the cleanest management chart. "
-            "Other options show only the latest available year, never every yearly point."
+            "Yearly Highest & Lowest highlights only the maximum and minimum solvent ratio "
+            "within each year. All other values remain available in hover and the table."
         ),
     )
     label_col2.caption(
-        "All annual solvent-ratio values remain available in hover and in the table below. "
-        "Visible labels are limited to prevent overlapping text."
+        "The recommended view labels only the highest and lowest solvent ratio in each year. "
+        "All other annual values remain available in hover and in the table below."
     )
 
     ranking_source_df = filter_df.copy()
@@ -1170,86 +1170,173 @@ with tab_ranking:
                 )
 
             # ---------------------------------------------------------
-            # OPTIONAL CLEAN LABEL LAYER
-            # Default = hover only. This fully prevents label collision.
-            # When enabled, labels are restricted to the latest available
-            # year and are placed only on selected paint codes.
+            # OPTIMIZED LABEL LAYER
+            # Recommended mode: show only the highest and lowest ratio
+            # within each year. This gives management the key annual
+            # extremes without covering the chart with labels.
             # ---------------------------------------------------------
-            latest_label_df = (
-                summary_df
-                .assign(
-                    _Year_Number=pd.to_numeric(
-                        summary_df["Analysis_Year"], errors="coerce"
-                    )
-                )
-                .sort_values(["_Paint_Order", "_Year_Number"])
-                .groupby("Paint_Code", as_index=False, dropna=False)
-                .tail(1)
-                .sort_values("_Paint_Order")
-                .reset_index(drop=True)
-            )
+            label_df = pd.DataFrame()
 
-            if ratio_label_mode == "Latest Year - Top 3 Paint Codes":
-                # Select Top 3 using total solvent consumption across all years.
+            if ratio_label_mode == "Yearly Highest & Lowest (Recommended)":
+                yearly_extreme_rows = []
+
+                for year_value, year_group in summary_df.groupby(
+                    "Analysis_Year", dropna=False, sort=True
+                ):
+                    valid_group = year_group.dropna(
+                        subset=["Weighted_Ratio_Percent"]
+                    ).copy()
+
+                    if valid_group.empty:
+                        continue
+
+                    max_index = valid_group[
+                        "Weighted_Ratio_Percent"
+                    ].idxmax()
+                    min_index = valid_group[
+                        "Weighted_Ratio_Percent"
+                    ].idxmin()
+
+                    max_row = summary_df.loc[[max_index]].copy()
+                    max_row["_Extreme_Type"] = "Highest"
+
+                    min_row = summary_df.loc[[min_index]].copy()
+                    min_row["_Extreme_Type"] = "Lowest"
+
+                    yearly_extreme_rows.extend([max_row, min_row])
+
+                if yearly_extreme_rows:
+                    label_df = pd.concat(
+                        yearly_extreme_rows,
+                        ignore_index=True,
+                    ).drop_duplicates(
+                        subset=[
+                            "Paint_Code",
+                            "Analysis_Year",
+                            "Weighted_Ratio_Percent",
+                        ]
+                    )
+
+            elif ratio_label_mode == "Latest Year - Top 3 Paint Codes":
+                latest_label_df = (
+                    summary_df
+                    .assign(
+                        _Year_Number=pd.to_numeric(
+                            summary_df["Analysis_Year"],
+                            errors="coerce",
+                        )
+                    )
+                    .sort_values(
+                        ["_Paint_Order", "_Year_Number"]
+                    )
+                    .groupby(
+                        "Paint_Code",
+                        as_index=False,
+                        dropna=False,
+                    )
+                    .tail(1)
+                )
+
                 top_label_codes = (
                     top10_overall_df
-                    .sort_values("Total_Solvent_kg", ascending=False)
+                    .sort_values(
+                        "Total_Solvent_kg",
+                        ascending=False,
+                    )
                     .head(3)["Paint_Code"]
                     .astype(str)
                     .tolist()
                 )
+
                 label_df = latest_label_df[
-                    latest_label_df["Paint_Code"].astype(str).isin(top_label_codes)
+                    latest_label_df["Paint_Code"]
+                    .astype(str)
+                    .isin(top_label_codes)
                 ].copy()
-            elif ratio_label_mode == "Latest Year - All Paint Codes":
-                label_df = latest_label_df.copy()
-            else:
-                label_df = pd.DataFrame()
 
+                label_df["_Extreme_Type"] = "Latest"
+
+            # Hover Only intentionally leaves label_df empty.
             if not label_df.empty:
-                label_df = label_df.sort_values("_Paint_Order").reset_index(drop=True)
+                label_df["_Year_Number"] = pd.to_numeric(
+                    label_df["Analysis_Year"],
+                    errors="coerce",
+                )
 
-                # Use four offset slots. Because only latest-year points are labelled,
-                # these offsets are sufficient without covering neighbouring values.
-                offset_slots = [
-                    (0, 18, "bottom"),
-                    (0, -20, "top"),
-                    (-10, 26, "bottom"),
-                    (10, -28, "top"),
-                ]
+                label_df = label_df.sort_values(
+                    [
+                        "_Year_Number",
+                        "_Paint_Order",
+                        "_Extreme_Type",
+                    ]
+                ).reset_index(drop=True)
 
                 for label_index, row in label_df.iterrows():
                     ratio_value = pd.to_numeric(
-                        row["Weighted_Ratio_Percent"], errors="coerce"
+                        row["Weighted_Ratio_Percent"],
+                        errors="coerce",
                     )
+
                     if pd.isna(ratio_value):
                         continue
 
-                    x_shift, y_shift, y_anchor = offset_slots[
-                        label_index % len(offset_slots)
-                    ]
+                    extreme_type = str(
+                        row.get("_Extreme_Type", "")
+                    )
+
+                    # Highest is placed above the point;
+                    # lowest is placed below the point.
+                    if extreme_type == "Highest":
+                        label_text = (
+                            f"▲ {int(row['Analysis_Year'])} High "
+                            f"{float(ratio_value):.2f}%"
+                        )
+                        y_shift = 24
+                        y_anchor = "bottom"
+                        border_color = "#DC2626"
+                    elif extreme_type == "Lowest":
+                        label_text = (
+                            f"▼ {int(row['Analysis_Year'])} Low "
+                            f"{float(ratio_value):.2f}%"
+                        )
+                        y_shift = -26
+                        y_anchor = "top"
+                        border_color = "#2563EB"
+                    else:
+                        label_text = f"{float(ratio_value):.2f}%"
+                        y_shift = 22 if label_index % 2 == 0 else -24
+                        y_anchor = "bottom" if y_shift > 0 else "top"
+                        border_color = "#9CA3AF"
+
+                    x_shift = (
+                        -8 if label_index % 2 == 0 else 8
+                    )
 
                     fig_dual.add_annotation(
-                        x=[str(row["Paint_Code"]), str(row["Analysis_Year"])],
+                        x=[
+                            str(row["Paint_Code"]),
+                            str(row["Analysis_Year"]),
+                        ],
                         y=float(ratio_value),
                         xref="x",
                         yref="y2",
-                        text=f"{float(ratio_value):.2f}%",
+                        text=label_text,
                         showarrow=True,
                         arrowhead=0,
                         ax=x_shift,
                         ay=-y_shift,
-                        xshift=0,
-                        yshift=0,
                         xanchor="center",
                         yanchor=y_anchor,
-                        font=dict(size=9, color="#111827"),
-                        bgcolor="rgba(255,255,255,0.97)",
-                        bordercolor="#9CA3AF",
-                        borderwidth=0.7,
-                        borderpad=2,
-                        arrowcolor="#9CA3AF",
-                        arrowwidth=0.7,
+                        font=dict(
+                            size=9,
+                            color="#111827",
+                        ),
+                        bgcolor="rgba(255,255,255,0.98)",
+                        bordercolor=border_color,
+                        borderwidth=0.9,
+                        borderpad=3,
+                        arrowcolor=border_color,
+                        arrowwidth=0.8,
                         opacity=0.98,
                     )
 
