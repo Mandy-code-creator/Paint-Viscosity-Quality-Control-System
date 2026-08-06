@@ -521,42 +521,26 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
     return buf
 
 def create_annual_usage_matrix_png(matrix_df, filter_details):
-    """Create annual Paint / Solvent / Ratio matrix for Word export."""
+    """Create annual Paint / Solvent / Ratio matrix for Word export - EXTRA LARGE FONT."""
     if matrix_df is None or matrix_df.empty:
-        fig, ax = plt.subplots(figsize=(10.2, 4.5), dpi=300)
+        fig, ax = plt.subplots(figsize=(10.2, 4.5), dpi=600)
         ax.text(
-            0.5,
-            0.5,
-            "No annual matrix data available",
-            ha="center",
-            va="center",
-            fontsize=15,
-            color="black",
+            0.5, 0.5, "No annual matrix data available",
+            ha="center", va="center", fontsize=24, color="black"
         )
         ax.set_axis_off()
     else:
         work_df = matrix_df.copy()
         paint_codes = work_df["Paint_Code"].drop_duplicates().astype(str).tolist()
         years = sorted(
-            work_df["Analysis_Year"]
-            .dropna()
-            .astype(str)
-            .unique()
-            .tolist(),
+            work_df["Analysis_Year"].dropna().astype(str).unique().tolist(),
             key=lambda value: int(value) if str(value).isdigit() else 9999,
         )
 
         complete_index = pd.MultiIndex.from_product(
-            [paint_codes, years],
-            names=["Paint_Code", "Analysis_Year"],
+            [paint_codes, years], names=["Paint_Code", "Analysis_Year"]
         )
-
-        work_df = (
-            work_df
-            .set_index(["Paint_Code", "Analysis_Year"])
-            .reindex(complete_index)
-            .reset_index()
-        )
+        work_df = work_df.set_index(["Paint_Code", "Analysis_Year"]).reindex(complete_index).reset_index()
 
         metrics = [
             ("Total_Paint_kg", "Paint\n(kg)", "Blues"),
@@ -567,11 +551,10 @@ def create_annual_usage_matrix_png(matrix_df, filter_details):
         n_rows = len(paint_codes)
         n_cols = len(years) * len(metrics)
 
-        # --- OPTIMIZED SIZING AND FONT FOR WORD EXPORT ---
-        # Base width matches Word A4 Landscape insertion closely (~10.2 inches)
-        fig_width = max(10.2, min(14.0, 0.9 * n_cols + 2.5))
-        fig_height = max(4.5, min(9.0, 0.45 * n_rows + 2.5))
-        fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=300)
+        # Nới rộng kích thước các ô vuông để chứa được font chữ khổng lồ
+        fig_width = max(14.0, min(20.0, 1.5 * n_cols + 4.5))
+        fig_height = max(7.0, min(16.0, 0.8 * n_rows + 4.0))
+        fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=600)
 
         ax.set_xlim(0, n_cols)
         ax.set_ylim(0, n_rows)
@@ -582,11 +565,7 @@ def create_annual_usage_matrix_png(matrix_df, filter_details):
         for column_name, _, _ in metrics:
             values = pd.to_numeric(work_df[column_name], errors="coerce")
             max_value = values.max()
-            maxima[column_name] = (
-                float(max_value)
-                if pd.notna(max_value) and max_value > 0
-                else 1.0
-            )
+            maxima[column_name] = float(max_value) if pd.notna(max_value) and max_value > 0 else 1.0
 
         for row_index, paint_code in enumerate(paint_codes):
             for year_index, year_value in enumerate(years):
@@ -594,16 +573,11 @@ def create_annual_usage_matrix_png(matrix_df, filter_details):
                     (work_df["Paint_Code"].astype(str) == str(paint_code))
                     & (work_df["Analysis_Year"].astype(str) == str(year_value))
                 ]
-
                 row_data = row_match.iloc[0] if not row_match.empty else None
 
                 for metric_index, (column_name, _, cmap_name) in enumerate(metrics):
                     col_index = year_index * len(metrics) + metric_index
-                    value = (
-                        pd.to_numeric(row_data[column_name], errors="coerce")
-                        if row_data is not None
-                        else np.nan
-                    )
+                    value = pd.to_numeric(row_data[column_name], errors="coerce") if row_data is not None else np.nan
 
                     if pd.isna(value) or float(value) <= 0:
                         facecolor = "#F3F4F6"
@@ -611,148 +585,76 @@ def create_annual_usage_matrix_png(matrix_df, filter_details):
                         text_color = "#6B7280"
                         font_weight = "normal"
                     else:
-                        normalized = min(
-                            float(value) / maxima[column_name],
-                            1.0,
-                        )
+                        normalized = min(float(value) / maxima[column_name], 1.0)
                         cmap = plt.get_cmap(cmap_name)
                         facecolor = cmap(0.18 + normalized * 0.68)
-                        label = (
-                            f"{float(value):.2f}%"
-                            if column_name == "Weighted_Ratio_Percent"
-                            else f"{float(value):,.0f}"
-                        )
-                        text_color = (
-                            "white" if normalized >= 0.58 else "#111827"
-                        )
+                        label = f"{float(value):.2f}%" if column_name == "Weighted_Ratio_Percent" else f"{float(value):,.0f}"
+                        text_color = "white" if normalized >= 0.58 else "#111827"
                         font_weight = "bold"
 
-                    rect = plt.Rectangle(
-                        (col_index, row_index),
-                        1,
-                        1,
-                        facecolor=facecolor,
-                        edgecolor="white",
-                        linewidth=1.3,
-                    )
+                    rect = plt.Rectangle((col_index, row_index), 1, 1, facecolor=facecolor, edgecolor="white", linewidth=1.8)
                     ax.add_patch(rect)
 
+                    # Tăng cỡ chữ cực lớn cho DỮ LIỆU TỪNG Ô (lên 20)
                     ax.text(
-                        col_index + 0.5,
-                        row_index + 0.5,
-                        label,
-                        ha="center",
-                        va="center",
-                        fontsize=11, # Increased from 9.8
-                        fontweight=font_weight,
-                        color=text_color,
+                        col_index + 0.5, row_index + 0.5, label,
+                        ha="center", va="center", fontsize=20, fontweight=font_weight, color=text_color
                     )
 
-        # Strong separator between years.
         for year_index in range(1, len(years)):
             separator_x = year_index * len(metrics)
-            ax.plot(
-                [separator_x, separator_x],
-                [0, n_rows],
-                color="#475569",
-                linewidth=1.5,
-                zorder=5,
-            )
+            ax.plot([separator_x, separator_x], [0, n_rows], color="#475569", linewidth=2.5, zorder=5)
 
         ax.set_yticks(np.arange(n_rows) + 0.5)
-        ax.set_yticklabels(
-            paint_codes,
-            fontsize=12, # Increased from 10.5
-            fontweight="bold",
-            color="black",
-        )
-        ax.tick_params(axis="y", length=0, pad=8)
+        # Tăng cỡ chữ cho MÃ SƠN trục Y (lên 20)
+        ax.set_yticklabels(paint_codes, fontsize=20, fontweight="bold", color="black")
+        ax.tick_params(axis="y", length=0, pad=14)
 
         ax.set_xticks(np.arange(n_cols) + 0.5)
         metric_labels = []
         for _ in years:
             metric_labels.extend([label for _, label, _ in metrics])
-        ax.set_xticklabels(
-            metric_labels,
-            fontsize=11, # Increased from 9.3
-            fontweight="bold",
-            color="black",
-        )
+            
+        # Tăng cỡ chữ cho TIÊU ĐỀ Paint/Solvent/Ratio trục X (lên 16)
+        ax.set_xticklabels(metric_labels, fontsize=16, fontweight="bold", color="black")
         ax.xaxis.tick_top()
-        ax.tick_params(axis="x", length=0, pad=7)
+        ax.tick_params(axis="x", length=0, pad=14)
 
-        header_transform = blended_transform_factory(
-            ax.transData,
-            ax.transAxes,
-        )
-
+        header_transform = blended_transform_factory(ax.transData, ax.transAxes)
         for year_index, year_value in enumerate(years):
             group_start = year_index * len(metrics)
             group_center = group_start + len(metrics) / 2
 
+            # Tăng cỡ chữ cho NĂM (2024, 2025...) lên mức khổng lồ (26)
             ax.text(
-                group_center,
-                1.115,
-                str(year_value),
-                transform=header_transform,
-                ha="center",
-                va="bottom",
-                fontsize=14, # Increased from 12.5
-                fontweight="bold",
-                color="#111827",
-                clip_on=False,
+                group_center, 1.13, str(year_value),
+                transform=header_transform, ha="center", va="bottom",
+                fontsize=26, fontweight="bold", color="#111827", clip_on=False
             )
-
             ax.plot(
-                [group_start + 0.12, group_start + len(metrics) - 0.12],
-                [1.082, 1.082],
-                transform=header_transform,
-                color="#475569",
-                linewidth=1.2,
-                clip_on=False,
+                [group_start + 0.1, group_start + len(metrics) - 0.1], [1.09, 1.09],
+                transform=header_transform, color="#475569", linewidth=2.0, clip_on=False
             )
 
-        border = plt.Rectangle(
-            (0, 0),
-            n_cols,
-            n_rows,
-            fill=False,
-            edgecolor="#334155",
-            linewidth=1.4,
-        )
+        border = plt.Rectangle((0, 0), n_cols, n_rows, fill=False, edgecolor="#334155", linewidth=2.5)
         ax.add_patch(border)
 
         for spine in ax.spines.values():
             spine.set_visible(False)
 
+        # Chú thích bên dưới cùng (lên 16)
         ax.text(
-            0.0,
-            -0.09,
+            0.0, -0.07,
             "Blue: Paint usage  |  Orange: Solvent usage  |  Green: Solvent ratio  |  —: No data",
-            transform=ax.transAxes,
-            ha="left",
-            va="top",
-            fontsize=11, # Increased from 9.5
-            color="#475569",
+            transform=ax.transAxes, ha="left", va="top",
+            fontsize=16, color="#475569", fontweight="bold"
         )
 
         fig.patch.set_facecolor("white")
-        fig.subplots_adjust(
-            left=0.16,
-            right=0.99,
-            bottom=0.14,
-            top=0.77,
-        )
+        fig.subplots_adjust(left=0.18, right=0.98, bottom=0.12, top=0.72)
 
     buffer = io.BytesIO()
-    fig.savefig(
-        buffer,
-        format="png",
-        bbox_inches="tight",
-        facecolor="white",
-        dpi=300, # Set to print-quality resolution
-        pad_inches=0.18,
-    )
+    fig.savefig(buffer, format="png", bbox_inches="tight", facecolor="white", dpi=600, pad_inches=0.25)
     plt.close(fig)
     buffer.seek(0)
     return buffer
