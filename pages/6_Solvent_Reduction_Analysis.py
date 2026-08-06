@@ -523,7 +523,7 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
 def create_annual_usage_matrix_png(matrix_df, filter_details):
     """Create annual Paint / Solvent / Ratio matrix for Word export."""
     if matrix_df is None or matrix_df.empty:
-        fig, ax = plt.subplots(figsize=(12.5, 4.5), dpi=220)
+        fig, ax = plt.subplots(figsize=(10.2, 4.5), dpi=300)
         ax.text(
             0.5,
             0.5,
@@ -567,9 +567,11 @@ def create_annual_usage_matrix_png(matrix_df, filter_details):
         n_rows = len(paint_codes)
         n_cols = len(years) * len(metrics)
 
-        fig_width = max(12.0, min(19.0, 1.55 * n_cols + 4.5))
-        fig_height = max(5.5, min(11.0, 0.62 * n_rows + 3.4))
-        fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=220)
+        # --- OPTIMIZED SIZING AND FONT FOR WORD EXPORT ---
+        # Base width matches Word A4 Landscape insertion closely (~10.2 inches)
+        fig_width = max(10.2, min(14.0, 0.9 * n_cols + 2.5))
+        fig_height = max(4.5, min(9.0, 0.45 * n_rows + 2.5))
+        fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=300)
 
         ax.set_xlim(0, n_cols)
         ax.set_ylim(0, n_rows)
@@ -641,7 +643,7 @@ def create_annual_usage_matrix_png(matrix_df, filter_details):
                         label,
                         ha="center",
                         va="center",
-                        fontsize=9.8,
+                        fontsize=11, # Increased from 9.8
                         fontweight=font_weight,
                         color=text_color,
                     )
@@ -660,7 +662,7 @@ def create_annual_usage_matrix_png(matrix_df, filter_details):
         ax.set_yticks(np.arange(n_rows) + 0.5)
         ax.set_yticklabels(
             paint_codes,
-            fontsize=10.5,
+            fontsize=12, # Increased from 10.5
             fontweight="bold",
             color="black",
         )
@@ -672,7 +674,7 @@ def create_annual_usage_matrix_png(matrix_df, filter_details):
             metric_labels.extend([label for _, label, _ in metrics])
         ax.set_xticklabels(
             metric_labels,
-            fontsize=9.3,
+            fontsize=11, # Increased from 9.3
             fontweight="bold",
             color="black",
         )
@@ -695,7 +697,7 @@ def create_annual_usage_matrix_png(matrix_df, filter_details):
                 transform=header_transform,
                 ha="center",
                 va="bottom",
-                fontsize=12.5,
+                fontsize=14, # Increased from 12.5
                 fontweight="bold",
                 color="#111827",
                 clip_on=False,
@@ -730,7 +732,7 @@ def create_annual_usage_matrix_png(matrix_df, filter_details):
             transform=ax.transAxes,
             ha="left",
             va="top",
-            fontsize=9.5,
+            fontsize=11, # Increased from 9.5
             color="#475569",
         )
 
@@ -748,7 +750,7 @@ def create_annual_usage_matrix_png(matrix_df, filter_details):
         format="png",
         bbox_inches="tight",
         facecolor="white",
-        dpi=280,
+        dpi=300, # Set to print-quality resolution
         pad_inches=0.18,
     )
     plt.close(fig)
