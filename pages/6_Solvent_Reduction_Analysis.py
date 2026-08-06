@@ -1304,7 +1304,8 @@ with tab_ranking:
                 y=pivot_color.index.tolist(),
                 text=text_matrix,
                 texttemplate="<b>%{text}</b>",
-                textfont=dict(size=11, color="#111827"),
+                # TĂNG CỠ CHỮ BÊN TRONG Ô LÊN 16
+                textfont=dict(size=16, color="#111827"), 
                 colorscale=[
                     [0.0, "#F3F4F6"],
                     [0.33, "#DBEAFE"],
@@ -1333,18 +1334,22 @@ with tab_ranking:
                 ),
                 x=0.5,
                 xanchor="center",
+                font=dict(size=20), # Tăng cỡ chữ tiêu đề biểu đồ
             ),
             height=max(520, 58 * len(top10_codes) + 180),
-            margin=dict(l=120, r=40, t=120, b=110),
+            # Tăng lề trên (t=140) để chứa đủ phần text header nhiều dòng
+            margin=dict(l=120, r=40, t=140, b=110), 
             xaxis=dict(
                 side="top",
                 tickangle=0,
-                tickfont=dict(size=10, color="#111827"),
+                # TĂNG CỠ CHỮ HEADER (2024 Paint...) LÊN 14
+                tickfont=dict(size=14, color="#111827"), 
                 showgrid=False,
             ),
             yaxis=dict(
                 autorange="reversed",
-                tickfont=dict(size=11, color="#111827"),
+                # TĂNG CỠ CHỮ TÊN MÃ SƠN LÊN 14
+                tickfont=dict(size=14, color="#111827"), 
                 showgrid=False,
             ),
             paper_bgcolor="white",
