@@ -521,7 +521,7 @@ def create_top10_usage_ratio_png(summary_df, filter_details):
     return buf
 
 def create_annual_usage_matrix_png(matrix_df, filter_details):
-    """Create annual Paint / Solvent / Ratio matrix for Word export - EXTRA LARGE FONT."""
+    """Create annual Paint / Solvent / Ratio matrix for Word export - EXTRA LARGE FONT FIXED."""
     if matrix_df is None or matrix_df.empty:
         fig, ax = plt.subplots(figsize=(10.2, 4.5), dpi=600)
         ax.text(
@@ -551,7 +551,6 @@ def create_annual_usage_matrix_png(matrix_df, filter_details):
         n_rows = len(paint_codes)
         n_cols = len(years) * len(metrics)
 
-        # Nới rộng kích thước các ô vuông để chứa được font chữ khổng lồ
         fig_width = max(14.0, min(20.0, 1.5 * n_cols + 4.5))
         fig_height = max(7.0, min(16.0, 0.8 * n_rows + 4.0))
         fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=600)
@@ -595,7 +594,6 @@ def create_annual_usage_matrix_png(matrix_df, filter_details):
                     rect = plt.Rectangle((col_index, row_index), 1, 1, facecolor=facecolor, edgecolor="white", linewidth=1.8)
                     ax.add_patch(rect)
 
-                    # Tăng cỡ chữ cực lớn cho DỮ LIỆU TỪNG Ô (lên 20)
                     ax.text(
                         col_index + 0.5, row_index + 0.5, label,
                         ha="center", va="center", fontsize=20, fontweight=font_weight, color=text_color
@@ -606,7 +604,6 @@ def create_annual_usage_matrix_png(matrix_df, filter_details):
             ax.plot([separator_x, separator_x], [0, n_rows], color="#475569", linewidth=2.5, zorder=5)
 
         ax.set_yticks(np.arange(n_rows) + 0.5)
-        # Tăng cỡ chữ cho MÃ SƠN trục Y (lên 20)
         ax.set_yticklabels(paint_codes, fontsize=20, fontweight="bold", color="black")
         ax.tick_params(axis="y", length=0, pad=14)
 
@@ -615,7 +612,6 @@ def create_annual_usage_matrix_png(matrix_df, filter_details):
         for _ in years:
             metric_labels.extend([label for _, label, _ in metrics])
             
-        # Tăng cỡ chữ cho TIÊU ĐỀ Paint/Solvent/Ratio trục X (lên 16)
         ax.set_xticklabels(metric_labels, fontsize=16, fontweight="bold", color="black")
         ax.xaxis.tick_top()
         ax.tick_params(axis="x", length=0, pad=14)
@@ -625,14 +621,15 @@ def create_annual_usage_matrix_png(matrix_df, filter_details):
             group_start = year_index * len(metrics)
             group_center = group_start + len(metrics) / 2
 
-            # Tăng cỡ chữ cho NĂM (2024, 2025...) lên mức khổng lồ (26)
+            # Đẩy chữ Năm (2024, 2025...) lên cao hơn (từ tọa độ 1.13 lên 1.22)
             ax.text(
-                group_center, 1.13, str(year_value),
+                group_center, 1.22, str(year_value),
                 transform=header_transform, ha="center", va="bottom",
                 fontsize=26, fontweight="bold", color="#111827", clip_on=False
             )
+            # Đẩy đường gạch ngang lên cao hơn để thoát khỏi chữ Paint/Solvent (từ 1.09 lên 1.15)
             ax.plot(
-                [group_start + 0.1, group_start + len(metrics) - 0.1], [1.09, 1.09],
+                [group_start + 0.1, group_start + len(metrics) - 0.1], [1.15, 1.15],
                 transform=header_transform, color="#475569", linewidth=2.0, clip_on=False
             )
 
@@ -642,7 +639,6 @@ def create_annual_usage_matrix_png(matrix_df, filter_details):
         for spine in ax.spines.values():
             spine.set_visible(False)
 
-        # Chú thích bên dưới cùng (lên 16)
         ax.text(
             0.0, -0.07,
             "Blue: Paint usage  |  Orange: Solvent usage  |  Green: Solvent ratio  |  —: No data",
@@ -651,7 +647,8 @@ def create_annual_usage_matrix_png(matrix_df, filter_details):
         )
 
         fig.patch.set_facecolor("white")
-        fig.subplots_adjust(left=0.18, right=0.98, bottom=0.12, top=0.72)
+        # Giảm 'top' từ 0.72 xuống 0.65 để chừa thêm lề trên cùng, chống bị cắt chữ Năm
+        fig.subplots_adjust(left=0.18, right=0.98, bottom=0.12, top=0.65)
 
     buffer = io.BytesIO()
     fig.savefig(buffer, format="png", bbox_inches="tight", facecolor="white", dpi=600, pad_inches=0.25)
