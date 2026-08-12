@@ -1623,7 +1623,7 @@ fig_condition.update_layout(
     template="plotly_white",
     margin=dict(
         l=80,
-        r=150,
+        r=230,
         t=145,
         b=80,
     ),
@@ -1631,6 +1631,7 @@ fig_condition.update_layout(
         title="Season",
         categoryorder="array",
         categoryarray=period_values,
+        domain=[0.0, 0.84],
         showgrid=False,
         showline=True,
         linecolor="#4B5563",
@@ -1650,20 +1651,27 @@ fig_condition.update_layout(
         zeroline=False,
     ),
     yaxis2=dict(
-        title="Solvent Ratio (%)",
+        title=dict(
+            text="Solvent Ratio (%)",
+            font=dict(color="#047857"),
+            standoff=8,
+        ),
         overlaying="y",
         side="right",
+        anchor="free",
+        position=0.88,
         range=ratio_range,
         showgrid=False,
         showline=True,
         linecolor="#059669",
         linewidth=1.4,
         tickfont=dict(
-            color="#047857"
+            color="#047857",
+            size=11,
         ),
-        title_font=dict(
-            color="#047857"
-        ),
+        ticks="outside",
+        ticklen=4,
+        tickcolor="#059669",
         zeroline=False,
     ),
     yaxis3=dict(
@@ -1710,21 +1718,25 @@ fig_condition.update_layout(
     yaxis3=dict(
         title=dict(
             text="Temperature (°C)",
-            font=dict(
-                color="#7E22CE"
-            ),
-            standoff=48,
+            font=dict(color="#7E22CE"),
+            standoff=10,
         ),
         overlaying="y",
         side="right",
         anchor="free",
-        position=1.0,
+        position=0.985,
         range=temp_range,
         showgrid=False,
-        showline=False,
+        showline=True,
+        linecolor="#7E22CE",
+        linewidth=1.2,
         tickfont=dict(
-            color="#7E22CE"
+            color="#7E22CE",
+            size=11,
         ),
+        ticks="outside",
+        ticklen=4,
+        tickcolor="#7E22CE",
         ticksuffix="°",
         zeroline=False,
     )
