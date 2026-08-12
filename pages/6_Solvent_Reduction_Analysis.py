@@ -99,6 +99,23 @@ pos_map = {
 
 df["Position_UI"] = df["塗裝位置"].map(pos_map)
 
+# ---------------------------------------------------------
+# SPECIAL POSITION EXCEPTION
+# PS30213Z2 is operationally a primer-group paint.
+# Because of multi-pass production records, some source rows may be marked
+# as Top Finish / TF, but for analysis and filtering this paint code must
+# always belong to the Primer group.
+# Therefore it must never appear when Coating Position = Top Finish.
+# ---------------------------------------------------------
+special_primer_paint_codes = {
+    "PS30213Z2",
+}
+
+df.loc[
+    df["Paint_Code"].isin(special_primer_paint_codes),
+    "Position_UI",
+] = "Primer"
+
 valid_position_ui = {
     "Primer",
     "Top Finish",
