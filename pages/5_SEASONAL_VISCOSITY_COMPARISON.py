@@ -920,6 +920,7 @@ if season_summary.empty:
 # =========================================================
 st.markdown("---")
 st.subheader("1. Seasonal Overview")
+st.caption(filter_details)
 
 period_values = (
     season_summary[period_col]
@@ -1014,19 +1015,12 @@ fig_overview = go.Figure(
 )
 
 fig_overview.update_layout(
-    title=dict(
-        text=(
-            "<b>Seasonal Viscosity Overview</b>"
-            f"<br><sup>{filter_details}</sup>"
-        ),
-        x=0.5,
-        xanchor="center",
-    ),
-    height=330,
+    title=None,
+    height=315,
     margin=dict(
         l=130,
         r=80,
-        t=115,
+        t=55,
         b=65,
     ),
     paper_bgcolor="white",
@@ -1041,11 +1035,14 @@ fig_overview.update_layout(
 )
 
 fig_overview.update_xaxes(
-    title="Season",
+    title=None,
     side="top",
     showline=True,
     linecolor="#475569",
     mirror=True,
+    ticks="outside",
+    ticklen=6,
+    tickfont=dict(size=12),
 )
 
 fig_overview.update_yaxes(
