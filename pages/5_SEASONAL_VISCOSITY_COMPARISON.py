@@ -2177,7 +2177,7 @@ fig_overview = go.Figure(
         text=[cell_text],
         texttemplate="%{text}",
         textfont=dict(
-            size=14,
+            size=18,
             color="#000000",
         ),
         customdata=customdata,
@@ -2194,7 +2194,7 @@ fig_overview = go.Figure(
             len=0.70,
             outlinecolor="#94A3B8",
             outlinewidth=1,
-            tickfont=dict(color="#000000", size=10),
+            tickfont=dict(color="#000000", size=12),
         ),
         xgap=3,
         ygap=3,
