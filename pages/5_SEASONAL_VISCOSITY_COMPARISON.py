@@ -109,6 +109,8 @@ df["Bucket_Number"] = (
 )
 
 # Position mapping
+# Only real coating positions are allowed in the UI.
+# Values such as 0 / 0.0 / blank / NaN are treated as Unknown.
 position_map = {
     "TP": "Primer",
     "正底漆": "Primer",
@@ -118,12 +120,34 @@ position_map = {
     "正面漆": "Top Finish",
     "BF": "Back Finish",
     "背面漆": "Back Finish",
+    "PRIMER": "Primer",
+    "TOP FINISH": "Top Finish",
+    "BACK FINISH": "Back Finish",
 }
 
-df["Position_UI"] = (
+position_raw = (
     df["塗裝位置"]
+    .fillna("")
+    .astype(str)
+    .str.strip()
+)
+
+position_key = position_raw.str.upper()
+
+invalid_position_values = {
+    "", "0", "0.0", "NAN", "NONE", "NULL",
+    "N/A", "NA", "-", "--", "<NA>", "UNKNOWN"
+}
+
+position_key = position_key.mask(
+    position_key.isin(invalid_position_values),
+    ""
+)
+
+df["Position_UI"] = (
+    position_key
     .map(position_map)
-    .fillna(df["塗裝位置"])
+    .fillna("Unknown")
 )
 
 # Numeric columns
@@ -342,13 +366,26 @@ if selected_resin != "All":
     filter_df = filter_df[filter_df["Resin"] == selected_resin]
 
 # Position
-position_options = ["All"] + sorted(
-    [
-        str(value)
-        for value in filter_df["Position_UI"].unique()
-        if value != "Unknown"
-    ]
+# Hard-limit the selector to real coating positions only.
+valid_position_order = [
+    "Primer",
+    "Top Finish",
+    "Back Finish",
+]
+
+available_position_set = set(
+    filter_df["Position_UI"]
+    .dropna()
+    .astype(str)
+    .str.strip()
+    .tolist()
 )
+
+position_options = ["All"] + [
+    position
+    for position in valid_position_order
+    if position in available_position_set
+]
 
 selected_position = filter_col3.selectbox(
     "Coating Position (塗裝位置)",
