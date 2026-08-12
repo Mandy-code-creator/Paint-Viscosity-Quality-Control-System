@@ -195,16 +195,56 @@ group_a = st.session_state['group_a_data'].copy()
 group_a['Solvent_Type'] = group_a['Solvent_Type'].astype(str)
 
 # Position Mapping
+# Only keep real coating positions. Invalid values such as 0 / blank / NaN
+# are excluded so they cannot appear in the Position filter.
 if "塗裝位置" not in group_a.columns:
-    group_a["塗裝位置"] = "Unknown"
+    group_a["塗裝位置"] = pd.NA
+
+group_a["塗裝位置"] = (
+    group_a["塗裝位置"]
+    .astype("string")
+    .str.strip()
+    .str.upper()
+)
+
+invalid_positions = {
+    "",
+    "0",
+    "0.0",
+    "NAN",
+    "NONE",
+    "NULL",
+    "N/A",
+    "NA",
+    "-",
+    "--",
+    "<NA>",
+    "UNKNOWN",
+}
+
+group_a.loc[
+    group_a["塗裝位置"].isin(invalid_positions),
+    "塗裝位置",
+] = pd.NA
 
 pos_mapping = {
-    "TP": "Primer", "正底漆": "Primer",
-    "BP": "Primer", "背底漆": "Primer",
-    "TF": "Top Finish", "正面漆": "Top Finish",
-    "BF": "Back Finish", "背面漆": "Back Finish"
+    "TP": "Primer",
+    "正底漆": "Primer",
+    "BP": "Primer",
+    "背底漆": "Primer",
+    "TF": "Top Finish",
+    "正面漆": "Top Finish",
+    "BF": "Back Finish",
+    "背面漆": "Back Finish",
 }
-group_a["Position_UI"] = group_a["塗裝位置"].map(pos_mapping).fillna(group_a["塗裝位置"])
+
+group_a["Position_UI"] = group_a["塗裝位置"].map(pos_mapping)
+
+group_a = group_a[
+    group_a["Position_UI"].isin(
+        ["Primer", "Top Finish", "Back Finish"]
+    )
+].copy()
 
 # Data Normalization (Không cộng 120kg theo quy trình chuẩn)
 group_a['Solvent_Ratio_Percent'] = (group_a['添加重量'] / group_a['塗料重量'].replace(0, 1)) * 100
@@ -219,39 +259,125 @@ group_a['Historical_Efficiency'] = group_a['Viscosity_Reduction'] / group_a['Sol
 st.markdown("---")
 st.subheader("🎯 Master System Selection")
 
-# Lọc các nhóm có >= 10 mẻ hợp lệ (Bao gồm cả Position)
-valid_groups = group_a.groupby(['Resin', 'Position_UI', 'Vendor', 'Solvent_Type']).filter(lambda x: x['塗料批號'].nunique() >= 10)
+# No minimum historical batch limit is applied here.
+# Any valid historical combination available in the data can be selected.
+filter_source = group_a.copy()
 
-if valid_groups.empty:
-    st.error("❌ No groups found with 10+ historical batches. Please upload a larger dataset.")
+# Normalize filter columns
+for col in [
+    "Resin",
+    "Position_UI",
+    "Vendor",
+    "Solvent_Type",
+]:
+    if col not in filter_source.columns:
+        filter_source[col] = pd.NA
+
+    filter_source[col] = (
+        filter_source[col]
+        .astype("string")
+        .str.strip()
+    )
+
+# Keep only complete and valid filter records
+filter_source = filter_source[
+    filter_source["Resin"].notna()
+    & filter_source["Position_UI"].notna()
+    & filter_source["Vendor"].notna()
+    & filter_source["Solvent_Type"].notna()
+].copy()
+
+# Position_UI is strictly limited to real coating positions
+filter_source = filter_source[
+    filter_source["Position_UI"].isin(
+        ["Primer", "Top Finish", "Back Finish"]
+    )
+].copy()
+
+if filter_source.empty:
+    st.error("❌ No valid historical data available.")
     st.stop()
 
 col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+
+# Resin
 with col_m1:
-    master_resin = st.selectbox("Select Resin:", sorted(valid_groups['Resin'].unique()))
-with col_m2:
-    master_pos = st.selectbox("Select Position:", sorted(valid_groups[valid_groups['Resin'] == master_resin]['Position_UI'].unique()))
-with col_m3:
-    master_vendor = st.selectbox(
-        "Select Vendor:", 
-        sorted(valid_groups[(valid_groups['Resin'] == master_resin) & (valid_groups['Position_UI'] == master_pos)]['Vendor'].unique())
+    resin_options = sorted(
+        filter_source["Resin"]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
     )
+
+    master_resin = st.selectbox(
+        "Select Resin:",
+        resin_options
+    )
+
+# Position
+resin_df = filter_source[
+    filter_source["Resin"] == master_resin
+].copy()
+
+with col_m2:
+    position_options = sorted(
+        resin_df["Position_UI"]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
+    )
+
+    master_pos = st.selectbox(
+        "Select Position:",
+        position_options
+    )
+
+# Vendor
+position_df = resin_df[
+    resin_df["Position_UI"] == master_pos
+].copy()
+
+with col_m3:
+    vendor_options = sorted(
+        position_df["Vendor"]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
+    )
+
+    master_vendor = st.selectbox(
+        "Select Vendor:",
+        vendor_options
+    )
+
+# Solvent
+vendor_df = position_df[
+    position_df["Vendor"] == master_vendor
+].copy()
+
 with col_m4:
+    solvent_options = sorted(
+        vendor_df["Solvent_Type"]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
+    )
+
     master_solvent = st.selectbox(
-        "Select Solvent Type:", 
-        sorted(valid_groups[
-            (valid_groups['Resin'] == master_resin) & 
-            (valid_groups['Position_UI'] == master_pos) & 
-            (valid_groups['Vendor'] == master_vendor)
-        ]['Solvent_Type'].unique())
+        "Select Solvent Type:",
+        solvent_options
     )
 
 # Extract data for the chosen system
-system_data = valid_groups[
-    (valid_groups['Resin'] == master_resin) & 
-    (valid_groups['Position_UI'] == master_pos) & 
-    (valid_groups['Vendor'] == master_vendor) & 
-    (valid_groups['Solvent_Type'] == master_solvent)
+system_data = filter_source[
+    (filter_source["Resin"] == master_resin)
+    & (filter_source["Position_UI"] == master_pos)
+    & (filter_source["Vendor"] == master_vendor)
+    & (filter_source["Solvent_Type"] == master_solvent)
 ].copy()
 
 if system_data.empty:
