@@ -2648,7 +2648,7 @@ fig_condition.add_trace(
         y=season_summary[
             "Median_Before_Viscosity"
         ],
-        mode="lines+markers+text",
+        mode="lines+markers",
         name="Before Viscosity (s)",
         line=dict(
             color="#D97706",
@@ -2657,15 +2657,6 @@ fig_condition.add_trace(
         marker=dict(
             size=9,
             color="#D97706",
-        ),
-        text=season_summary[
-            "Median_Before_Viscosity"
-        ].map(
-            lambda value: f"{value:.1f}"
-        ),
-        textposition="top center",
-        textfont=dict(size=CHART_LABEL_SIZE,
-            color="#92400E",
         ),
         yaxis="y1",
         cliponaxis=False,
@@ -2804,7 +2795,7 @@ if season_summary[
             y=season_summary[
                 "Median_Temperature"
             ],
-            mode="lines+markers+text",
+            mode="lines+markers",
             name="Temperature (C)",
             line=dict(
                 color="#7E22CE",
@@ -2816,19 +2807,6 @@ if season_summary[
                 color="#7E22CE",
                 symbol="circle",
             ),
-            text=season_summary[
-                "Median_Temperature"
-            ].map(
-                lambda value: (
-                    f"{value:.1f}°"
-                    if pd.notna(value)
-                    else ""
-                )
-            ),
-            textposition="top center",
-            textfont=dict(size=CHART_LABEL_SIZE,
-                color="#6B21A8",
-            ),
             yaxis="y3",
             cliponaxis=False,
             hovertemplate=(
@@ -2838,6 +2816,53 @@ if season_summary[
             ),
         )
     )
+
+
+
+# ---------------------------------------------------------
+# Fixed labels — prevent Before Viscosity and Temperature
+# from overlapping at Spring / Autumn.
+# ---------------------------------------------------------
+for _, row in season_summary.iterrows():
+    period_name = str(row[period_col])
+
+    # Before viscosity: left + above the orange marker
+    if pd.notna(row["Median_Before_Viscosity"]):
+        fig_condition.add_annotation(
+            x=period_name,
+            y=row["Median_Before_Viscosity"],
+            xref="x",
+            yref="y",
+            text=f"{row['Median_Before_Viscosity']:.1f}",
+            showarrow=False,
+            xshift=-18,
+            yshift=18,
+            font=dict(
+                size=15,
+                color="#000000",
+            ),
+            bgcolor="rgba(255,255,255,0.82)",
+            borderpad=1,
+        )
+
+    # Temperature: right + above the purple marker
+    if pd.notna(row["Median_Temperature"]):
+        fig_condition.add_annotation(
+            x=period_name,
+            y=row["Median_Temperature"],
+            xref="x",
+            yref="y3",
+            text=f"{row['Median_Temperature']:.1f}°",
+            showarrow=False,
+            xshift=20,
+            yshift=18,
+            font=dict(
+                size=15,
+                color="#000000",
+            ),
+            bgcolor="rgba(255,255,255,0.82)",
+            borderpad=1,
+        )
 
 
 # ---------------------------------------------------------
@@ -2899,22 +2924,12 @@ else:
 # Layout
 # ---------------------------------------------------------
 fig_condition.update_layout(
-    title=dict(
-        text=(
-            f"<b>{selected_paint_code} — "
-            "Seasonal Viscosity, Solvent Ratio & Temperature</b>"
-            f"<br><sup>Thickness: "
-            f"{structure_display}</sup>"
-        ),
-        x=0.5,
-        xanchor="center",
-    ),
     height=590,
     template="plotly_white",
     margin=dict(
         l=80,
         r=230,
-        t=145,
+        t=205,
         b=80,
     ),
     xaxis=dict(
@@ -2985,7 +3000,7 @@ fig_condition.update_layout(
     legend=dict(
         orientation="h",
         yanchor="bottom",
-        y=1.07,
+        y=1.025,
         xanchor="center",
         x=0.5,
         bgcolor="rgba(255,255,255,0.94)",
@@ -2998,6 +3013,44 @@ fig_condition.update_layout(
         color=CHART_TEXT_COLOR,
     ),
 )
+
+
+# Fixed chart title and thickness subtitle.
+# These are paper annotations instead of Plotly's built-in title,
+# so they cannot overlap with the legend.
+fig_condition.add_annotation(
+    x=0.42,
+    y=1.24,
+    xref="paper",
+    yref="paper",
+    text=(
+        f"<b>{selected_paint_code} — Seasonal Viscosity, "
+        "Solvent Ratio & Temperature</b>"
+    ),
+    showarrow=False,
+    xanchor="center",
+    yanchor="bottom",
+    font=dict(
+        size=19,
+        color="#000000",
+    ),
+)
+
+fig_condition.add_annotation(
+    x=0.42,
+    y=1.155,
+    xref="paper",
+    yref="paper",
+    text=f"<b>Thickness: {structure_display}</b>",
+    showarrow=False,
+    xanchor="center",
+    yanchor="bottom",
+    font=dict(
+        size=14,
+        color="#000000",
+    ),
+)
+
 
 # Shift the temperature axis title farther right so it does not overlap
 # with the solvent-ratio axis.
@@ -3067,7 +3120,7 @@ fig_condition.update_yaxes(
 
 fig_condition.update_layout(
 
-    legend=dict(font=dict(color=CHART_TEXT_COLOR, size=14)),
+    legend=dict(font=dict(color="#000000", size=14)),
 
     yaxis=dict(
 
