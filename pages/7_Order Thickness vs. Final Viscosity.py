@@ -1308,11 +1308,415 @@ else:
     )
 
 
+
 # =========================================================
-# 12. EXPORT
+# 12. READY-TO-LINE INCOMING VISCOSITY RECOMMENDATION
 # =========================================================
 st.markdown("---")
-st.subheader("7. Export")
+st.subheader("7. Ready-to-Line Incoming Viscosity Recommendation")
+
+st.markdown(
+    "Estimate an incoming viscosity range that may allow the selected paint "
+    "to go directly to line without on-site solvent addition. "
+    "The recommendation is based on the historical final-viscosity distribution "
+    "for the same Paint Code and Coating Structure."
+)
+
+# ---------------------------------------------------------
+# 12.1 Clean historical reference records
+# ---------------------------------------------------------
+ready_df = system_df.copy()
+
+# Keep only positive and valid final viscosity values.
+ready_df = ready_df[
+    ready_df["黏度(秒)_1"].notna()
+    & (ready_df["黏度(秒)_1"] > 0)
+].copy()
+
+# Exclude clearly abnormal solvent-ratio records from the recommendation reference.
+# This does NOT remove them from the earlier analysis; it only protects the
+# ready-to-line recommendation from extreme dilution events.
+ratio_reference = pd.to_numeric(
+    ready_df["Solvent_Ratio_Percent"],
+    errors="coerce",
+)
+
+if ratio_reference.notna().sum() >= 5:
+    ratio_p10 = float(ratio_reference.quantile(0.10))
+    ratio_p90 = float(ratio_reference.quantile(0.90))
+
+    ready_reference_df = ready_df[
+        ready_df["Solvent_Ratio_Percent"].between(
+            ratio_p10,
+            ratio_p90,
+            inclusive="both",
+        )
+    ].copy()
+else:
+    ratio_p10 = np.nan
+    ratio_p90 = np.nan
+    ready_reference_df = ready_df.copy()
+
+# If trimming leaves too few records, fall back to all valid records.
+if len(ready_reference_df) < 5:
+    ready_reference_df = ready_df.copy()
+
+# ---------------------------------------------------------
+# 12.2 Recommendation statistics
+# ---------------------------------------------------------
+ready_records = len(ready_reference_df)
+
+if ready_records == 0:
+    st.info(
+        "No valid historical final-viscosity records are available for "
+        "a ready-to-line recommendation."
+    )
+else:
+    current_incoming_p25 = float(
+        ready_reference_df["黏度(秒)"].quantile(0.25)
+    )
+    current_incoming_median = float(
+        ready_reference_df["黏度(秒)"].median()
+    )
+    current_incoming_p75 = float(
+        ready_reference_df["黏度(秒)"].quantile(0.75)
+    )
+
+    recommended_lower = float(
+        ready_reference_df["黏度(秒)_1"].quantile(0.25)
+    )
+    recommended_target = float(
+        ready_reference_df["黏度(秒)_1"].median()
+    )
+    recommended_upper = float(
+        ready_reference_df["黏度(秒)_1"].quantile(0.75)
+    )
+
+    final_iqr = recommended_upper - recommended_lower
+
+    median_solvent_ratio = float(
+        ready_reference_df["Solvent_Ratio_Percent"].median()
+    ) if ready_reference_df["Solvent_Ratio_Percent"].notna().any() else np.nan
+
+    median_solvent_kg = float(
+        ready_reference_df["添加重量"].median()
+    ) if "添加重量" in ready_reference_df.columns and ready_reference_df["添加重量"].notna().any() else np.nan
+
+    total_solvent_kg = float(
+        ready_reference_df["添加重量"].sum()
+    ) if "添加重量" in ready_reference_df.columns and ready_reference_df["添加重量"].notna().any() else np.nan
+
+    # -----------------------------------------------------
+    # 12.3 Pilot readiness classification
+    # -----------------------------------------------------
+    if ready_records < 8:
+        ready_status = "Insufficient Data"
+        ready_icon = "⚪"
+        ready_message = (
+            "Historical reference is limited. Keep the current incoming viscosity "
+            "and collect more matched records before a no-solvent pilot."
+        )
+    elif final_iqr <= 4:
+        ready_status = "Ready for No-Solvent Pilot"
+        ready_icon = "🟢"
+        ready_message = (
+            "Historical final viscosity is tightly concentrated. "
+            "A supplier trial at the recommended incoming target is suitable "
+            "for line validation."
+        )
+    elif final_iqr <= 8:
+        ready_status = "Pilot with Monitoring"
+        ready_icon = "🟡"
+        ready_message = (
+            "Historical final viscosity is moderately dispersed. "
+            "A controlled pilot is possible, but viscosity and coating quality "
+            "should be checked closely."
+        )
+    else:
+        ready_status = "Not Ready for Direct Specification"
+        ready_icon = "🟠"
+        ready_message = (
+            "Historical final viscosity is too dispersed for a narrow incoming "
+            "specification. Further stratification or process review is recommended."
+        )
+
+    # -----------------------------------------------------
+    # 12.4 KPI cards
+    # -----------------------------------------------------
+    r1, r2, r3, r4 = st.columns(4)
+
+    r1.metric(
+        "Current Incoming Median",
+        f"{current_incoming_median:.1f} s",
+    )
+
+    r2.metric(
+        "Recommended Lower",
+        f"{recommended_lower:.1f} s",
+    )
+
+    r3.metric(
+        "Recommended Target",
+        f"{recommended_target:.1f} s",
+    )
+
+    r4.metric(
+        "Recommended Upper",
+        f"{recommended_upper:.1f} s",
+    )
+
+    # -----------------------------------------------------
+    # 12.5 Recommendation table
+    # -----------------------------------------------------
+    ready_report = pd.DataFrame(
+        [
+            {
+                "Vendor": selected_vendor,
+                "Paint Code": selected_paint_code,
+                "Position": selected_position,
+                "Resin": selected_resin,
+                "Solvent": selected_solvent,
+                "Coating Structure": structure_text,
+                "Reference Records": ready_records,
+                "Current Incoming P25 (s)": current_incoming_p25,
+                "Current Incoming Median (s)": current_incoming_median,
+                "Current Incoming P75 (s)": current_incoming_p75,
+                "Recommended Lower (s)": recommended_lower,
+                "Recommended Target (s)": recommended_target,
+                "Recommended Upper (s)": recommended_upper,
+                "Final Viscosity IQR (s)": final_iqr,
+                "Historical Median Solvent Ratio (%)": median_solvent_ratio,
+                "Historical Median Solvent Added (kg)": median_solvent_kg,
+                "Historical Solvent Total (kg)": total_solvent_kg,
+                "Pilot Readiness": ready_status,
+            }
+        ]
+    )
+
+    st.dataframe(
+        ready_report,
+        column_config={
+            "Reference Records": st.column_config.NumberColumn(
+                "Reference Records", format="%d"
+            ),
+            "Current Incoming P25 (s)": st.column_config.NumberColumn(
+                "Current Incoming P25 (s)", format="%.1f"
+            ),
+            "Current Incoming Median (s)": st.column_config.NumberColumn(
+                "Current Incoming Median (s)", format="%.1f"
+            ),
+            "Current Incoming P75 (s)": st.column_config.NumberColumn(
+                "Current Incoming P75 (s)", format="%.1f"
+            ),
+            "Recommended Lower (s)": st.column_config.NumberColumn(
+                "Recommended Lower (s)", format="%.1f"
+            ),
+            "Recommended Target (s)": st.column_config.NumberColumn(
+                "Recommended Target (s)", format="%.1f"
+            ),
+            "Recommended Upper (s)": st.column_config.NumberColumn(
+                "Recommended Upper (s)", format="%.1f"
+            ),
+            "Final Viscosity IQR (s)": st.column_config.NumberColumn(
+                "Final Viscosity IQR (s)", format="%.1f"
+            ),
+            "Historical Median Solvent Ratio (%)": st.column_config.NumberColumn(
+                "Historical Median Solvent Ratio (%)", format="%.2f"
+            ),
+            "Historical Median Solvent Added (kg)": st.column_config.NumberColumn(
+                "Historical Median Solvent Added (kg)", format="%.2f"
+            ),
+            "Historical Solvent Total (kg)": st.column_config.NumberColumn(
+                "Historical Solvent Total (kg)", format="%.1f"
+            ),
+        },
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    # -----------------------------------------------------
+    # 12.6 Current vs recommended range chart
+    # -----------------------------------------------------
+    fig_ready = go.Figure()
+
+    fig_ready.add_trace(
+        go.Scatter(
+            x=[
+                current_incoming_p25,
+                current_incoming_p75,
+            ],
+            y=[
+                "Current Incoming",
+                "Current Incoming",
+            ],
+            mode="lines",
+            line=dict(width=18),
+            name="Current Incoming P25–P75",
+            hovertemplate=(
+                "Current incoming range: "
+                f"{current_incoming_p25:.1f}–{current_incoming_p75:.1f} s"
+                "<extra></extra>"
+            ),
+        )
+    )
+
+    fig_ready.add_trace(
+        go.Scatter(
+            x=[current_incoming_median],
+            y=["Current Incoming"],
+            mode="markers+text",
+            marker=dict(
+                size=16,
+                symbol="diamond",
+            ),
+            text=[f"{current_incoming_median:.1f} s"],
+            textposition="top center",
+            name="Current Incoming Median",
+            hovertemplate=(
+                "Current incoming median: "
+                f"{current_incoming_median:.1f} s"
+                "<extra></extra>"
+            ),
+        )
+    )
+
+    fig_ready.add_trace(
+        go.Scatter(
+            x=[
+                recommended_lower,
+                recommended_upper,
+            ],
+            y=[
+                "Recommended Incoming",
+                "Recommended Incoming",
+            ],
+            mode="lines",
+            line=dict(width=18),
+            name="Recommended P25–P75",
+            hovertemplate=(
+                "Recommended incoming range: "
+                f"{recommended_lower:.1f}–{recommended_upper:.1f} s"
+                "<extra></extra>"
+            ),
+        )
+    )
+
+    fig_ready.add_trace(
+        go.Scatter(
+            x=[recommended_target],
+            y=["Recommended Incoming"],
+            mode="markers+text",
+            marker=dict(
+                size=17,
+                symbol="diamond",
+            ),
+            text=[f"Target {recommended_target:.1f} s"],
+            textposition="bottom center",
+            name="Recommended Target",
+            hovertemplate=(
+                "Recommended target: "
+                f"{recommended_target:.1f} s"
+                "<extra></extra>"
+            ),
+        )
+    )
+
+    x_min = min(
+        current_incoming_p25,
+        recommended_lower,
+    )
+    x_max = max(
+        current_incoming_p75,
+        recommended_upper,
+    )
+    x_pad = max((x_max - x_min) * 0.15, 5.0)
+
+    fig_ready.update_layout(
+        title=dict(
+            text=(
+                "<b>Current Incoming vs. Ready-to-Line Recommendation</b>"
+                f"<br><sup>{selected_paint_code} | "
+                f"Coating Structure: {structure_text}</sup>"
+            ),
+            x=0.5,
+            xanchor="center",
+        ),
+        height=520,
+        margin=dict(
+            l=170,
+            r=50,
+            t=125,
+            b=75,
+        ),
+        template="plotly_white",
+        xaxis=dict(
+            title="Viscosity (s)",
+            range=[x_min - x_pad, x_max + x_pad],
+            showgrid=True,
+            gridcolor="#E5E7EB",
+            showline=True,
+            linecolor="#374151",
+            mirror=True,
+        ),
+        yaxis=dict(
+            title="",
+            categoryorder="array",
+            categoryarray=[
+                "Recommended Incoming",
+                "Current Incoming",
+            ],
+            showgrid=True,
+            gridcolor="#E5E7EB",
+            showline=True,
+            linecolor="#374151",
+            mirror=True,
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="center",
+            x=0.5,
+        ),
+    )
+
+    st.plotly_chart(
+        fig_ready,
+        use_container_width=True,
+    )
+
+    # -----------------------------------------------------
+    # 12.7 Decision message
+    # -----------------------------------------------------
+    if ready_status == "Ready for No-Solvent Pilot":
+        st.success(
+            f"{ready_icon} **{ready_status}**  \n{ready_message}"
+        )
+    elif ready_status == "Pilot with Monitoring":
+        st.warning(
+            f"{ready_icon} **{ready_status}**  \n{ready_message}"
+        )
+    elif ready_status == "Not Ready for Direct Specification":
+        st.warning(
+            f"{ready_icon} **{ready_status}**  \n{ready_message}"
+        )
+    else:
+        st.info(
+            f"{ready_icon} **{ready_status}**  \n{ready_message}"
+        )
+
+    st.caption(
+        "The recommended range is a supplier trial reference based on historical "
+        "post-dilution viscosity. It should not be treated as a final purchasing "
+        "specification until line validation confirms coating thickness, gloss, "
+        "surface quality, and finished-product quality."
+    )
+
+# =========================================================
+# 13. EXPORT
+# =========================================================
+st.markdown("---")
+st.subheader("8. Export")
 
 export_summary = summary_df.copy()
 export_decision = decision_table.copy()
@@ -1347,7 +1751,7 @@ with e2:
 
 
 # =========================================================
-# 13. METHOD NOTE
+# 14. METHOD NOTE
 # =========================================================
 with st.expander("Method & Interpretation"):
     st.markdown(
