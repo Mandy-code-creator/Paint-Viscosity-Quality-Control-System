@@ -299,6 +299,7 @@ def add_dataframe_table(
 
 def save_matplotlib_to_buffer(fig):
     """Save matplotlib figure to an in-memory PNG buffer."""
+    plt.rcParams["font.family"] = "DejaVu Sans"
     buffer = io.BytesIO()
     fig.savefig(
         buffer,
@@ -349,7 +350,7 @@ def create_word_seasonal_overview_png():
                 f"{before[i]:.0f} → {after[i]:.0f} s\n"
                 f"{ratio[i]:.1f}%\n"
                 + (
-                    f"{temperature[i]:.1f} °C"
+                    f"{temperature[i]:.1f} C"
                     if np.isfinite(temperature[i])
                     else "—"
                 )
@@ -370,13 +371,13 @@ def create_word_seasonal_overview_png():
     ax.set_ylim(0, 1)
     ax.set_xticks(x)
     ax.set_xticklabels(
-        chart_df[period_col].astype(str),
+        chart_df[period_col].map(season_label_for_export),
         fontsize=10,
     )
     ax.set_yticks([])
     ax.set_xlabel("Season", fontsize=10)
     ax.set_title(
-        f"{selected_paint_code} — Seasonal Viscosity Overview",
+        f"{selected_paint_code} - Seasonal Viscosity Overview",
         fontsize=14,
         fontweight="bold",
         pad=18,
@@ -455,7 +456,7 @@ def create_word_before_after_png():
 
     ax.set_yticks(y)
     ax.set_yticklabels(
-        chart_df[period_col].astype(str),
+        chart_df[period_col].map(season_label_for_export),
         fontsize=10,
     )
     ax.set_xlabel("Viscosity (s)", fontsize=11)
@@ -467,7 +468,7 @@ def create_word_before_after_png():
         frameon=False,
     )
     ax.set_title(
-        f"{selected_paint_code} — Seasonal Before vs After Viscosity",
+        f"{selected_paint_code} - Seasonal Before vs After Viscosity",
         fontsize=14,
         fontweight="bold",
         pad=28,
@@ -566,7 +567,7 @@ def create_word_condition_png():
             marker="o",
             linewidth=2.0,
             linestyle=":",
-            label="Temperature (°C)",
+            label="Temperature (C)",
         )
 
         for xi, scaled, original in zip(
@@ -578,7 +579,7 @@ def create_word_condition_png():
                 ax2.text(
                     xi,
                     scaled,
-                    f"{original:.1f}°",
+                    f"{original:.1f} C",
                     fontsize=8,
                     ha="center",
                     va="bottom",
@@ -597,13 +598,13 @@ def create_word_condition_png():
 
     ax1.set_xticks(x)
     ax1.set_xticklabels(
-        chart_df[period_col].astype(str),
+        chart_df[period_col].map(season_label_for_export),
         fontsize=9,
     )
 
     ax1.set_ylabel("Viscosity (s)", fontsize=10)
     ax2.set_ylabel(
-        "Solvent Ratio (%) / Temperature trend",
+        "Solvent Ratio (%) / Temperature Trend",
         fontsize=10,
     )
 
@@ -623,7 +624,7 @@ def create_word_condition_png():
     )
 
     ax1.set_title(
-        f"{selected_paint_code} — Seasonal Viscosity, Solvent Ratio & Temperature",
+        f"{selected_paint_code} - Seasonal Viscosity, Solvent Ratio & Temperature",
         fontsize=14,
         fontweight="bold",
         pad=32,
@@ -728,7 +729,7 @@ def create_word_recommendation_png():
     ax.set_xlabel("Viscosity (s)", fontsize=10)
     ax.grid(axis="x", linewidth=0.8, alpha=0.35)
     ax.set_title(
-        f"{selected_paint_code} — Current vs Recommended Incoming Viscosity",
+        f"{selected_paint_code} - Current vs Recommended Incoming Viscosity",
         fontsize=14,
         fontweight="bold",
         pad=20,
@@ -1224,6 +1225,38 @@ def build_structure_label(row):
     return (
         f"{fmt_thickness(primer)} µm + "
         f"{fmt_thickness(main)} µm"
+    )
+
+
+
+def season_label_for_export(value):
+    """
+    Use ASCII/English labels in downloaded PNG/Word charts.
+    This avoids square-box / missing-glyph errors on Linux servers
+    when Chinese fonts are not installed.
+    """
+    text_value = str(value)
+
+    mapping = {
+        "冬季 (12–02月)": "Winter (12-02)",
+        "春季 (03–05月)": "Spring (03-05)",
+        "夏季 (06–08月)": "Summer (06-08)",
+        "秋季 (09–11月)": "Autumn (09-11)",
+    }
+
+    if text_value in mapping:
+        return mapping[text_value]
+
+    # For yearly mode, replace the Chinese season part only.
+    for zh, en in mapping.items():
+        if zh in text_value:
+            return text_value.replace(zh, en)
+
+    # Defensive cleanup for unsupported symbols in export text.
+    return (
+        text_value
+        .replace("–", "-")
+        .replace("月", "")
     )
 
 
@@ -2705,7 +2738,7 @@ if season_summary[
                 "Median_Temperature"
             ],
             mode="lines+markers+text",
-            name="Temperature (°C)",
+            name="Temperature (C)",
             line=dict(
                 color="#7E22CE",
                 width=3,
@@ -2866,7 +2899,7 @@ fig_condition.update_layout(
         zeroline=False,
     ),
     yaxis3=dict(
-        title="Temperature (°C)",
+        title="Temperature (C)",
         overlaying="y",
         side="right",
         anchor="free",
@@ -2908,7 +2941,7 @@ fig_condition.update_layout(
 fig_condition.update_layout(
     yaxis3=dict(
         title=dict(
-            text="Temperature (°C)",
+            text="Temperature (C)",
             font=dict(color="#7E22CE"),
             standoff=10,
         ),
