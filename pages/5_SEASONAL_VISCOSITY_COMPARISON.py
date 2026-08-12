@@ -2583,10 +2583,10 @@ else:
     )
 
 # =========================================================
-# 17. EXPORT
+# 17. MANAGEMENT REPORT EXPORT
 # =========================================================
 st.markdown("---")
-st.subheader("📥 Export")
+st.subheader("📥 Management Report Export")
 
 csv_data = dataframe_to_csv_bytes(
     season_display
@@ -2605,145 +2605,564 @@ st.download_button(
 
 
 if st.button(
-    "產生互動式 HTML 報告",
+    "產生管理報告 HTML",
     type="primary",
 ):
     try:
-        overview_html = (
-            fig_overview.to_html(
-                full_html=False,
-                include_plotlyjs="cdn",
-                default_width="100%",
-                default_height="360px",
-            )
+        # -------------------------------------------------
+        # 17.1 Prepare report charts
+        # -------------------------------------------------
+        overview_html = fig_overview.to_html(
+            full_html=False,
+            include_plotlyjs="cdn",
+            default_width="100%",
+            default_height="360px",
         )
 
-        chart1_html = (
-            fig_before_after.to_html(
+        before_after_html = fig_before_after.to_html(
+            full_html=False,
+            include_plotlyjs=False,
+            default_width="100%",
+            default_height="600px",
+        )
+
+        condition_html = fig_condition.to_html(
+            full_html=False,
+            include_plotlyjs=False,
+            default_width="100%",
+            default_height="600px",
+        )
+
+        if "fig_recommend" in locals():
+            recommend_chart_html = fig_recommend.to_html(
                 full_html=False,
                 include_plotlyjs=False,
                 default_width="100%",
-                default_height="600px",
+                default_height="520px",
             )
+        else:
+            recommend_chart_html = (
+                "<div class='notice'>目前無法產生建議進料黏度比較圖。</div>"
+            )
+
+        # -------------------------------------------------
+        # 17.2 Prepare tables
+        # -------------------------------------------------
+        seasonal_table_html = season_display.to_html(
+            index=False,
+            border=0,
+            classes="summary-table",
+            justify="center",
         )
 
-        chart2_html = (
-            fig_condition.to_html(
-                full_html=False,
-                include_plotlyjs=False,
-                default_width="100%",
-                default_height="560px",
+        if "recommendation_table" in locals():
+            recommendation_table_html = (
+                recommendation_table.round(2).to_html(
+                    index=False,
+                    border=0,
+                    classes="summary-table",
+                    justify="center",
+                )
             )
-        )
-
-        table_html = (
-            season_display.to_html(
-                index=False,
-                border=0,
-                classes="summary-table",
+        else:
+            recommendation_table_html = (
+                "<div class='notice'>目前無足夠資料建立進料黏度建議。</div>"
             )
-        )
 
+        if "seasonal_final_display" in locals():
+            seasonal_final_html = (
+                seasonal_final_display.round(2).to_html(
+                    index=False,
+                    border=0,
+                    classes="summary-table",
+                    justify="center",
+                )
+            )
+        else:
+            seasonal_final_html = (
+                "<div class='notice'>目前無季節添加後黏度驗證資料。</div>"
+            )
+
+        # -------------------------------------------------
+        # 17.3 Automatic management narrative
+        # -------------------------------------------------
+        if available_seasons >= 2:
+            if before_range <= 5:
+                seasonal_before_comment = (
+                    "不同季節之添加前黏度差異小，整體季節影響有限。"
+                )
+            elif before_range <= 10:
+                seasonal_before_comment = (
+                    "不同季節之添加前黏度存在輕微差異，建議持續觀察溫度及儲存條件。"
+                )
+            else:
+                seasonal_before_comment = (
+                    "不同季節之添加前黏度差異明顯，建議確認溫度、儲存及批次因素。"
+                )
+
+            if after_range <= 5:
+                seasonal_after_comment = (
+                    "現場調整後黏度差異小，顯示實際生產黏度具有一定穩定性。"
+                )
+            else:
+                seasonal_after_comment = (
+                    "現場調整後黏度仍存在季節差異，需評估是否應分季節管理。"
+                )
+        else:
+            seasonal_before_comment = (
+                "目前季節資料不足，暫無法判定季節穩定性。"
+            )
+            seasonal_after_comment = (
+                "建議持續累積至少兩個以上季節之有效資料。"
+            )
+
+        if "recommendation_status" in locals():
+            recommendation_summary = (
+                f"{recommendation_icon} {recommendation_status}"
+            )
+            recommendation_detail = recommendation_message
+        else:
+            recommendation_summary = "⚪ Insufficient Data"
+            recommendation_detail = (
+                "目前無足夠資料建立建議進料黏度範圍。"
+            )
+
+        if "final_p25" in locals():
+            recommended_range_text = (
+                f"{final_p25:.1f}–{final_p75:.1f} s，"
+                f"目標值 {final_median:.1f} s"
+            )
+        else:
+            recommended_range_text = "N/A"
+
+        if "seasonal_gap" in locals() and pd.notna(seasonal_gap):
+            seasonal_gap_text = f"{seasonal_gap:.1f} s"
+        else:
+            seasonal_gap_text = "N/A"
+
+        # -------------------------------------------------
+        # 17.4 HTML management report
+        # -------------------------------------------------
         html_content = f"""
         <html>
         <head>
             <meta charset="utf-8">
-            <title>Seasonal Viscosity Comparison</title>
+            <title>季節別黏度與進料黏度最佳化分析報告</title>
+
             <style>
                 body {{
                     font-family: Arial, "Microsoft JhengHei", sans-serif;
-                    margin: 32px;
-                    color: #1F2937;
+                    margin: 34px;
                     background: #F8FAFC;
+                    color: #1F2937;
+                    line-height: 1.65;
                 }}
 
                 h1 {{
+                    text-align: center;
                     color: #1F4E78;
+                    margin-bottom: 8px;
                 }}
 
                 h2 {{
-                    margin-top: 34px;
+                    margin-top: 36px;
+                    color: #1F4E78;
                     border-bottom: 2px solid #CBD5E1;
                     padding-bottom: 7px;
                 }}
 
-                .info {{
-                    background: white;
-                    border-left: 5px solid #2563EB;
-                    padding: 16px;
-                    margin-bottom: 24px;
+                h3 {{
+                    margin-top: 24px;
+                    color: #334155;
                 }}
 
-                .box {{
+                .subtitle {{
+                    text-align: center;
+                    color: #64748B;
+                    margin-bottom: 28px;
+                }}
+
+                .info-box {{
+                    background: white;
+                    border-left: 5px solid #2563EB;
+                    padding: 16px 20px;
+                    margin-bottom: 22px;
+                    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+                }}
+
+                .kpi-grid {{
+                    display: grid;
+                    grid-template-columns: repeat(4, 1fr);
+                    gap: 12px;
+                    margin: 18px 0 24px 0;
+                }}
+
+                .kpi {{
+                    background: white;
+                    border: 1px solid #CBD5E1;
+                    border-radius: 8px;
+                    padding: 14px;
+                    text-align: center;
+                }}
+
+                .kpi-label {{
+                    color: #64748B;
+                    font-size: 12px;
+                }}
+
+                .kpi-value {{
+                    color: #111827;
+                    font-size: 22px;
+                    font-weight: bold;
+                    margin-top: 4px;
+                }}
+
+                .chart-box {{
+                    background: white;
+                    border: 1px solid #CBD5E1;
+                    padding: 12px;
+                    margin: 18px 0 26px 0;
+                    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+                }}
+
+                .table-box {{
                     background: white;
                     border: 1px solid #CBD5E1;
                     padding: 14px;
-                    margin-bottom: 25px;
+                    margin: 18px 0 26px 0;
+                    overflow-x: auto;
                 }}
 
                 .summary-table {{
                     border-collapse: collapse;
                     width: 100%;
+                    font-size: 12px;
                     background: white;
-                    font-size: 13px;
                 }}
 
                 .summary-table th {{
                     background: #1F4E78;
                     color: white;
-                    padding: 8px;
                     border: 1px solid #CBD5E1;
+                    padding: 8px;
+                    text-align: center;
                 }}
 
                 .summary-table td {{
-                    padding: 8px;
-                    text-align: center;
                     border: 1px solid #CBD5E1;
+                    padding: 7px;
+                    text-align: center;
+                }}
+
+                .summary-table tr:nth-child(even) {{
+                    background: #F8FAFC;
+                }}
+
+                .conclusion {{
+                    background: #EFF6FF;
+                    border-left: 5px solid #2563EB;
+                    padding: 16px 20px;
+                    margin: 18px 0;
+                }}
+
+                .recommend {{
+                    background: #ECFDF5;
+                    border-left: 5px solid #059669;
+                    padding: 16px 20px;
+                    margin: 18px 0;
+                }}
+
+                .warning {{
+                    background: #FFF7ED;
+                    border-left: 5px solid #D97706;
+                    padding: 16px 20px;
+                    margin: 18px 0;
+                }}
+
+                .notice {{
+                    background: #F3F4F6;
+                    padding: 14px;
+                    border-radius: 6px;
+                    color: #6B7280;
+                }}
+
+                .formula {{
+                    background: #F1F5F9;
+                    border: 1px solid #CBD5E1;
+                    padding: 12px 16px;
+                    font-family: Consolas, monospace;
+                    margin: 12px 0;
+                }}
+
+                .small {{
+                    font-size: 12px;
+                    color: #64748B;
+                }}
+
+                @media print {{
+                    body {{
+                        background: white;
+                        margin: 18mm;
+                    }}
+
+                    .chart-box,
+                    .table-box {{
+                        page-break-inside: avoid;
+                    }}
+
+                    h2 {{
+                        page-break-after: avoid;
+                    }}
                 }}
             </style>
         </head>
 
         <body>
-            <h1>季節別黏度比較分析</h1>
 
-            <div class="info">
-                <p><b>Paint Code：</b>{selected_paint_code}</p>
-                <p><b>Coating Position：</b>{selected_position}</p>
-                <p><b>Coating Structure：</b>{structure_display}</p>
-                <p><b>Data Period：</b>{min_date} ～ {max_date}</p>
-                <p><b>Filters：</b>{filter_details}</p>
+            <h1>季節別黏度與進料黏度最佳化分析報告</h1>
+            <div class="subtitle">
+                Paint Code: {selected_paint_code}
             </div>
 
-            <h2>Seasonal Overview</h2>
-            <div class="box">{overview_html}</div>
+            <div class="info-box">
+                <b>供應商：</b>{selected_vendor}<br>
+                <b>色號：</b>{selected_paint_code}<br>
+                <b>塗裝位置：</b>{selected_position}<br>
+                <b>膜厚組合：</b>{structure_display}<br>
+                <b>樹脂：</b>{selected_resin}<br>
+                <b>稀釋劑：</b>{selected_solvent}<br>
+                <b>資料期間：</b>{min_date} ～ {max_date}<br>
+                <b>有效紀錄：</b>{len(analysis_df):,} 筆
+            </div>
 
-            <h2>Before vs. After Viscosity</h2>
-            <div class="box">{chart1_html}</div>
+            <h2>一、分析目的</h2>
+            <p>
+                本分析針對指定色號，依供應商、塗裝位置、膜厚組合、
+                樹脂種類及稀釋劑條件，比較不同季節之黏度變化、
+                稀釋劑使用及塗料使用量，並進一步評估免加稀釋劑直接上線之
+                試驗進料黏度範圍。
+            </p>
 
-            <h2>Seasonal Viscosity, Solvent Ratio and Temperature</h2>
-            <div class="box">{chart2_html}</div>
+            <h2>二、分析條件與方法</h2>
+            <p>
+                分析條件依序為：
+                <b>Vendor → Paint Code → Position → Coating Structure →
+                Resin → Solvent → Production Line</b>。
+            </p>
 
-            <h2>Seasonal Summary Table</h2>
-            <div class="box">{table_html}</div>
+            <p>
+                季節分類為：冬季 12–02 月、春季 03–05 月、
+                夏季 06–08 月、秋季 09–11 月。
+            </p>
+
+            <p>
+                膜厚條件以完整塗層組合表示，例如
+                <b>5 µm + 20 µm</b>，以避免不同訂單膜厚條件混合分析。
+            </p>
+
+            <h2>三、季節別黏度分析</h2>
+
+            <div class="kpi-grid">
+                <div class="kpi">
+                    <div class="kpi-label">最高添加前黏度</div>
+                    <div class="kpi-value">
+                        {highest_before_row['Median_Before_Viscosity']:.1f} s
+                    </div>
+                    <div class="small">{highest_before_row[period_col]}</div>
+                </div>
+
+                <div class="kpi">
+                    <div class="kpi-label">最低添加前黏度</div>
+                    <div class="kpi-value">
+                        {lowest_before_row['Median_Before_Viscosity']:.1f} s
+                    </div>
+                    <div class="small">{lowest_before_row[period_col]}</div>
+                </div>
+
+                <div class="kpi">
+                    <div class="kpi-label">最高添加比例</div>
+                    <div class="kpi-value">
+                        {highest_ratio_row['Median_Solvent_Ratio']:.1f}%
+                    </div>
+                    <div class="small">{highest_ratio_row[period_col]}</div>
+                </div>
+
+                <div class="kpi">
+                    <div class="kpi-label">最大降黏幅度</div>
+                    <div class="kpi-value">
+                        {largest_drop_row['Median_Viscosity_Drop']:.1f} s
+                    </div>
+                    <div class="small">{largest_drop_row[period_col]}</div>
+                </div>
+            </div>
+
+            <div class="chart-box">
+                {overview_html}
+            </div>
+
+            <div class="chart-box">
+                {before_after_html}
+            </div>
+
+            <div class="conclusion">
+                <b>季節黏度判讀：</b><br>
+                {seasonal_before_comment}<br>
+                {seasonal_after_comment}
+            </div>
+
+            <h2>四、稀釋劑、溫度與生產量分析</h2>
+
+            <p>
+                為避免直接以添加比例與稀釋劑總用量比較而產生誤判，
+                本分析同時納入季節塗料使用量及加權添加比例。
+            </p>
+
+            <div class="formula">
+                加權添加比例 (%) =
+                季節稀釋劑總用量 ÷ 季節塗料使用量 × 100
+            </div>
+
+            <div class="chart-box">
+                {condition_html}
+            </div>
+
+            <div class="table-box">
+                {seasonal_table_html}
+            </div>
+
+            <div class="conclusion">
+                <b>生產量判讀：</b><br>
+                生產使用量最高期間為
+                <b>{highest_production_period}</b>，
+                塗料使用量約
+                <b>{highest_production_kg:,.1f} kg</b>。
+                因此，稀釋劑總用量較高不一定代表添加比例較高，
+                亦可能主要受到該季節生產量增加影響。
+            </div>
+
+            <h2>五、進料黏度最佳化方法</h2>
+
+            <p>
+                以歷史添加後黏度作為現場實際可生產黏度之參考，
+                建立免加稀釋劑直接上線之試驗進料黏度範圍：
+            </p>
+
+            <div class="formula">
+                建議進料下限 = P25(Final Viscosity)<br>
+                建議進料目標 = Median(Final Viscosity)<br>
+                建議進料上限 = P75(Final Viscosity)
+            </div>
+
+            <p>
+                同時使用資料量、添加後黏度 IQR 及 Seasonal Gap
+                評估建議範圍之穩定性。
+            </p>
+
+            <div class="formula">
+                IQR = P75 − P25<br>
+                Seasonal Gap =
+                各季節添加後黏度中位數最大值 − 最小值
+            </div>
+
+            <h2>六、建議進料黏度結果</h2>
+
+            <div class="kpi-grid">
+                <div class="kpi">
+                    <div class="kpi-label">Recommended Lower</div>
+                    <div class="kpi-value">
+                        {f"{final_p25:.1f} s" if "final_p25" in locals() else "N/A"}
+                    </div>
+                </div>
+
+                <div class="kpi">
+                    <div class="kpi-label">Recommended Target</div>
+                    <div class="kpi-value">
+                        {f"{final_median:.1f} s" if "final_median" in locals() else "N/A"}
+                    </div>
+                </div>
+
+                <div class="kpi">
+                    <div class="kpi-label">Recommended Upper</div>
+                    <div class="kpi-value">
+                        {f"{final_p75:.1f} s" if "final_p75" in locals() else "N/A"}
+                    </div>
+                </div>
+
+                <div class="kpi">
+                    <div class="kpi-label">Seasonal Gap</div>
+                    <div class="kpi-value">
+                        {seasonal_gap_text}
+                    </div>
+                </div>
+            </div>
+
+            <div class="chart-box">
+                {recommend_chart_html}
+            </div>
+
+            <div class="table-box">
+                {recommendation_table_html}
+            </div>
+
+            <h3>各季節添加後黏度驗證</h3>
+
+            <div class="table-box">
+                {seasonal_final_html}
+            </div>
+
+            <div class="recommend">
+                <b>系統判定：</b>{recommendation_summary}<br><br>
+                <b>建議試驗範圍：</b>{recommended_range_text}<br><br>
+                {recommendation_detail}
+            </div>
+
+            <h2>七、管理建議</h2>
+
+            <p>
+                若判定為 <b>Ready for No-Solvent Pilot</b>，
+                建議優先要求供應商依建議目標值進行小批量試配，
+                並於現場確認是否可免加稀釋劑直接生產。
+            </p>
+
+            <p>
+                試驗時應同步確認：
+                膜厚、光澤、色差、表面品質及成品品質。
+                驗證穩定後，再評估是否轉為正式進料黏度管制規格。
+            </p>
+
+            <div class="warning">
+                <b>注意：</b>
+                本分析之建議進料範圍為試驗參考值，
+                並非直接取代正式進料規格。
+                正式規格仍須經供應商試配與產線實際驗證。
+            </div>
+
+            <h2>八、結論</h2>
+
+            <p>
+                本分析透過季節差異、生產量、稀釋劑使用及添加後黏度分布，
+                將現場黏度調整結果轉換為可供供應商試配之數據化進料條件。
+                最終目的為降低現場稀釋劑添加需求、縮短調整時間，
+                並提升不同季節與不同膜厚條件下之作業一致性。
+            </p>
+
         </body>
         </html>
         """
 
-        html_buffer = (
-            html_content.encode(
-                "utf-8"
-            )
+        html_buffer = html_content.encode(
+            "utf-8"
         )
 
         st.success(
-            "✅ HTML 報告已產生。"
+            "✅ 管理報告已產生。"
         )
 
         st.download_button(
-            label="下載 HTML 報告",
+            label="下載管理報告 HTML",
             data=html_buffer,
             file_name=(
-                f"Seasonal_Viscosity_Report_"
+                f"Seasonal_Viscosity_Management_Report_"
                 f"{selected_paint_code}_"
                 f"{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}"
                 f".html"
@@ -2754,5 +3173,5 @@ if st.button(
 
     except Exception as error:
         st.error(
-            f"❌ 產生報告時發生錯誤：{error}"
+            f"❌ 產生管理報告時發生錯誤：{error}"
         )
