@@ -51,8 +51,63 @@ df.replace(list(invalid_vals), "Unknown", inplace=True)
 df["Batch_ID"] = df["塗料批號"]
 df["Bucket_Number"] = df.get("塗料桶號", pd.Series("Unknown", index=df.index)).fillna("Unknown").astype(str).str.strip()
 
-pos_map = {"TP": "Primer", "正底漆": "Primer", "BP": "Primer", "背底漆": "Primer", "TF": "Top Finish", "正面漆": "Top Finish", "BF": "Back Finish", "背面漆": "Back Finish"}
-df["Position_UI"] = df["塗裝位置"].map(pos_map).fillna(df["塗裝位置"])
+# ---------------------------------------------------------
+# COATING POSITION CLEANING
+# Only valid coating positions are allowed in Position_UI.
+# Invalid values such as 0 / blank / NaN are excluded.
+# ---------------------------------------------------------
+if "塗裝位置" not in df.columns:
+    df["塗裝位置"] = pd.NA
+
+df["塗裝位置"] = (
+    df["塗裝位置"]
+    .astype("string")
+    .str.strip()
+    .str.upper()
+)
+
+invalid_positions = {
+    "",
+    "0",
+    "0.0",
+    "NAN",
+    "NONE",
+    "NULL",
+    "N/A",
+    "NA",
+    "-",
+    "--",
+    "<NA>",
+    "UNKNOWN",
+}
+
+df.loc[
+    df["塗裝位置"].isin(invalid_positions),
+    "塗裝位置",
+] = pd.NA
+
+pos_map = {
+    "TP": "Primer",
+    "正底漆": "Primer",
+    "BP": "Primer",
+    "背底漆": "Primer",
+    "TF": "Top Finish",
+    "正面漆": "Top Finish",
+    "BF": "Back Finish",
+    "背面漆": "Back Finish",
+}
+
+df["Position_UI"] = df["塗裝位置"].map(pos_map)
+
+valid_position_ui = {
+    "Primer",
+    "Top Finish",
+    "Back Finish",
+}
+
+df = df[
+    df["Position_UI"].isin(valid_position_ui)
+].copy()
 
 num_cols = ["塗料重量", "添加重量", "黏度(秒)", "黏度(秒)_1", "溫度"]
 for col in num_cols:
@@ -995,7 +1050,13 @@ resin_opts = ["All"] + sorted([str(x) for x in filter_df["Resin"].unique() if x 
 selected_resin = col2.selectbox("Resin Type", resin_opts)
 if selected_resin != "All": filter_df = filter_df[filter_df["Resin"] == selected_resin]
 
-pos_opts = ["All"] + sorted([str(x) for x in filter_df["Position_UI"].unique() if x != "Unknown"])
+pos_opts = ["All"] + sorted(
+    [
+        str(x)
+        for x in filter_df["Position_UI"].dropna().unique()
+        if str(x) in {"Primer", "Top Finish", "Back Finish"}
+    ]
+)
 selected_position = col3.selectbox("Coating Position", pos_opts)
 if selected_position != "All": filter_df = filter_df[filter_df["Position_UI"] == selected_position]
 
