@@ -880,12 +880,26 @@ season_summary = (
             "溫度",
             "median",
         ),
+        Total_Base_Paint_kg=(
+            "Base_Paint_kg",
+            "sum",
+        ),
         Total_Solvent_kg=(
             "添加重量",
             "sum",
         ),
     )
     .reset_index()
+)
+
+# Weighted solvent ratio is calculated from seasonal totals.
+# This makes the relationship between production volume and solvent use clear.
+season_summary["Weighted_Solvent_Ratio"] = np.where(
+    season_summary["Total_Base_Paint_kg"] > 0,
+    season_summary["Total_Solvent_kg"]
+    / season_summary["Total_Base_Paint_kg"]
+    * 100,
+    np.nan,
 )
 
 if analysis_mode == "合併各年度比較四季":
@@ -968,6 +982,9 @@ customdata = np.array(
                 row["Median_Temperature"],
                 row["Historical_Records"],
                 row["Historical_Batches"],
+                row["Total_Base_Paint_kg"],
+                row["Total_Solvent_kg"],
+                row["Weighted_Solvent_Ratio"],
             ]
             for _, row in season_summary.iterrows()
         ]
@@ -1008,7 +1025,10 @@ fig_overview = go.Figure(
             "Solvent Ratio: %{customdata[3]:.2f}%<br>"
             "Temperature: %{customdata[4]:.1f} °C<br>"
             "Records: %{customdata[5]:,.0f}<br>"
-            "Batches: %{customdata[6]:,.0f}"
+            "Batches: %{customdata[6]:,.0f}<br>"
+            "Total Base Paint: %{customdata[7]:,.1f} kg<br>"
+            "Total Solvent: %{customdata[8]:,.1f} kg<br>"
+            "Weighted Solvent Ratio: %{customdata[9]:.2f}%"
             "<extra></extra>"
         ),
     )
@@ -1457,7 +1477,13 @@ fig_condition.add_trace(
         customdata=np.column_stack(
             [
                 season_summary[
+                    "Total_Base_Paint_kg"
+                ],
+                season_summary[
                     "Total_Solvent_kg"
+                ],
+                season_summary[
+                    "Weighted_Solvent_Ratio"
                 ],
                 season_summary[
                     "Historical_Records"
@@ -1466,9 +1492,11 @@ fig_condition.add_trace(
         ),
         hovertemplate=(
             "<b>%{x}</b><br>"
-            "Solvent Ratio: %{y:.2f}%<br>"
-            "Total Solvent: %{customdata[0]:.1f} kg<br>"
-            "Records: %{customdata[1]:,.0f}"
+            "Median Solvent Ratio: %{y:.2f}%<br>"
+            "Total Base Paint: %{customdata[0]:,.1f} kg<br>"
+            "Total Solvent: %{customdata[1]:,.1f} kg<br>"
+            "Weighted Solvent Ratio: %{customdata[2]:.2f}%<br>"
+            "Records: %{customdata[3]:,.0f}"
             "<extra></extra>"
         ),
     )
@@ -1758,6 +1786,11 @@ st.caption(
 # =========================================================
 st.markdown("---")
 st.subheader("5. Seasonal Summary Table")
+st.caption(
+    "為避免將添加比例與稀釋劑總用量直接比較，表中新增「季節塗料使用量」與"
+    "「加權添加比例」。生產量較高的季節，即使添加比例較低，也可能有較高的"
+    "稀釋劑總用量。"
+)
 
 season_display = season_summary[
     [
@@ -1768,8 +1801,10 @@ season_display = season_summary[
         "Median_After_Viscosity",
         "Median_Viscosity_Drop",
         "Median_Solvent_Ratio",
-        "Median_Temperature",
+        "Total_Base_Paint_kg",
+        "Weighted_Solvent_Ratio",
         "Total_Solvent_kg",
+        "Median_Temperature",
     ]
 ].copy()
 
@@ -1788,8 +1823,10 @@ season_display = season_display.rename(
         "Median_After_Viscosity": "添加後黏度中位數",
         "Median_Viscosity_Drop": "降黏幅度中位數",
         "Median_Solvent_Ratio": "添加比例中位數",
-        "Median_Temperature": "溫度中位數",
+        "Total_Base_Paint_kg": "季節塗料使用量",
+        "Weighted_Solvent_Ratio": "加權添加比例",
         "Total_Solvent_kg": "稀釋劑總用量",
+        "Median_Temperature": "溫度中位數",
     }
 )
 
@@ -1798,8 +1835,10 @@ round_cols = [
     "添加後黏度中位數",
     "降黏幅度中位數",
     "添加比例中位數",
-    "溫度中位數",
+    "季節塗料使用量",
+    "加權添加比例",
     "稀釋劑總用量",
+    "溫度中位數",
 ]
 
 season_display[
@@ -1842,6 +1881,17 @@ st.dataframe(
         "添加比例中位數": st.column_config.NumberColumn(
             "添加比例中位數 (%)",
             format="%.1f",
+            help="各筆紀錄添加比例的中位數。",
+        ),
+        "季節塗料使用量": st.column_config.NumberColumn(
+            "季節塗料使用量 (kg)",
+            format="%.1f",
+            help="該季節所有有效紀錄之原始塗料重量合計，用於表示生產使用量。",
+        ),
+        "加權添加比例": st.column_config.NumberColumn(
+            "加權添加比例 (%)",
+            format="%.2f",
+            help="季節稀釋劑總用量 ÷ 季節塗料使用量 × 100。",
         ),
         "溫度中位數": st.column_config.NumberColumn(
             "溫度中位數 (°C)",
@@ -1896,6 +1946,18 @@ available_seasons = int(
     ].nunique()
 )
 
+highest_production_row = season_summary.loc[
+    season_summary["Total_Base_Paint_kg"].idxmax()
+]
+
+highest_production_period = str(
+    highest_production_row[period_col]
+)
+
+highest_production_kg = float(
+    highest_production_row["Total_Base_Paint_kg"]
+)
+
 if available_seasons < 2:
     st.info(
         "⚪ 可比較季節少於 2 個，目前資料不足以判定季節差異。"
@@ -1926,7 +1988,9 @@ else:
     st.markdown(
         f"- **{before_text}**：最大差異約 **{before_range:.1f} s**。  \n"
         f"- **{after_text}**：最大差異約 **{after_range:.1f} s**。  \n"
-        f"- 稀釋劑添加比例季節差異約 **{ratio_range:.1f} 個百分點**。"
+        f"- 稀釋劑添加比例季節差異約 **{ratio_range:.1f} 個百分點**。  \n"
+        f"- **生產使用量最高期間：{highest_production_period}**，"
+        f"塗料使用量約 **{highest_production_kg:,.1f} kg**。"
     )
 
 
