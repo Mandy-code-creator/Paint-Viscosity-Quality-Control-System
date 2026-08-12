@@ -1994,8 +1994,596 @@ else:
     )
 
 
+
 # =========================================================
-# 16. EXPORT
+# 16. OPTIMAL & SAFE INCOMING VISCOSITY RECOMMENDATION
+# =========================================================
+st.markdown("---")
+st.subheader("7. Optimal & Safe Incoming Viscosity Recommendation")
+
+st.caption(
+    "依目前篩選之 Vendor × Paint Code × Position × Coating Structure × "
+    "Resin × Solvent 條件，使用歷史添加後黏度分布評估免加稀釋劑直接上線之"
+    "試驗進料黏度範圍。"
+)
+
+recommendation_df = analysis_df[
+    analysis_df["黏度(秒)_1"].notna()
+    & (analysis_df["黏度(秒)_1"] > 0)
+].copy()
+
+if recommendation_df.empty:
+    st.info(
+        "⚪ 無有效添加後黏度資料，暫時無法建立建議進料黏度範圍。"
+    )
+else:
+    # -----------------------------------------------------
+    # 16.1 Core distribution
+    # -----------------------------------------------------
+    rec_records = int(len(recommendation_df))
+    rec_batches = int(
+        recommendation_df["Batch_ID"].nunique()
+    )
+
+    final_p25 = float(
+        recommendation_df["黏度(秒)_1"].quantile(0.25)
+    )
+    final_median = float(
+        recommendation_df["黏度(秒)_1"].median()
+    )
+    final_p75 = float(
+        recommendation_df["黏度(秒)_1"].quantile(0.75)
+    )
+
+    final_iqr = final_p75 - final_p25
+
+    current_before_p25 = float(
+        recommendation_df["黏度(秒)"].quantile(0.25)
+    )
+    current_before_median = float(
+        recommendation_df["黏度(秒)"].median()
+    )
+    current_before_p75 = float(
+        recommendation_df["黏度(秒)"].quantile(0.75)
+    )
+
+    # -----------------------------------------------------
+    # 16.2 Seasonal stability
+    # -----------------------------------------------------
+    seasonal_final = (
+        recommendation_df
+        .groupby(
+            ["Season_Order", "Season"],
+            dropna=False,
+        )
+        .agg(
+            Records=("Paint_Code", "size"),
+            Batches=("Batch_ID", "nunique"),
+            Median_Final_Viscosity=("黏度(秒)_1", "median"),
+            Median_Before_Viscosity=("黏度(秒)", "median"),
+            Median_Solvent_Ratio=("Solvent_Ratio_Percent", "median"),
+            Median_Temperature=("溫度", "median"),
+        )
+        .reset_index()
+        .sort_values("Season_Order")
+    )
+
+    available_seasons_for_rec = int(
+        seasonal_final["Season"].nunique()
+    )
+
+    if available_seasons_for_rec >= 2:
+        seasonal_gap = float(
+            seasonal_final["Median_Final_Viscosity"].max()
+            - seasonal_final["Median_Final_Viscosity"].min()
+        )
+    else:
+        seasonal_gap = np.nan
+
+    # -----------------------------------------------------
+    # 16.3 Evidence / safety screening
+    # -----------------------------------------------------
+    if rec_records < 10 or rec_batches < 3:
+        evidence_status = "Insufficient Data"
+        evidence_icon = "⚪"
+        evidence_score = 0
+
+    elif rec_records < 30 or rec_batches < 5:
+        evidence_status = "Pilot Only"
+        evidence_icon = "🟡"
+        evidence_score = 1
+
+    else:
+        evidence_status = "Adequate Historical Evidence"
+        evidence_icon = "🟢"
+        evidence_score = 2
+
+
+    if pd.isna(seasonal_gap):
+        season_status = "Insufficient Seasonal Coverage"
+        season_score = 0
+
+    elif seasonal_gap <= 3:
+        season_status = "Seasonally Stable"
+        season_score = 2
+
+    elif seasonal_gap <= 5:
+        season_status = "Seasonal Monitoring Required"
+        season_score = 1
+
+    else:
+        season_status = "Seasonal Difference Significant"
+        season_score = 0
+
+
+    if final_iqr <= 3:
+        dispersion_status = "Tight Final Viscosity Distribution"
+        dispersion_score = 2
+
+    elif final_iqr <= 5:
+        dispersion_status = "Moderate Final Viscosity Distribution"
+        dispersion_score = 1
+
+    else:
+        dispersion_status = "Wide Final Viscosity Distribution"
+        dispersion_score = 0
+
+
+    total_safety_score = (
+        evidence_score
+        + season_score
+        + dispersion_score
+    )
+
+    # -----------------------------------------------------
+    # 16.4 Final recommendation classification
+    # -----------------------------------------------------
+    if (
+        total_safety_score >= 5
+        and rec_records >= 30
+        and rec_batches >= 5
+        and available_seasons_for_rec >= 2
+    ):
+        recommendation_status = (
+            "Ready for No-Solvent Pilot"
+        )
+        recommendation_icon = "🟢"
+        recommendation_message = (
+            "歷史添加後黏度集中且季節差異小，"
+            "可優先以此範圍進行供應商小批量免加稀釋劑直接上線試驗。"
+        )
+
+    elif total_safety_score >= 3:
+        recommendation_status = (
+            "Pilot with Monitoring"
+        )
+        recommendation_icon = "🟡"
+        recommendation_message = (
+            "可進行小批量試驗，但需同步監控膜厚、光澤、色差及成品品質；"
+            "若季節差異較大，應持續累積資料後再決定是否建立正式規格。"
+        )
+
+    else:
+        recommendation_status = (
+            "Not Ready for Direct Specification"
+        )
+        recommendation_icon = "🟠"
+        recommendation_message = (
+            "目前資料量、季節穩定性或添加後黏度分布尚不足以建立單一安全進料範圍。"
+        )
+
+
+    # -----------------------------------------------------
+    # 16.5 KPI cards
+    # -----------------------------------------------------
+    rec_col1, rec_col2, rec_col3, rec_col4 = st.columns(4)
+
+    rec_col1.metric(
+        "Recommended Lower",
+        f"{final_p25:.1f} s",
+    )
+
+    rec_col2.metric(
+        "Recommended Target",
+        f"{final_median:.1f} s",
+    )
+
+    rec_col3.metric(
+        "Recommended Upper",
+        f"{final_p75:.1f} s",
+    )
+
+    rec_col4.metric(
+        "Seasonal Gap",
+        (
+            f"{seasonal_gap:.1f} s"
+            if pd.notna(seasonal_gap)
+            else "N/A"
+        ),
+    )
+
+
+    # -----------------------------------------------------
+    # 16.6 Decision table
+    # -----------------------------------------------------
+    recommendation_table = pd.DataFrame(
+        [
+            {
+                "Vendor": selected_vendor,
+                "Paint Code": selected_paint_code,
+                "Position": selected_position,
+                "Coating Structure": structure_display,
+                "Resin": selected_resin,
+                "Solvent": selected_solvent,
+                "Records": rec_records,
+                "Batches": rec_batches,
+                "Available Seasons": available_seasons_for_rec,
+                "Current Incoming P25 (s)": current_before_p25,
+                "Current Incoming Median (s)": current_before_median,
+                "Current Incoming P75 (s)": current_before_p75,
+                "Recommended Lower (s)": final_p25,
+                "Recommended Target (s)": final_median,
+                "Recommended Upper (s)": final_p75,
+                "Final Viscosity IQR (s)": final_iqr,
+                "Seasonal Final Viscosity Gap (s)": seasonal_gap,
+                "Evidence": evidence_status,
+                "Seasonal Stability": season_status,
+                "Final Viscosity Stability": dispersion_status,
+                "Recommendation": recommendation_status,
+            }
+        ]
+    )
+
+    st.dataframe(
+        recommendation_table,
+        column_config={
+            "Records": st.column_config.NumberColumn(
+                "Records",
+                format="%d",
+            ),
+            "Batches": st.column_config.NumberColumn(
+                "Batches",
+                format="%d",
+            ),
+            "Available Seasons": st.column_config.NumberColumn(
+                "Available Seasons",
+                format="%d",
+            ),
+            "Current Incoming P25 (s)": st.column_config.NumberColumn(
+                "Current Incoming P25 (s)",
+                format="%.1f",
+            ),
+            "Current Incoming Median (s)": st.column_config.NumberColumn(
+                "Current Incoming Median (s)",
+                format="%.1f",
+            ),
+            "Current Incoming P75 (s)": st.column_config.NumberColumn(
+                "Current Incoming P75 (s)",
+                format="%.1f",
+            ),
+            "Recommended Lower (s)": st.column_config.NumberColumn(
+                "Recommended Lower (s)",
+                format="%.1f",
+            ),
+            "Recommended Target (s)": st.column_config.NumberColumn(
+                "Recommended Target (s)",
+                format="%.1f",
+            ),
+            "Recommended Upper (s)": st.column_config.NumberColumn(
+                "Recommended Upper (s)",
+                format="%.1f",
+            ),
+            "Final Viscosity IQR (s)": st.column_config.NumberColumn(
+                "Final Viscosity IQR (s)",
+                format="%.1f",
+            ),
+            "Seasonal Final Viscosity Gap (s)": st.column_config.NumberColumn(
+                "Seasonal Final Viscosity Gap (s)",
+                format="%.1f",
+            ),
+        },
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+    # -----------------------------------------------------
+    # 16.7 Current vs recommended viscosity interval
+    # -----------------------------------------------------
+    fig_recommend = go.Figure()
+
+    fig_recommend.add_trace(
+        go.Scatter(
+            x=[
+                current_before_p25,
+                current_before_p75,
+            ],
+            y=[
+                "Current Incoming",
+                "Current Incoming",
+            ],
+            mode="lines",
+            line=dict(
+                width=18,
+                color="#D97706",
+            ),
+            name="Current Incoming P25–P75",
+            hovertemplate=(
+                f"Current Incoming: "
+                f"{current_before_p25:.1f}–"
+                f"{current_before_p75:.1f} s"
+                "<extra></extra>"
+            ),
+        )
+    )
+
+    fig_recommend.add_trace(
+        go.Scatter(
+            x=[current_before_median],
+            y=["Current Incoming"],
+            mode="markers+text",
+            marker=dict(
+                size=16,
+                symbol="diamond",
+                color="#92400E",
+            ),
+            text=[
+                f"{current_before_median:.1f} s"
+            ],
+            textposition="top center",
+            name="Current Median",
+            hovertemplate=(
+                f"Current Median: "
+                f"{current_before_median:.1f} s"
+                "<extra></extra>"
+            ),
+        )
+    )
+
+    fig_recommend.add_trace(
+        go.Scatter(
+            x=[
+                final_p25,
+                final_p75,
+            ],
+            y=[
+                "Recommended Incoming",
+                "Recommended Incoming",
+            ],
+            mode="lines",
+            line=dict(
+                width=18,
+                color="#2563EB",
+            ),
+            name="Recommended P25–P75",
+            hovertemplate=(
+                f"Recommended Range: "
+                f"{final_p25:.1f}–"
+                f"{final_p75:.1f} s"
+                "<extra></extra>"
+            ),
+        )
+    )
+
+    fig_recommend.add_trace(
+        go.Scatter(
+            x=[final_median],
+            y=["Recommended Incoming"],
+            mode="markers+text",
+            marker=dict(
+                size=17,
+                symbol="diamond",
+                color="#1D4ED8",
+            ),
+            text=[
+                f"Target {final_median:.1f} s"
+            ],
+            textposition="bottom center",
+            name="Recommended Target",
+            hovertemplate=(
+                f"Recommended Target: "
+                f"{final_median:.1f} s"
+                "<extra></extra>"
+            ),
+        )
+    )
+
+    fig_recommend.add_annotation(
+        x=final_p25,
+        y="Recommended Incoming",
+        text=f"Lower {final_p25:.1f}",
+        showarrow=False,
+        yshift=28,
+        font=dict(
+            size=11,
+            color="#1D4ED8",
+        ),
+        bgcolor="rgba(255,255,255,0.92)",
+    )
+
+    fig_recommend.add_annotation(
+        x=final_p75,
+        y="Recommended Incoming",
+        text=f"Upper {final_p75:.1f}",
+        showarrow=False,
+        yshift=28,
+        font=dict(
+            size=11,
+            color="#1D4ED8",
+        ),
+        bgcolor="rgba(255,255,255,0.92)",
+    )
+
+    rec_x_min = min(
+        current_before_p25,
+        final_p25,
+    )
+
+    rec_x_max = max(
+        current_before_p75,
+        final_p75,
+    )
+
+    rec_x_pad = max(
+        (rec_x_max - rec_x_min) * 0.12,
+        5,
+    )
+
+    fig_recommend.update_layout(
+        title=dict(
+            text=(
+                f"<b>{selected_paint_code} — "
+                "Current vs. Recommended Incoming Viscosity</b>"
+                f"<br><sup>Thickness: "
+                f"{structure_display}</sup>"
+            ),
+            x=0.5,
+            xanchor="center",
+        ),
+        height=470,
+        template="plotly_white",
+        margin=dict(
+            l=165,
+            r=60,
+            t=120,
+            b=75,
+        ),
+        xaxis=dict(
+            title="Viscosity (s)",
+            range=[
+                rec_x_min - rec_x_pad,
+                rec_x_max + rec_x_pad,
+            ],
+            showgrid=True,
+            gridcolor="#E5E7EB",
+            showline=True,
+            linecolor="#475569",
+            mirror=True,
+        ),
+        yaxis=dict(
+            title="",
+            categoryorder="array",
+            categoryarray=[
+                "Recommended Incoming",
+                "Current Incoming",
+            ],
+            showgrid=True,
+            gridcolor="#E5E7EB",
+            showline=True,
+            linecolor="#475569",
+            mirror=True,
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.03,
+            xanchor="center",
+            x=0.5,
+        ),
+    )
+
+    st.plotly_chart(
+        fig_recommend,
+        use_container_width=True,
+    )
+
+
+    # -----------------------------------------------------
+    # 16.8 Seasonal final viscosity verification
+    # -----------------------------------------------------
+    st.markdown(
+        "#### Seasonal Final Viscosity Verification"
+    )
+
+    seasonal_final_display = (
+        seasonal_final[
+            [
+                "Season",
+                "Records",
+                "Batches",
+                "Median_Before_Viscosity",
+                "Median_Final_Viscosity",
+                "Median_Solvent_Ratio",
+                "Median_Temperature",
+            ]
+        ]
+        .copy()
+        .rename(
+            columns={
+                "Season": "Season",
+                "Records": "Records",
+                "Batches": "Batches",
+                "Median_Before_Viscosity": "Before Median (s)",
+                "Median_Final_Viscosity": "Final Median (s)",
+                "Median_Solvent_Ratio": "Solvent Ratio Median (%)",
+                "Median_Temperature": "Temperature Median (°C)",
+            }
+        )
+    )
+
+    st.dataframe(
+        seasonal_final_display,
+        column_config={
+            "Records": st.column_config.NumberColumn(
+                "Records",
+                format="%d",
+            ),
+            "Batches": st.column_config.NumberColumn(
+                "Batches",
+                format="%d",
+            ),
+            "Before Median (s)": st.column_config.NumberColumn(
+                "Before Median (s)",
+                format="%.1f",
+            ),
+            "Final Median (s)": st.column_config.NumberColumn(
+                "Final Median (s)",
+                format="%.1f",
+            ),
+            "Solvent Ratio Median (%)": st.column_config.NumberColumn(
+                "Solvent Ratio Median (%)",
+                format="%.1f",
+            ),
+            "Temperature Median (°C)": st.column_config.NumberColumn(
+                "Temperature Median (°C)",
+                format="%.1f",
+            ),
+        },
+        hide_index=True,
+        use_container_width=True,
+    )
+
+
+    # -----------------------------------------------------
+    # 16.9 Final decision
+    # -----------------------------------------------------
+    if recommendation_status == "Ready for No-Solvent Pilot":
+        st.success(
+            f"{recommendation_icon} **{recommendation_status}**  \n"
+            f"{recommendation_message}"
+        )
+
+    elif recommendation_status == "Pilot with Monitoring":
+        st.warning(
+            f"{recommendation_icon} **{recommendation_status}**  \n"
+            f"{recommendation_message}"
+        )
+
+    else:
+        st.warning(
+            f"{recommendation_icon} **{recommendation_status}**  \n"
+            f"{recommendation_message}"
+        )
+
+
+    st.caption(
+        "建議下限／目標／上限分別採歷史添加後黏度 P25／Median／P75。"
+        "此範圍僅作為供應商小批量試配及免加稀釋劑直接上線之試驗參考，"
+        "正式進料規格仍須確認膜厚、光澤、色差、表面品質及成品品質皆符合要求。"
+    )
+
+# =========================================================
+# 17. EXPORT
 # =========================================================
 st.markdown("---")
 st.subheader("📥 Export")
