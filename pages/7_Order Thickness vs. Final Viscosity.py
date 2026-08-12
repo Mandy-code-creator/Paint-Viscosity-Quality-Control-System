@@ -588,6 +588,8 @@ with st.expander("View thickness coverage by coating position"):
 
 # =========================================================
 # 7. LINKED FILTERS
+#    Main analysis object = Paint Code
+#    Filter order: Vendor → Paint Code → Position → Resin → Solvent
 # =========================================================
 st.markdown("---")
 st.subheader("2. System Selection")
@@ -603,71 +605,94 @@ if filter_source.empty:
 
 f1, f2, f3, f4, f5 = st.columns(5)
 
+# ---------------------------------------------------------
+# 1. Vendor
+# ---------------------------------------------------------
 with f1:
-    resin_options = safe_sorted_unique(filter_source["Resin"])
-    selected_resin = st.selectbox(
-        "Select Resin:",
-        resin_options,
-    )
-
-resin_df = filter_source[
-    filter_source["Resin"] == selected_resin
-].copy()
-
-with f2:
-    position_options = safe_sorted_unique(
-        resin_df["Position_Detail"]
-    )
-    selected_position = st.selectbox(
-        "Select Position:",
-        position_options,
-    )
-
-position_df = resin_df[
-    resin_df["Position_Detail"] == selected_position
-].copy()
-
-with f3:
     vendor_options = safe_sorted_unique(
-        position_df["Vendor"]
+        filter_source["Vendor"]
     )
+
     selected_vendor = st.selectbox(
         "Select Vendor:",
         vendor_options,
     )
 
-vendor_df = position_df[
-    position_df["Vendor"] == selected_vendor
+vendor_df = filter_source[
+    filter_source["Vendor"] == selected_vendor
 ].copy()
 
-with f4:
-    solvent_options = safe_sorted_unique(
-        vendor_df["Solvent_Type"]
-    )
-    selected_solvent = st.selectbox(
-        "Select Solvent:",
-        solvent_options,
-    )
-
-solvent_df = vendor_df[
-    vendor_df["Solvent_Type"] == selected_solvent
-].copy()
-
-with f5:
+# ---------------------------------------------------------
+# 2. Paint Code — main analysis object
+# ---------------------------------------------------------
+with f2:
     paint_code_options = safe_sorted_unique(
-        solvent_df["Paint_Code"]
+        vendor_df["Paint_Code"]
     )
+
     selected_paint_code = st.selectbox(
         "Select Paint Code:",
         paint_code_options,
     )
 
-system_df = solvent_df[
-    solvent_df["Paint_Code"] == selected_paint_code
+paint_df = vendor_df[
+    vendor_df["Paint_Code"] == selected_paint_code
+].copy()
+
+# ---------------------------------------------------------
+# 3. Position
+# ---------------------------------------------------------
+with f3:
+    position_options = safe_sorted_unique(
+        paint_df["Position_Detail"]
+    )
+
+    selected_position = st.selectbox(
+        "Select Position:",
+        position_options,
+    )
+
+position_df = paint_df[
+    paint_df["Position_Detail"] == selected_position
+].copy()
+
+# ---------------------------------------------------------
+# 4. Resin
+# ---------------------------------------------------------
+with f4:
+    resin_options = safe_sorted_unique(
+        position_df["Resin"]
+    )
+
+    selected_resin = st.selectbox(
+        "Select Resin:",
+        resin_options,
+    )
+
+resin_df = position_df[
+    position_df["Resin"] == selected_resin
+].copy()
+
+# ---------------------------------------------------------
+# 5. Solvent
+# ---------------------------------------------------------
+with f5:
+    solvent_options = safe_sorted_unique(
+        resin_df["Solvent_Type"]
+    )
+
+    selected_solvent = st.selectbox(
+        "Select Solvent:",
+        solvent_options,
+    )
+
+# Final selected paint-code system
+system_df = resin_df[
+    resin_df["Solvent_Type"] == selected_solvent
 ].copy()
 
 if system_df.empty:
-    st.warning("No data available for the selected system.")
+    st.warning("No data available for the selected paint-code system.")
     st.stop()
 
 system_df["Thickness_Group"] = adaptive_thickness_group(
@@ -1061,11 +1086,18 @@ st.subheader("6. All Paint Codes — Thickness Effect Screening")
 
 st.caption(
     "This table screens all paint codes under the selected "
-    "Resin × Position × Vendor × Solvent condition. "
-    "It helps identify which paint codes deserve a thickness-based SOP pilot."
+    "Vendor × Position × Resin × Solvent condition. "
+    "Paint Code remains the main analysis object, and this screening helps "
+    "identify which codes deserve a thickness-based SOP pilot."
 )
 
-screen_source = solvent_df.copy()
+# Compare all paint codes under the same Vendor × Position × Resin × Solvent condition.
+screen_source = filter_source[
+    (filter_source["Vendor"] == selected_vendor)
+    & (filter_source["Position_Detail"] == selected_position)
+    & (filter_source["Resin"] == selected_resin)
+    & (filter_source["Solvent_Type"] == selected_solvent)
+].copy()
 
 screen_rows = []
 
@@ -1217,4 +1249,3 @@ A thickness-based SOP should be introduced only after a controlled line trial co
 the proposed viscosity ranges remain safe for coating quality, gloss, film thickness, and final product quality.
 """
     )
-
