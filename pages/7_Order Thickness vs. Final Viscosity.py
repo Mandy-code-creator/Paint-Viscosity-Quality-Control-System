@@ -171,7 +171,16 @@ def build_position_detail(data):
 
 def assign_order_thickness(data):
     """
-    Select the correct order-thickness column according to Position_Detail.
+    Select the correct active-layer thickness according to Position_Detail,
+    and also build the full coating structure:
+
+    Top side:
+        TTMFILM_THICK + TOPFILM_THICK
+        Primer + Top Finish
+
+    Back side:
+        BTMFILM_THICK + BACKFILM_THICK
+        Primer + Back Finish
     """
     work = data.copy()
 
@@ -187,6 +196,7 @@ def assign_order_thickness(data):
             work[col] = np.nan
         work[col] = clean_numeric(work[col])
 
+    # Thickness of the specific coating layer currently being analyzed.
     work["Order_Film_Thickness"] = np.select(
         [
             work["Position_Detail"] == "Top Finish",
@@ -217,6 +227,67 @@ def assign_order_thickness(data):
             "BTMFILM_THICK",
         ],
         default="Unknown",
+    )
+
+    # Full side structure: primer + main coating.
+    is_top_side = work["Position_Detail"].isin(
+        ["Top Finish", "Top Primer"]
+    )
+    is_back_side = work["Position_Detail"].isin(
+        ["Back Finish", "Back Primer"]
+    )
+
+    work["Primer_Thickness"] = np.select(
+        [is_top_side, is_back_side],
+        [work["TTMFILM_THICK"], work["BTMFILM_THICK"]],
+        default=np.nan,
+    )
+
+    work["Main_Coat_Thickness"] = np.select(
+        [is_top_side, is_back_side],
+        [work["TOPFILM_THICK"], work["BACKFILM_THICK"]],
+        default=np.nan,
+    )
+
+    work["Total_Coating_Thickness"] = (
+        pd.to_numeric(work["Primer_Thickness"], errors="coerce")
+        + pd.to_numeric(work["Main_Coat_Thickness"], errors="coerce")
+    )
+
+    def format_um(value):
+        if pd.isna(value):
+            return "—"
+        value = float(value)
+        if value.is_integer():
+            return f"{int(value)}"
+        return f"{value:.1f}".rstrip("0").rstrip(".")
+
+    def build_structure_label(row):
+        primer = row["Primer_Thickness"]
+        main = row["Main_Coat_Thickness"]
+
+        if pd.isna(primer) and pd.isna(main):
+            return "Unknown"
+
+        return (
+            f"{format_um(primer)} µm + "
+            f"{format_um(main)} µm"
+        )
+
+    work["Coating_Structure"] = work.apply(
+        build_structure_label,
+        axis=1,
+    )
+
+    work["Coating_Structure_Detail"] = np.select(
+        [is_top_side, is_back_side],
+        [
+            work["Coating_Structure"]
+            + " (Primer + Top Finish)",
+            work["Coating_Structure"]
+            + " (Primer + Back Finish)",
+        ],
+        default=work["Coating_Structure"],
     )
 
     return work
@@ -724,9 +795,30 @@ system_label = (
     f"{selected_solvent} | {selected_paint_code}"
 )
 
+structure_values = (
+    system_df["Coating_Structure_Detail"]
+    .dropna()
+    .astype(str)
+    .loc[lambda s: ~s.isin(["Unknown", "—"])]
+    .unique()
+    .tolist()
+)
+
+if len(structure_values) == 1:
+    structure_text = structure_values[0]
+elif len(structure_values) <= 4:
+    structure_text = " / ".join(structure_values)
+else:
+    structure_text = (
+        "Multiple structures: "
+        + " / ".join(structure_values[:4])
+        + f" / ... ({len(structure_values)} total)"
+    )
+
 st.info(
     f"**Selected system:** {system_label}  \n"
-    f"**Order thickness source:** `{source_column_text}`"
+    f"**Coating structure:** {structure_text}  \n"
+    f"**Active thickness source:** `{source_column_text}`"
 )
 
 metrics = calculate_relationship_metrics(system_df)
@@ -760,6 +852,10 @@ fig_scatter = px.scatter(
     y="黏度(秒)_1",
     hover_data={
         "Paint_Code": True,
+        "Coating_Structure_Detail": True,
+        "Primer_Thickness": ":.1f",
+        "Main_Coat_Thickness": ":.1f",
+        "Total_Coating_Thickness": ":.1f",
         "黏度(秒)": ":.1f",
         "黏度(秒)_1": ":.1f",
         "Delta_V": ":.1f",
@@ -820,12 +916,13 @@ fig_scatter.update_layout(
         text=(
             "<b>Order Film Thickness vs. Final Viscosity</b>"
             f"<br><sup>{system_label}</sup>"
+            f"<br><sup>Coating Structure: {structure_text}</sup>"
         ),
         x=0.5,
         xanchor="center",
     ),
     height=560,
-    margin=dict(l=70, r=50, t=110, b=70),
+    margin=dict(l=70, r=50, t=145, b=70),
     template="plotly_white",
     legend=dict(
         orientation="h",
@@ -880,6 +977,19 @@ summary_df = (
     )
     .agg(
         Records=("Paint_Code", "size"),
+        Coating_Structure=(
+            "Coating_Structure_Detail",
+            lambda x: " / ".join(
+                pd.Series(x)
+                .dropna()
+                .astype(str)
+                .drop_duplicates()
+                .tolist()
+            ),
+        ),
+        Primer_Thickness=("Primer_Thickness", "median"),
+        Main_Coat_Thickness=("Main_Coat_Thickness", "median"),
+        Total_Coating_Thickness=("Total_Coating_Thickness", "median"),
         Thickness_Min=("Order_Film_Thickness", "min"),
         Thickness_Median=("Order_Film_Thickness", "median"),
         Thickness_Max=("Order_Film_Thickness", "max"),
@@ -904,6 +1014,19 @@ st.dataframe(
     summary_df,
     column_config={
         "Thickness_Group": "Thickness Group",
+        "Coating_Structure": st.column_config.TextColumn(
+            "Coating Structure",
+            width="large",
+        ),
+        "Primer_Thickness": st.column_config.NumberColumn(
+            "Primer (µm)", format="%.1f"
+        ),
+        "Main_Coat_Thickness": st.column_config.NumberColumn(
+            "Main Coat (µm)", format="%.1f"
+        ),
+        "Total_Coating_Thickness": st.column_config.NumberColumn(
+            "Total (µm)", format="%.1f"
+        ),
         "Records": st.column_config.NumberColumn(
             "Records", format="%d"
         ),
@@ -959,7 +1082,8 @@ fig_box.update_layout(
     title=dict(
         text=(
             "<b>Final Viscosity Distribution by Order Thickness</b>"
-            f"<br><sup>{selected_paint_code}</sup>"
+            f"<br><sup>{selected_paint_code} | Coating Structure: "
+            f"{structure_text}</sup>"
         ),
         x=0.5,
         xanchor="center",
@@ -1039,6 +1163,7 @@ decision_table = pd.DataFrame(
     [
         {
             "System": system_label,
+            "Coating Structure": structure_text,
             "Records": metrics["records"],
             "Unique Thickness": metrics["unique_thickness"],
             "Pearson r": metrics["pearson_r"],
@@ -1237,10 +1362,19 @@ This page answers three questions:
 
 **Thickness mapping**
 
-- TF / 正面漆 → `TOPFILM_THICK`
-- TP / 正底漆 → `TTMFILM_THICK`
-- BF / 背面漆 → `BACKFILM_THICK`
-- BP / 背底漆 → `BTMFILM_THICK`
+- TF / 正面漆 → active thickness = `TOPFILM_THICK`
+- TP / 正底漆 → active thickness = `TTMFILM_THICK`
+- BF / 背面漆 → active thickness = `BACKFILM_THICK`
+- BP / 背底漆 → active thickness = `BTMFILM_THICK`
+
+**Full coating structure shown in titles and tables**
+
+- Top side = `TTMFILM_THICK + TOPFILM_THICK`
+  = Primer + Top Finish
+- Back side = `BTMFILM_THICK + BACKFILM_THICK`
+  = Primer + Back Finish
+
+Example: `5 µm + 20 µm (Primer + Top Finish)`.
 
 **Important**
 
