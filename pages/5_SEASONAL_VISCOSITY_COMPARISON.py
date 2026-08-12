@@ -1285,6 +1285,24 @@ SEASON_ORDER = {
     "秋季 (09–11月)": 4,
 }
 
+# Browser-side Plotly export font stack.
+# Microsoft JhengHei is normally available on Windows; Noto/Arial fallbacks
+# keep Chinese text readable on other clients.
+PLOTLY_FONT_FAMILY = (
+    "Microsoft JhengHei, Microsoft YaHei, "
+    "Noto Sans CJK TC, Arial Unicode MS, Arial, sans-serif"
+)
+
+PLOTLY_IMAGE_CONFIG = {
+    "displaylogo": False,
+    "toImageButtonOptions": {
+        "format": "png",
+        "scale": 2,
+        "width": 1600,
+        "height": 900,
+    },
+}
+
 
 # =========================================================
 # 4. DATA PREPARATION
@@ -2221,10 +2239,7 @@ fig_overview.update_layout(
     paper_bgcolor="white",
     plot_bgcolor="white",
     font=dict(
-        family=(
-            "Arial, Microsoft JhengHei, "
-            "sans-serif"
-        ),
+        family=PLOTLY_FONT_FAMILY,
         color="#334155",
     ),
 )
@@ -2254,17 +2269,15 @@ fig_overview.update_layout(
 st.plotly_chart(
     fig_overview,
     use_container_width=True,
+    config={
+        **PLOTLY_IMAGE_CONFIG,
+        "toImageButtonOptions": {
+            **PLOTLY_IMAGE_CONFIG["toImageButtonOptions"],
+            "filename": f"{selected_paint_code}_Seasonal_Viscosity_Overview",
+        },
+    },
 )
-
-overview_png = create_word_seasonal_overview_png()
-st.download_button(
-    label="📷 下載季節黏度總覽 PNG",
-    data=overview_png.getvalue(),
-    file_name=f"{selected_paint_code}_Seasonal_Viscosity_Overview.png",
-    mime="image/png",
-    key="download_seasonal_overview_png",
-    on_click="ignore",
-)
+st.caption("📷 使用圖表右上角的相機圖示下載 PNG；下載內容會與畫面顯示完全一致。")
 
 st.caption(
     "每格依序顯示：添加前 → 添加後黏度、稀釋劑添加比例、溫度；底色代表典型降黏幅度。"
@@ -2538,22 +2551,24 @@ fig_before_after.update_layout(
         linecolor="#475569",
         mirror=True,
     ),
+    font=dict(
+        family=PLOTLY_FONT_FAMILY,
+        color="#374151",
+    ),
 )
 
 st.plotly_chart(
     fig_before_after,
     use_container_width=True,
+    config={
+        **PLOTLY_IMAGE_CONFIG,
+        "toImageButtonOptions": {
+            **PLOTLY_IMAGE_CONFIG["toImageButtonOptions"],
+            "filename": f"{selected_paint_code}_Seasonal_Before_After_Viscosity",
+        },
+    },
 )
-
-before_after_png = create_word_before_after_png()
-st.download_button(
-    label="📷 下載季節添加前後黏度比較 PNG",
-    data=before_after_png.getvalue(),
-    file_name=f"{selected_paint_code}_Seasonal_Before_After_Viscosity.png",
-    mime="image/png",
-    key="download_before_after_png",
-    on_click="ignore",
-)
+st.caption("📷 使用圖表右上角的相機圖示下載 PNG。")
 
 
 # =========================================================
@@ -2579,7 +2594,7 @@ fig_condition.add_trace(
         y=season_summary[
             "Median_Before_Viscosity"
         ],
-        mode="lines+markers+text",
+        mode="lines+markers",
         name="Before Viscosity (s)",
         line=dict(
             color="#D97706",
@@ -2588,16 +2603,6 @@ fig_condition.add_trace(
         marker=dict(
             size=9,
             color="#D97706",
-        ),
-        text=season_summary[
-            "Median_Before_Viscosity"
-        ].map(
-            lambda value: f"{value:.1f}"
-        ),
-        textposition="top center",
-        textfont=dict(
-            size=11,
-            color="#92400E",
         ),
         yaxis="y1",
         cliponaxis=False,
@@ -2618,7 +2623,7 @@ fig_condition.add_trace(
         y=season_summary[
             "Median_After_Viscosity"
         ],
-        mode="lines+markers+text",
+        mode="lines+markers",
         name="After Viscosity (s)",
         line=dict(
             color="#2563EB",
@@ -2627,16 +2632,6 @@ fig_condition.add_trace(
         marker=dict(
             size=9,
             color="#2563EB",
-        ),
-        text=season_summary[
-            "Median_After_Viscosity"
-        ].map(
-            lambda value: f"{value:.1f}"
-        ),
-        textposition="bottom center",
-        textfont=dict(
-            size=11,
-            color="#1D4ED8",
         ),
         yaxis="y1",
         cliponaxis=False,
@@ -2714,6 +2709,7 @@ for i, row in season_summary.iterrows():
         xshift=12 if i % 2 == 0 else -12,
         yshift=13,
         font=dict(
+            family=PLOTLY_FONT_FAMILY,
             size=10,
             color="#047857",
         ),
@@ -2722,6 +2718,49 @@ for i, row in season_summary.iterrows():
         borderwidth=1,
         borderpad=2,
     )
+
+# Fixed-position labels for viscosity series.
+# Using annotations prevents Plotly from moving labels automatically
+# when chart width changes or when exporting PNG.
+for i, row in season_summary.iterrows():
+    period_name = str(row[period_col])
+
+    fig_condition.add_annotation(
+        x=period_name,
+        y=row["Median_Before_Viscosity"],
+        xref="x",
+        yref="y",
+        text=f"{row['Median_Before_Viscosity']:.1f}",
+        showarrow=False,
+        yshift=14,
+        xshift=0,
+        font=dict(
+            family=PLOTLY_FONT_FAMILY,
+            size=10,
+            color="#92400E",
+        ),
+        bgcolor="rgba(255,255,255,0.88)",
+        borderpad=1,
+    )
+
+    fig_condition.add_annotation(
+        x=period_name,
+        y=row["Median_After_Viscosity"],
+        xref="x",
+        yref="y",
+        text=f"{row['Median_After_Viscosity']:.1f}",
+        showarrow=False,
+        yshift=-15,
+        xshift=0,
+        font=dict(
+            family=PLOTLY_FONT_FAMILY,
+            size=10,
+            color="#1D4ED8",
+        ),
+        bgcolor="rgba(255,255,255,0.88)",
+        borderpad=1,
+    )
+
 
 # ---------------------------------------------------------
 # Temperature
@@ -2737,7 +2776,7 @@ if season_summary[
             y=season_summary[
                 "Median_Temperature"
             ],
-            mode="lines+markers+text",
+            mode="lines+markers",
             name="Temperature (C)",
             line=dict(
                 color="#7E22CE",
@@ -2772,6 +2811,31 @@ if season_summary[
             ),
         )
     )
+
+
+# Fixed-position temperature labels.
+if season_summary["Median_Temperature"].notna().any():
+    for i, row in season_summary.iterrows():
+        if pd.isna(row["Median_Temperature"]):
+            continue
+
+        fig_condition.add_annotation(
+            x=str(row[period_col]),
+            y=row["Median_Temperature"],
+            xref="x",
+            yref="y3",
+            text=f"{row['Median_Temperature']:.1f}°C",
+            showarrow=False,
+            yshift=13,
+            xshift=0,
+            font=dict(
+                family=PLOTLY_FONT_FAMILY,
+                size=10,
+                color="#6B21A8",
+            ),
+            bgcolor="rgba(255,255,255,0.88)",
+            borderpad=1,
+        )
 
 
 # ---------------------------------------------------------
@@ -2927,10 +2991,7 @@ fig_condition.update_layout(
         borderwidth=1,
     ),
     font=dict(
-        family=(
-            "Arial, Microsoft JhengHei, "
-            "sans-serif"
-        ),
+        family=PLOTLY_FONT_FAMILY,
         size=12,
         color="#374151",
     ),
@@ -2969,17 +3030,15 @@ fig_condition.update_layout(
 st.plotly_chart(
     fig_condition,
     use_container_width=True,
+    config={
+        **PLOTLY_IMAGE_CONFIG,
+        "toImageButtonOptions": {
+            **PLOTLY_IMAGE_CONFIG["toImageButtonOptions"],
+            "filename": f"{selected_paint_code}_Seasonal_Viscosity_Solvent_Temperature",
+        },
+    },
 )
-
-condition_png = create_word_condition_png()
-st.download_button(
-    label="📷 下載季節黏度、添加比例與溫度趨勢 PNG",
-    data=condition_png.getvalue(),
-    file_name=f"{selected_paint_code}_Seasonal_Viscosity_Solvent_Temperature.png",
-    mime="image/png",
-    key="download_condition_png",
-    on_click="ignore",
-)
+st.caption("📷 使用圖表右上角的相機圖示下載 PNG。")
 
 st.caption(
     "橘線＝添加前黏度；藍線＝添加後黏度；"
@@ -3686,23 +3745,24 @@ else:
             xanchor="center",
             x=0.5,
         ),
+        font=dict(
+            family=PLOTLY_FONT_FAMILY,
+            color="#374151",
+        ),
     )
 
     st.plotly_chart(
         fig_recommend,
         use_container_width=True,
+        config={
+            **PLOTLY_IMAGE_CONFIG,
+            "toImageButtonOptions": {
+                **PLOTLY_IMAGE_CONFIG["toImageButtonOptions"],
+                "filename": f"{selected_paint_code}_Current_vs_Recommended_Viscosity",
+            },
+        },
     )
-
-    recommendation_png = create_word_recommendation_png()
-    if recommendation_png is not None:
-        st.download_button(
-            label="📷 下載目前與建議進料黏度比較 PNG",
-            data=recommendation_png.getvalue(),
-            file_name=f"{selected_paint_code}_Current_vs_Recommended_Viscosity.png",
-            mime="image/png",
-            key="download_recommendation_png",
-            on_click="ignore",
-        )
+    st.caption("📷 使用圖表右上角的相機圖示下載 PNG。")
 
 
     # -----------------------------------------------------
