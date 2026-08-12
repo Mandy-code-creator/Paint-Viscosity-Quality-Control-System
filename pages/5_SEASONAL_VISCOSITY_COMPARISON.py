@@ -2240,7 +2240,7 @@ fig_overview.update_xaxes(
     ticks="outside",
     ticklen=6,
     tickfont=dict(
-        size=12,
+        size=15,
         color="#000000",
     ),
 )
@@ -2253,7 +2253,7 @@ fig_overview.update_yaxes(
     ticks="outside",
     ticklen=5,
     tickfont=dict(
-        size=11,
+        size=13,
         color="#000000",
     ),
     title_font=dict(
