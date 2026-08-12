@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import matplotlib.pyplot as plt
 
 # Word report export
 try:
@@ -295,25 +296,454 @@ def add_dataframe_table(
     return table
 
 
-def plotly_figure_to_png_buffer(fig, scale=2):
-    """
-    Convert Plotly figure to PNG for Word.
-    Requires kaleido. If unavailable, return None rather than failing
-    the whole management report.
-    """
-    try:
-        png_bytes = fig.to_image(
-            format="png",
-            scale=scale,
+
+def save_matplotlib_to_buffer(fig):
+    """Save matplotlib figure to an in-memory PNG buffer."""
+    buffer = io.BytesIO()
+    fig.savefig(
+        buffer,
+        format="png",
+        dpi=220,
+        bbox_inches="tight",
+        facecolor="white",
+        pad_inches=0.12,
+    )
+    plt.close(fig)
+    buffer.seek(0)
+    return buffer
+
+
+def create_word_seasonal_overview_png():
+    """Compact seasonal overview for Word export — no Kaleido required."""
+    chart_df = season_summary.copy().reset_index(drop=True)
+
+    fig, ax = plt.subplots(figsize=(10.8, 3.4), dpi=180)
+
+    x = np.arange(len(chart_df))
+
+    before = pd.to_numeric(
+        chart_df["Median_Before_Viscosity"],
+        errors="coerce",
+    ).to_numpy(dtype=float)
+
+    after = pd.to_numeric(
+        chart_df["Median_After_Viscosity"],
+        errors="coerce",
+    ).to_numpy(dtype=float)
+
+    ratio = pd.to_numeric(
+        chart_df["Median_Solvent_Ratio"],
+        errors="coerce",
+    ).to_numpy(dtype=float)
+
+    temperature = pd.to_numeric(
+        chart_df["Median_Temperature"],
+        errors="coerce",
+    ).to_numpy(dtype=float)
+
+    for i in range(len(chart_df)):
+        ax.text(
+            x[i],
+            0.5,
+            (
+                f"{before[i]:.0f} → {after[i]:.0f} s\n"
+                f"{ratio[i]:.1f}%\n"
+                + (
+                    f"{temperature[i]:.1f} °C"
+                    if np.isfinite(temperature[i])
+                    else "—"
+                )
+            ),
+            ha="center",
+            va="center",
+            fontsize=11,
+            fontweight="bold",
+            bbox=dict(
+                boxstyle="round,pad=0.55",
+                facecolor="white",
+                edgecolor="#94A3B8",
+                linewidth=1.1,
+            ),
         )
-        return io.BytesIO(png_bytes)
-    except Exception:
+
+    ax.set_xlim(-0.5, len(chart_df) - 0.5)
+    ax.set_ylim(0, 1)
+    ax.set_xticks(x)
+    ax.set_xticklabels(
+        chart_df[period_col].astype(str),
+        fontsize=10,
+    )
+    ax.set_yticks([])
+    ax.set_xlabel("Season", fontsize=10)
+    ax.set_title(
+        f"{selected_paint_code} — Seasonal Viscosity Overview",
+        fontsize=14,
+        fontweight="bold",
+        pad=18,
+    )
+
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+    ax.set_facecolor("white")
+    fig.patch.set_facecolor("white")
+    fig.subplots_adjust(left=0.04, right=0.98, top=0.80, bottom=0.22)
+
+    return save_matplotlib_to_buffer(fig)
+
+
+def create_word_before_after_png():
+    """Before vs After seasonal viscosity chart for Word export."""
+    chart_df = season_summary.copy().reset_index(drop=True)
+
+    fig, ax = plt.subplots(figsize=(10.8, 5.5), dpi=180)
+
+    y = np.arange(len(chart_df))
+
+    before = pd.to_numeric(
+        chart_df["Median_Before_Viscosity"],
+        errors="coerce",
+    ).to_numpy(dtype=float)
+
+    after = pd.to_numeric(
+        chart_df["Median_After_Viscosity"],
+        errors="coerce",
+    ).to_numpy(dtype=float)
+
+    for yi, b, a in zip(y, before, after):
+        ax.plot(
+            [a, b],
+            [yi, yi],
+            linewidth=4,
+            color="#94A3B8",
+            zorder=1,
+        )
+
+    ax.scatter(
+        before,
+        y,
+        s=90,
+        label="Before Viscosity",
+        zorder=3,
+    )
+
+    ax.scatter(
+        after,
+        y,
+        s=90,
+        label="After Viscosity",
+        zorder=3,
+    )
+
+    for yi, b, a in zip(y, before, after):
+        ax.text(
+            b,
+            yi + 0.16,
+            f"{b:.1f}",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+        )
+        ax.text(
+            a,
+            yi - 0.16,
+            f"{a:.1f}",
+            ha="center",
+            va="top",
+            fontsize=9,
+        )
+
+    ax.set_yticks(y)
+    ax.set_yticklabels(
+        chart_df[period_col].astype(str),
+        fontsize=10,
+    )
+    ax.set_xlabel("Viscosity (s)", fontsize=11)
+    ax.grid(axis="x", linewidth=0.8, alpha=0.35)
+    ax.legend(
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.13),
+        ncol=2,
+        frameon=False,
+    )
+    ax.set_title(
+        f"{selected_paint_code} — Seasonal Before vs After Viscosity",
+        fontsize=14,
+        fontweight="bold",
+        pad=28,
+    )
+
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
+    fig.subplots_adjust(left=0.19, right=0.98, top=0.82, bottom=0.12)
+
+    return save_matplotlib_to_buffer(fig)
+
+
+def create_word_condition_png():
+    """
+    Seasonal viscosity + solvent ratio + temperature chart for Word export.
+    Recreated with matplotlib; does not require Kaleido.
+    """
+    chart_df = season_summary.copy().reset_index(drop=True)
+
+    fig, ax1 = plt.subplots(figsize=(10.8, 5.8), dpi=180)
+
+    x = np.arange(len(chart_df))
+
+    before = pd.to_numeric(
+        chart_df["Median_Before_Viscosity"],
+        errors="coerce",
+    ).to_numpy(dtype=float)
+
+    after = pd.to_numeric(
+        chart_df["Median_After_Viscosity"],
+        errors="coerce",
+    ).to_numpy(dtype=float)
+
+    ratio = pd.to_numeric(
+        chart_df["Median_Solvent_Ratio"],
+        errors="coerce",
+    ).to_numpy(dtype=float)
+
+    temp = pd.to_numeric(
+        chart_df["Median_Temperature"],
+        errors="coerce",
+    ).to_numpy(dtype=float)
+
+    ax1.plot(
+        x,
+        before,
+        marker="o",
+        linewidth=2.4,
+        label="Before Viscosity (s)",
+    )
+
+    ax1.plot(
+        x,
+        after,
+        marker="o",
+        linewidth=2.4,
+        label="After Viscosity (s)",
+    )
+
+    ax2 = ax1.twinx()
+
+    ax2.plot(
+        x,
+        ratio,
+        marker="D",
+        linewidth=2.1,
+        linestyle="--",
+        label="Solvent Ratio (%)",
+    )
+
+    # Temperature is normalized to a separate line visually but shown
+    # against the second axis to avoid adding a crowded third Word axis.
+    if np.isfinite(temp).any():
+        temp_min = np.nanmin(temp)
+        temp_max = np.nanmax(temp)
+
+        ratio_min = np.nanmin(ratio)
+        ratio_max = np.nanmax(ratio)
+
+        if temp_max > temp_min and ratio_max > ratio_min:
+            temp_scaled = (
+                (temp - temp_min)
+                / (temp_max - temp_min)
+                * (ratio_max - ratio_min)
+                + ratio_min
+            )
+        else:
+            temp_scaled = np.full_like(
+                temp,
+                np.nanmean(ratio),
+            )
+
+        ax2.plot(
+            x,
+            temp_scaled,
+            marker="o",
+            linewidth=2.0,
+            linestyle=":",
+            label="Temperature (°C)",
+        )
+
+        for xi, scaled, original in zip(
+            x,
+            temp_scaled,
+            temp,
+        ):
+            if np.isfinite(original):
+                ax2.text(
+                    xi,
+                    scaled,
+                    f"{original:.1f}°",
+                    fontsize=8,
+                    ha="center",
+                    va="bottom",
+                )
+
+    for xi, value in zip(x, ratio):
+        if np.isfinite(value):
+            ax2.text(
+                xi,
+                value,
+                f"{value:.1f}%",
+                fontsize=8,
+                ha="center",
+                va="bottom",
+            )
+
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(
+        chart_df[period_col].astype(str),
+        fontsize=9,
+    )
+
+    ax1.set_ylabel("Viscosity (s)", fontsize=10)
+    ax2.set_ylabel(
+        "Solvent Ratio (%) / Temperature trend",
+        fontsize=10,
+    )
+
+    ax1.grid(axis="y", linewidth=0.8, alpha=0.35)
+
+    handles1, labels1 = ax1.get_legend_handles_labels()
+    handles2, labels2 = ax2.get_legend_handles_labels()
+
+    ax1.legend(
+        handles1 + handles2,
+        labels1 + labels2,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.16),
+        ncol=4,
+        frameon=False,
+        fontsize=9,
+    )
+
+    ax1.set_title(
+        f"{selected_paint_code} — Seasonal Viscosity, Solvent Ratio & Temperature",
+        fontsize=14,
+        fontweight="bold",
+        pad=32,
+    )
+
+    fig.patch.set_facecolor("white")
+    ax1.set_facecolor("white")
+    fig.subplots_adjust(left=0.08, right=0.90, top=0.80, bottom=0.15)
+
+    return save_matplotlib_to_buffer(fig)
+
+
+def create_word_recommendation_png():
+    """Current incoming vs recommended viscosity interval for Word."""
+    if "final_p25" not in locals():
         return None
 
+    fig, ax = plt.subplots(figsize=(10.8, 4.6), dpi=180)
 
-def add_plotly_figure_to_word(
+    y_current = 1
+    y_recommend = 0
+
+    ax.plot(
+        [current_before_p25, current_before_p75],
+        [y_current, y_current],
+        linewidth=14,
+        solid_capstyle="round",
+        label="Current Incoming P25–P75",
+    )
+
+    ax.scatter(
+        [current_before_median],
+        [y_current],
+        s=100,
+        marker="D",
+        zorder=3,
+    )
+
+    ax.text(
+        current_before_median,
+        y_current + 0.13,
+        f"{current_before_median:.1f} s",
+        ha="center",
+        va="bottom",
+        fontsize=9,
+    )
+
+    ax.plot(
+        [final_p25, final_p75],
+        [y_recommend, y_recommend],
+        linewidth=14,
+        solid_capstyle="round",
+        label="Recommended P25–P75",
+    )
+
+    ax.scatter(
+        [final_median],
+        [y_recommend],
+        s=100,
+        marker="D",
+        zorder=3,
+    )
+
+    ax.text(
+        final_median,
+        y_recommend - 0.13,
+        f"Target {final_median:.1f} s",
+        ha="center",
+        va="top",
+        fontsize=9,
+    )
+
+    ax.text(
+        final_p25,
+        y_recommend + 0.13,
+        f"Lower {final_p25:.1f}",
+        ha="center",
+        va="bottom",
+        fontsize=8,
+    )
+
+    ax.text(
+        final_p75,
+        y_recommend + 0.13,
+        f"Upper {final_p75:.1f}",
+        ha="center",
+        va="bottom",
+        fontsize=8,
+    )
+
+    ax.set_yticks(
+        [y_recommend, y_current]
+    )
+    ax.set_yticklabels(
+        [
+            "Recommended Incoming",
+            "Current Incoming",
+        ],
+        fontsize=10,
+    )
+
+    ax.set_xlabel("Viscosity (s)", fontsize=10)
+    ax.grid(axis="x", linewidth=0.8, alpha=0.35)
+    ax.set_title(
+        f"{selected_paint_code} — Current vs Recommended Incoming Viscosity",
+        fontsize=14,
+        fontweight="bold",
+        pad=20,
+    )
+
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
+    fig.subplots_adjust(left=0.22, right=0.98, top=0.82, bottom=0.18)
+
+    return save_matplotlib_to_buffer(fig)
+
+
+def add_image_buffer_to_word(
     doc,
-    fig,
+    image_buffer,
     caption,
     width_inches=9.6,
 ):
@@ -324,16 +754,10 @@ def add_plotly_figure_to_word(
         bold=True,
     )
 
-    image_buffer = plotly_figure_to_png_buffer(
-        fig,
-        scale=2,
-    )
-
     if image_buffer is None:
         add_report_paragraph(
             doc,
-            "Chart image could not be generated. "
-            "Install package 'kaleido' to include Plotly charts in Word export.",
+            "Chart data are unavailable for this section.",
             size=8,
         )
         return
@@ -521,16 +945,16 @@ def create_management_word_report():
         font_size=8,
     )
 
-    add_plotly_figure_to_word(
+    add_image_buffer_to_word(
         doc,
-        fig_overview,
+        create_word_seasonal_overview_png(),
         "圖1　Seasonal Viscosity Overview",
         width_inches=9.6,
     )
 
-    add_plotly_figure_to_word(
+    add_image_buffer_to_word(
         doc,
-        fig_before_after,
+        create_word_before_after_png(),
         "圖2　各季節添加前後黏度比較",
         width_inches=9.6,
     )
@@ -565,9 +989,9 @@ def create_management_word_report():
         bold=True,
     )
 
-    add_plotly_figure_to_word(
+    add_image_buffer_to_word(
         doc,
-        fig_condition,
+        create_word_condition_png(),
         "圖3　各季節黏度、稀釋劑添加比例與溫度趨勢",
         width_inches=9.6,
     )
@@ -658,9 +1082,9 @@ def create_management_word_report():
         )
 
     if "fig_recommend" in locals():
-        add_plotly_figure_to_word(
+        add_image_buffer_to_word(
             doc,
-            fig_recommend,
+            create_word_recommendation_png(),
             "圖4　目前進料黏度與建議試驗進料範圍比較",
             width_inches=9.6,
         )
@@ -3406,8 +3830,7 @@ else:
             )
 
             st.caption(
-                "若 Word 報告中未顯示 Plotly 圖表，"
-                "請在 requirements.txt 加入 `kaleido`。"
+                "Word 圖表使用 Matplotlib 產生，不需要 kaleido。"
             )
 
         except Exception as error:
