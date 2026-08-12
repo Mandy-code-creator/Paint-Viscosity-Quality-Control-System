@@ -1341,31 +1341,119 @@ st.plotly_chart(
 
 
 # =========================================================
-# 13. CHART 2 — SOLVENT RATIO + TEMPERATURE
+# 13. CHART 2 — SEASONAL VISCOSITY + SOLVENT RATIO + TEMPERATURE
+#     Preferred line-chart style:
+#     Before viscosity + After viscosity + Solvent ratio + Temperature
 # =========================================================
 st.markdown("---")
-st.subheader("4. Solvent Ratio and Temperature by Season")
+st.subheader("4. Seasonal Viscosity, Solvent Ratio and Temperature")
 
 fig_condition = go.Figure()
 
+period_series = season_summary[
+    period_col
+].astype(str)
+
+# ---------------------------------------------------------
+# Before viscosity
+# ---------------------------------------------------------
 fig_condition.add_trace(
-    go.Bar(
-        x=season_summary[
-            period_col
-        ].astype(str),
+    go.Scatter(
+        x=period_series,
+        y=season_summary[
+            "Median_Before_Viscosity"
+        ],
+        mode="lines+markers+text",
+        name="Before Viscosity (s)",
+        line=dict(
+            color="#D97706",
+            width=3,
+        ),
+        marker=dict(
+            size=9,
+            color="#D97706",
+        ),
+        text=season_summary[
+            "Median_Before_Viscosity"
+        ].map(
+            lambda value: f"{value:.1f}"
+        ),
+        textposition="top center",
+        textfont=dict(
+            size=11,
+            color="#92400E",
+        ),
+        yaxis="y1",
+        cliponaxis=False,
+        hovertemplate=(
+            "<b>%{x}</b><br>"
+            "Before Viscosity: %{y:.1f} s"
+            "<extra></extra>"
+        ),
+    )
+)
+
+# ---------------------------------------------------------
+# After viscosity
+# ---------------------------------------------------------
+fig_condition.add_trace(
+    go.Scatter(
+        x=period_series,
+        y=season_summary[
+            "Median_After_Viscosity"
+        ],
+        mode="lines+markers+text",
+        name="After Viscosity (s)",
+        line=dict(
+            color="#2563EB",
+            width=3,
+        ),
+        marker=dict(
+            size=9,
+            color="#2563EB",
+        ),
+        text=season_summary[
+            "Median_After_Viscosity"
+        ].map(
+            lambda value: f"{value:.1f}"
+        ),
+        textposition="bottom center",
+        textfont=dict(
+            size=11,
+            color="#1D4ED8",
+        ),
+        yaxis="y1",
+        cliponaxis=False,
+        hovertemplate=(
+            "<b>%{x}</b><br>"
+            "After Viscosity: %{y:.1f} s"
+            "<extra></extra>"
+        ),
+    )
+)
+
+# ---------------------------------------------------------
+# Solvent ratio
+# ---------------------------------------------------------
+fig_condition.add_trace(
+    go.Scatter(
+        x=period_series,
         y=season_summary[
             "Median_Solvent_Ratio"
         ],
+        mode="lines+markers",
         name="Solvent Ratio (%)",
-        marker_color="#F59E0B",
-        opacity=0.82,
-        text=season_summary[
-            "Median_Solvent_Ratio"
-        ].map(
-            lambda value: f"{value:.1f}%"
+        line=dict(
+            color="#059669",
+            width=3,
+            dash="dot",
         ),
-        textposition="outside",
-        yaxis="y1",
+        marker=dict(
+            size=10,
+            color="#059669",
+            symbol="diamond",
+        ),
+        yaxis="y2",
         customdata=np.column_stack(
             [
                 season_summary[
@@ -1378,7 +1466,7 @@ fig_condition.add_trace(
         ),
         hovertemplate=(
             "<b>%{x}</b><br>"
-            "Median Solvent Ratio: %{y:.2f}%<br>"
+            "Solvent Ratio: %{y:.2f}%<br>"
             "Total Solvent: %{customdata[0]:.1f} kg<br>"
             "Records: %{customdata[1]:,.0f}"
             "<extra></extra>"
@@ -1386,14 +1474,42 @@ fig_condition.add_trace(
     )
 )
 
+# Solvent ratio labels
+for i, row in season_summary.iterrows():
+    fig_condition.add_annotation(
+        x=str(row[period_col]),
+        y=row[
+            "Median_Solvent_Ratio"
+        ],
+        xref="x",
+        yref="y2",
+        text=(
+            f"{row['Median_Solvent_Ratio']:.1f}%"
+        ),
+        showarrow=False,
+        xshift=12 if i % 2 == 0 else -12,
+        yshift=13,
+        font=dict(
+            size=10,
+            color="#047857",
+        ),
+        bgcolor="rgba(255,255,255,0.90)",
+        bordercolor="rgba(5,150,105,0.25)",
+        borderwidth=1,
+        borderpad=2,
+    )
+
+# ---------------------------------------------------------
+# Temperature
+# Use a third Y-axis on the right so the temperature line
+# remains readable and does not compress the solvent-ratio line.
+# ---------------------------------------------------------
 if season_summary[
     "Median_Temperature"
 ].notna().any():
     fig_condition.add_trace(
         go.Scatter(
-            x=season_summary[
-                period_col
-            ].astype(str),
+            x=period_series,
             y=season_summary[
                 "Median_Temperature"
             ],
@@ -1402,9 +1518,12 @@ if season_summary[
             line=dict(
                 color="#7E22CE",
                 width=3,
+                dash="dash",
             ),
             marker=dict(
                 size=9,
+                color="#7E22CE",
+                symbol="circle",
             ),
             text=season_summary[
                 "Median_Temperature"
@@ -1416,32 +1535,56 @@ if season_summary[
                 )
             ),
             textposition="top center",
-            yaxis="y2",
+            textfont=dict(
+                size=10,
+                color="#6B21A8",
+            ),
+            yaxis="y3",
+            cliponaxis=False,
             hovertemplate=(
                 "<b>%{x}</b><br>"
-                "Median Temperature: %{y:.1f} °C"
+                "Temperature: %{y:.1f} °C"
                 "<extra></extra>"
             ),
         )
     )
 
 
-ratio_max = season_summary[
-    "Median_Solvent_Ratio"
-].max()
+# ---------------------------------------------------------
+# Axis ranges
+# ---------------------------------------------------------
+ratio_values = pd.to_numeric(
+    season_summary[
+        "Median_Solvent_Ratio"
+    ],
+    errors="coerce",
+).dropna()
 
-ratio_upper = (
-    max(
-        5.0,
-        float(ratio_max) * 1.25,
+if not ratio_values.empty:
+    ratio_min = float(
+        ratio_values.min()
     )
-    if pd.notna(ratio_max)
-    else 5.0
-)
+    ratio_max = float(
+        ratio_values.max()
+    )
+    ratio_pad = max(
+        0.8,
+        (ratio_max - ratio_min) * 0.20,
+    )
+    ratio_range = [
+        max(0, ratio_min - ratio_pad),
+        ratio_max + ratio_pad,
+    ]
+else:
+    ratio_range = None
 
-temp_values = season_summary[
-    "Median_Temperature"
-].dropna()
+
+temp_values = pd.to_numeric(
+    season_summary[
+        "Median_Temperature"
+    ],
+    errors="coerce",
+).dropna()
 
 if not temp_values.empty:
     temp_min = float(
@@ -1452,8 +1595,7 @@ if not temp_values.empty:
     )
     temp_pad = max(
         1.0,
-        (temp_max - temp_min)
-        * 0.18,
+        (temp_max - temp_min) * 0.18,
     )
     temp_range = [
         temp_min - temp_pad,
@@ -1463,66 +1605,139 @@ else:
     temp_range = None
 
 
+# ---------------------------------------------------------
+# Layout
+# ---------------------------------------------------------
 fig_condition.update_layout(
     title=dict(
         text=(
             f"<b>{selected_paint_code} — "
-            "Seasonal Solvent Ratio & Temperature</b>"
+            "Seasonal Viscosity, Solvent Ratio & Temperature</b>"
             f"<br><sup>Thickness: "
             f"{structure_display}</sup>"
         ),
         x=0.5,
         xanchor="center",
     ),
-    height=500,
-    margin=dict(
-        l=75,
-        r=90,
-        t=125,
-        b=75,
-    ),
+    height=590,
     template="plotly_white",
+    margin=dict(
+        l=80,
+        r=150,
+        t=145,
+        b=80,
+    ),
     xaxis=dict(
         title="Season",
         categoryorder="array",
         categoryarray=period_values,
         showgrid=False,
         showline=True,
-        linecolor="#475569",
+        linecolor="#4B5563",
+        linewidth=1.4,
         mirror=True,
+        ticks="outside",
     ),
     yaxis=dict(
-        title="Solvent Ratio (%)",
-        range=[
-            0,
-            ratio_upper,
-        ],
+        title="Viscosity (s)",
+        side="left",
         showgrid=True,
-        gridcolor="#FEF3C7",
+        gridcolor="#D6DCE5",
+        gridwidth=1,
         showline=True,
-        linecolor="#D97706",
+        linecolor="#4B5563",
+        linewidth=1.4,
+        zeroline=False,
     ),
     yaxis2=dict(
+        title="Solvent Ratio (%)",
+        overlaying="y",
+        side="right",
+        range=ratio_range,
+        showgrid=False,
+        showline=True,
+        linecolor="#059669",
+        linewidth=1.4,
+        tickfont=dict(
+            color="#047857"
+        ),
+        title_font=dict(
+            color="#047857"
+        ),
+        zeroline=False,
+    ),
+    yaxis3=dict(
         title="Temperature (°C)",
         overlaying="y",
         side="right",
+        anchor="free",
+        position=1.0,
         range=temp_range,
         showgrid=False,
-        showline=True,
-        linecolor="#7E22CE",
+        showline=False,
+        tickfont=dict(
+            color="#7E22CE"
+        ),
+        title_font=dict(
+            color="#7E22CE"
+        ),
+        ticksuffix="°",
+        zeroline=False,
     ),
     legend=dict(
         orientation="h",
         yanchor="bottom",
-        y=1.03,
+        y=1.07,
         xanchor="center",
         x=0.5,
+        bgcolor="rgba(255,255,255,0.94)",
+        bordercolor="#D1D5DB",
+        borderwidth=1,
     ),
+    font=dict(
+        family=(
+            "Arial, Microsoft JhengHei, "
+            "sans-serif"
+        ),
+        size=12,
+        color="#374151",
+    ),
+)
+
+# Shift the temperature axis title farther right so it does not overlap
+# with the solvent-ratio axis.
+fig_condition.update_layout(
+    yaxis3=dict(
+        title=dict(
+            text="Temperature (°C)",
+            font=dict(
+                color="#7E22CE"
+            ),
+            standoff=48,
+        ),
+        overlaying="y",
+        side="right",
+        anchor="free",
+        position=1.0,
+        range=temp_range,
+        showgrid=False,
+        showline=False,
+        tickfont=dict(
+            color="#7E22CE"
+        ),
+        ticksuffix="°",
+        zeroline=False,
+    )
 )
 
 st.plotly_chart(
     fig_condition,
     use_container_width=True,
+)
+
+st.caption(
+    "橘線＝添加前黏度；藍線＝添加後黏度；"
+    "綠色虛線＝稀釋劑添加比例；紫色虛線＝溫度。"
 )
 
 
@@ -1841,7 +2056,7 @@ if st.button(
             <h2>Before vs. After Viscosity</h2>
             <div class="box">{chart1_html}</div>
 
-            <h2>Solvent Ratio and Temperature</h2>
+            <h2>Seasonal Viscosity, Solvent Ratio and Temperature</h2>
             <div class="box">{chart2_html}</div>
 
             <h2>Seasonal Summary Table</h2>
