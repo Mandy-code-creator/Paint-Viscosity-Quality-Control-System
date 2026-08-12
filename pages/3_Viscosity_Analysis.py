@@ -446,20 +446,29 @@ with tab1:
             text=chart_title,
             x=0.5,
             xanchor="center",
-            y=0.98,
+            y=0.975,
             yanchor="top",
-            font=dict(size=18, color="#1F3855")
+            font=dict(size=18, color="#1F3855"),
+            pad=dict(t=4, b=8),
         ),
-        plot_bgcolor='white', 
-        height=450, # Tăng chiều cao tổng thể để chứa tiêu đề
-        margin=dict(l=40, r=40, t=80, b=30), # Tăng lề trên (t=80) 
-        hovermode='closest', 
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        height=560,
+        margin=dict(
+            l=70,
+            r=50,
+            t=145,
+            b=70,
+        ),
+        hovermode="closest",
         legend=dict(
-            orientation="h", 
-            y=1.08, # Đẩy legend lên sát ngay dưới tiêu đề
-            x=0.5, 
-            xanchor="center"
-        )
+            orientation="h",
+            yanchor="bottom",
+            y=1.01,
+            xanchor="center",
+            x=0.5,
+            bgcolor="rgba(255,255,255,0)",
+        ),
     )
     # --- KẾT THÚC PHẦN CẬP NHẬT ---
 
