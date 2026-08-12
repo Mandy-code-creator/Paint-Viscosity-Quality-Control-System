@@ -2178,7 +2178,7 @@ fig_overview = go.Figure(
         texttemplate="%{text}",
         textfont=dict(
             size=14,
-            color="#111827",
+            color="#000000",
         ),
         customdata=customdata,
         # Softer blue-gray palette for better readability.
@@ -2194,7 +2194,7 @@ fig_overview = go.Figure(
             len=0.70,
             outlinecolor="#94A3B8",
             outlinewidth=1,
-            tickfont=dict(color="#475569", size=10),
+            tickfont=dict(color="#000000", size=10),
         ),
         xgap=3,
         ygap=3,
@@ -2227,7 +2227,7 @@ fig_overview.update_layout(
     plot_bgcolor="white",
     font=dict(
         family=PLOTLY_FONT_FAMILY,
-        color="#334155",
+        color="#000000",
     ),
 )
 
@@ -2235,18 +2235,30 @@ fig_overview.update_xaxes(
     title_text="",
     side="top",
     showline=True,
-    linecolor="#475569",
+    linecolor="#000000",
     mirror=True,
     ticks="outside",
     ticklen=6,
-    tickfont=dict(size=12),
+    tickfont=dict(
+        size=12,
+        color="#000000",
+    ),
 )
 
 fig_overview.update_yaxes(
     title="Paint Code",
     showline=True,
-    linecolor="#475569",
+    linecolor="#000000",
     mirror=True,
+    ticks="outside",
+    ticklen=5,
+    tickfont=dict(
+        size=11,
+        color="#000000",
+    ),
+    title_font=dict(
+        color="#000000",
+    ),
 )
 
 fig_overview.update_layout(
