@@ -1015,7 +1015,6 @@ fig_overview = go.Figure(
 )
 
 fig_overview.update_layout(
-    title=None,
     height=315,
     margin=dict(
         l=130,
@@ -1035,7 +1034,7 @@ fig_overview.update_layout(
 )
 
 fig_overview.update_xaxes(
-    title=None,
+    title_text="",
     side="top",
     showline=True,
     linecolor="#475569",
@@ -1050,6 +1049,10 @@ fig_overview.update_yaxes(
     showline=True,
     linecolor="#475569",
     mirror=True,
+)
+
+fig_overview.update_layout(
+    title_text=""
 )
 
 st.plotly_chart(
