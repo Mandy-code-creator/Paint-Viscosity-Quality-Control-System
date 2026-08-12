@@ -5,6 +5,19 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+# Word report export
+try:
+    from docx import Document
+    from docx.shared import Inches, Pt, Cm
+    from docx.enum.section import WD_ORIENT
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.enum.table import WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    HAS_DOCX = True
+except ImportError:
+    HAS_DOCX = False
+
 
 # =========================================================
 # 1. PAGE CONFIGURATION
@@ -42,6 +55,708 @@ df = st.session_state["group_a_data"].copy()
 @st.cache_data(show_spinner=False)
 def dataframe_to_csv_bytes(dataframe: pd.DataFrame) -> bytes:
     return dataframe.to_csv(index=False).encode("utf-8-sig")
+
+
+def set_cell_shading(cell, fill):
+    """Apply background color to a Word table cell."""
+    tc_pr = cell._tc.get_or_add_tcPr()
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:fill"), fill)
+    tc_pr.append(shd)
+
+
+def set_cell_text_color(cell, color="FFFFFF", bold=False, size=8):
+    """Format all runs inside a Word table cell."""
+    for paragraph in cell.paragraphs:
+        for run in paragraph.runs:
+            run.font.color.rgb = None
+            run.font.bold = bold
+            run.font.size = Pt(size)
+            r_pr = run._element.get_or_add_rPr()
+            color_el = r_pr.find(qn("w:color"))
+            if color_el is None:
+                color_el = OxmlElement("w:color")
+                r_pr.append(color_el)
+            color_el.set(qn("w:val"), color)
+
+
+def set_run_font(run, size=10, bold=False, color=None):
+    """Use a Word-safe Traditional Chinese font."""
+    run.font.name = "Arial"
+    run.font.size = Pt(size)
+    run.font.bold = bold
+
+    r_pr = run._element.get_or_add_rPr()
+    r_fonts = r_pr.find(qn("w:rFonts"))
+    if r_fonts is None:
+        r_fonts = OxmlElement("w:rFonts")
+        r_pr.append(r_fonts)
+
+    r_fonts.set(qn("w:ascii"), "Arial")
+    r_fonts.set(qn("w:hAnsi"), "Arial")
+    r_fonts.set(qn("w:eastAsia"), "Microsoft JhengHei")
+
+    if color:
+        color_el = r_pr.find(qn("w:color"))
+        if color_el is None:
+            color_el = OxmlElement("w:color")
+            r_pr.append(color_el)
+        color_el.set(qn("w:val"), color)
+
+
+def add_report_paragraph(doc, text="", size=10, bold=False, align=None):
+    paragraph = doc.add_paragraph()
+
+    if align is not None:
+        paragraph.alignment = align
+
+    run = paragraph.add_run(str(text))
+    set_run_font(
+        run,
+        size=size,
+        bold=bold,
+    )
+
+    paragraph.paragraph_format.space_after = Pt(4)
+    paragraph.paragraph_format.line_spacing = 1.08
+    return paragraph
+
+
+def add_report_heading(doc, text, level=1):
+    paragraph = doc.add_paragraph()
+
+    if level == 1:
+        size = 16
+        color = "1F4E78"
+        before = 8
+        after = 6
+    else:
+        size = 12
+        color = "334155"
+        before = 6
+        after = 4
+
+    run = paragraph.add_run(text)
+    set_run_font(
+        run,
+        size=size,
+        bold=True,
+        color=color,
+    )
+
+    paragraph.paragraph_format.space_before = Pt(before)
+    paragraph.paragraph_format.space_after = Pt(after)
+    return paragraph
+
+
+def add_key_value_table(doc, items, col_widths=(4.2, 18.2)):
+    table = doc.add_table(
+        rows=len(items),
+        cols=2,
+    )
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.style = "Table Grid"
+
+    for row_idx, (key, value) in enumerate(items):
+        key_cell = table.rows[row_idx].cells[0]
+        value_cell = table.rows[row_idx].cells[1]
+
+        key_cell.text = str(key)
+        value_cell.text = str(value)
+
+        set_cell_shading(
+            key_cell,
+            "EAF2F8",
+        )
+
+        for cell, width_cm in zip(
+            [key_cell, value_cell],
+            col_widths,
+        ):
+            cell.width = Cm(width_cm)
+            cell.vertical_alignment = (
+                WD_CELL_VERTICAL_ALIGNMENT.CENTER
+            )
+
+            for paragraph in cell.paragraphs:
+                for run in paragraph.runs:
+                    set_run_font(
+                        run,
+                        size=9,
+                        bold=(cell is key_cell),
+                    )
+
+    doc.add_paragraph()
+    return table
+
+
+def add_dataframe_table(
+    doc,
+    dataframe,
+    max_rows=None,
+    font_size=7,
+):
+    """Add a compact management-style Word table."""
+    if dataframe is None or dataframe.empty:
+        add_report_paragraph(
+            doc,
+            "No data available.",
+            size=9,
+        )
+        return None
+
+    work_df = dataframe.copy()
+
+    if max_rows is not None:
+        work_df = work_df.head(max_rows)
+
+    # Convert NaN to dash and limit long decimals.
+    for col in work_df.columns:
+        if pd.api.types.is_numeric_dtype(work_df[col]):
+            work_df[col] = work_df[col].map(
+                lambda value: (
+                    "—"
+                    if pd.isna(value)
+                    else (
+                        f"{value:,.2f}"
+                        if isinstance(value, (float, np.floating))
+                        else f"{value:,}"
+                    )
+                )
+            )
+        else:
+            work_df[col] = (
+                work_df[col]
+                .fillna("—")
+                .astype(str)
+            )
+
+    table = doc.add_table(
+        rows=1,
+        cols=len(work_df.columns),
+    )
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.style = "Table Grid"
+
+    header_cells = table.rows[0].cells
+
+    for col_idx, column in enumerate(work_df.columns):
+        header_cells[col_idx].text = str(column)
+        set_cell_shading(
+            header_cells[col_idx],
+            "1F4E78",
+        )
+        header_cells[
+            col_idx
+        ].vertical_alignment = (
+            WD_CELL_VERTICAL_ALIGNMENT.CENTER
+        )
+
+        for paragraph in header_cells[
+            col_idx
+        ].paragraphs:
+            paragraph.alignment = (
+                WD_ALIGN_PARAGRAPH.CENTER
+            )
+
+            for run in paragraph.runs:
+                set_run_font(
+                    run,
+                    size=font_size,
+                    bold=True,
+                    color="FFFFFF",
+                )
+
+    for _, row in work_df.iterrows():
+        cells = table.add_row().cells
+
+        for col_idx, value in enumerate(row.tolist()):
+            cells[col_idx].text = str(value)
+            cells[
+                col_idx
+            ].vertical_alignment = (
+                WD_CELL_VERTICAL_ALIGNMENT.CENTER
+            )
+
+            for paragraph in cells[
+                col_idx
+            ].paragraphs:
+                paragraph.alignment = (
+                    WD_ALIGN_PARAGRAPH.CENTER
+                )
+
+                for run in paragraph.runs:
+                    set_run_font(
+                        run,
+                        size=font_size,
+                    )
+
+    doc.add_paragraph()
+    return table
+
+
+def plotly_figure_to_png_buffer(fig, scale=2):
+    """
+    Convert Plotly figure to PNG for Word.
+    Requires kaleido. If unavailable, return None rather than failing
+    the whole management report.
+    """
+    try:
+        png_bytes = fig.to_image(
+            format="png",
+            scale=scale,
+        )
+        return io.BytesIO(png_bytes)
+    except Exception:
+        return None
+
+
+def add_plotly_figure_to_word(
+    doc,
+    fig,
+    caption,
+    width_inches=9.6,
+):
+    add_report_paragraph(
+        doc,
+        caption,
+        size=10,
+        bold=True,
+    )
+
+    image_buffer = plotly_figure_to_png_buffer(
+        fig,
+        scale=2,
+    )
+
+    if image_buffer is None:
+        add_report_paragraph(
+            doc,
+            "Chart image could not be generated. "
+            "Install package 'kaleido' to include Plotly charts in Word export.",
+            size=8,
+        )
+        return
+
+    paragraph = doc.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    run = paragraph.add_run()
+    run.add_picture(
+        image_buffer,
+        width=Inches(width_inches),
+    )
+
+    paragraph.paragraph_format.space_after = Pt(6)
+
+
+def create_management_word_report():
+    if not HAS_DOCX:
+        raise ImportError(
+            "python-docx is not installed. "
+            "Please add python-docx to requirements.txt."
+        )
+
+    doc = Document()
+
+    # -----------------------------------------------------
+    # Landscape A4 for management tables and charts
+    # -----------------------------------------------------
+    section = doc.sections[0]
+    section.orientation = WD_ORIENT.LANDSCAPE
+    section.page_width = Cm(29.7)
+    section.page_height = Cm(21.0)
+    section.top_margin = Cm(1.25)
+    section.bottom_margin = Cm(1.25)
+    section.left_margin = Cm(1.35)
+    section.right_margin = Cm(1.35)
+
+    # -----------------------------------------------------
+    # Title
+    # -----------------------------------------------------
+    title = doc.add_paragraph()
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    title_run = title.add_run(
+        "季節別黏度與進料黏度最佳化分析報告"
+    )
+    set_run_font(
+        title_run,
+        size=18,
+        bold=True,
+        color="1F4E78",
+    )
+
+    subtitle = doc.add_paragraph()
+    subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    subtitle_run = subtitle.add_run(
+        f"Paint Code: {selected_paint_code}"
+    )
+    set_run_font(
+        subtitle_run,
+        size=11,
+        color="64748B",
+    )
+
+    # -----------------------------------------------------
+    # Basic information
+    # -----------------------------------------------------
+    add_key_value_table(
+        doc,
+        [
+            ("供應商", selected_vendor),
+            ("色號", selected_paint_code),
+            ("塗裝位置", selected_position),
+            ("膜厚組合", structure_display),
+            ("樹脂", selected_resin),
+            ("稀釋劑", selected_solvent),
+            ("資料期間", f"{min_date} ～ {max_date}"),
+            ("有效紀錄", f"{len(analysis_df):,} 筆"),
+        ],
+    )
+
+    # -----------------------------------------------------
+    # Section 1
+    # -----------------------------------------------------
+    add_report_heading(
+        doc,
+        "一、分析目的",
+        level=1,
+    )
+    add_report_paragraph(
+        doc,
+        "本分析針對指定色號，依供應商、塗裝位置、膜厚組合、樹脂種類及稀釋劑條件，"
+        "比較不同季節之黏度變化、稀釋劑使用及塗料使用量，並進一步評估免加稀釋劑"
+        "直接上線之試驗進料黏度範圍。",
+        size=10,
+    )
+
+    # -----------------------------------------------------
+    # Section 2
+    # -----------------------------------------------------
+    add_report_heading(
+        doc,
+        "二、分析條件與方法",
+        level=1,
+    )
+    add_report_paragraph(
+        doc,
+        "分析條件：Vendor → Paint Code → Position → Coating Structure → "
+        "Resin → Solvent → Production Line。",
+        size=10,
+    )
+    add_report_paragraph(
+        doc,
+        "季節分類：冬季 12–02 月、春季 03–05 月、夏季 06–08 月、秋季 09–11 月。",
+        size=10,
+    )
+    add_report_paragraph(
+        doc,
+        "膜厚條件以完整塗層組合表示，例如 5 µm + 20 µm，避免不同訂單膜厚條件混合分析。",
+        size=10,
+    )
+
+    # -----------------------------------------------------
+    # Section 3 — Seasonal viscosity
+    # -----------------------------------------------------
+    add_report_heading(
+        doc,
+        "三、季節別黏度分析",
+        level=1,
+    )
+
+    seasonal_kpi_df = pd.DataFrame(
+        [
+            {
+                "指標": "最高添加前黏度",
+                "期間": str(
+                    highest_before_row[
+                        period_col
+                    ]
+                ),
+                "數值": (
+                    f"{highest_before_row['Median_Before_Viscosity']:.1f} s"
+                ),
+            },
+            {
+                "指標": "最低添加前黏度",
+                "期間": str(
+                    lowest_before_row[
+                        period_col
+                    ]
+                ),
+                "數值": (
+                    f"{lowest_before_row['Median_Before_Viscosity']:.1f} s"
+                ),
+            },
+            {
+                "指標": "最高添加比例",
+                "期間": str(
+                    highest_ratio_row[
+                        period_col
+                    ]
+                ),
+                "數值": (
+                    f"{highest_ratio_row['Median_Solvent_Ratio']:.1f}%"
+                ),
+            },
+            {
+                "指標": "最大降黏幅度",
+                "期間": str(
+                    largest_drop_row[
+                        period_col
+                    ]
+                ),
+                "數值": (
+                    f"{largest_drop_row['Median_Viscosity_Drop']:.1f} s"
+                ),
+            },
+        ]
+    )
+
+    add_dataframe_table(
+        doc,
+        seasonal_kpi_df,
+        font_size=8,
+    )
+
+    add_plotly_figure_to_word(
+        doc,
+        fig_overview,
+        "圖1　Seasonal Viscosity Overview",
+        width_inches=9.6,
+    )
+
+    add_plotly_figure_to_word(
+        doc,
+        fig_before_after,
+        "圖2　各季節添加前後黏度比較",
+        width_inches=9.6,
+    )
+
+    add_report_paragraph(
+        doc,
+        f"季節黏度判讀：{seasonal_before_comment} {seasonal_after_comment}",
+        size=10,
+        bold=True,
+    )
+
+    # -----------------------------------------------------
+    # Section 4 — Solvent + production volume
+    # -----------------------------------------------------
+    add_report_heading(
+        doc,
+        "四、稀釋劑、溫度與生產量分析",
+        level=1,
+    )
+
+    add_report_paragraph(
+        doc,
+        "為避免將添加比例與稀釋劑總用量直接比較而產生誤判，"
+        "本分析同時納入季節塗料使用量與加權添加比例。",
+        size=10,
+    )
+
+    add_report_paragraph(
+        doc,
+        "加權添加比例 (%) = 季節稀釋劑總用量 ÷ 季節塗料使用量 × 100",
+        size=10,
+        bold=True,
+    )
+
+    add_plotly_figure_to_word(
+        doc,
+        fig_condition,
+        "圖3　各季節黏度、稀釋劑添加比例與溫度趨勢",
+        width_inches=9.6,
+    )
+
+    add_dataframe_table(
+        doc,
+        season_display,
+        font_size=6,
+    )
+
+    add_report_paragraph(
+        doc,
+        f"生產使用量最高期間為 {highest_production_period}，"
+        f"塗料使用量約 {highest_production_kg:,.1f} kg。"
+        "因此，稀釋劑總用量較高不一定代表添加比例較高，"
+        "亦可能主要受到該季節生產量增加影響。",
+        size=10,
+        bold=True,
+    )
+
+    # -----------------------------------------------------
+    # Section 5 — Optimization method
+    # -----------------------------------------------------
+    add_report_heading(
+        doc,
+        "五、進料黏度最佳化方法",
+        level=1,
+    )
+
+    add_report_paragraph(
+        doc,
+        "以歷史添加後黏度作為現場實際可生產黏度之參考：",
+        size=10,
+    )
+    add_report_paragraph(
+        doc,
+        "建議進料下限 = P25(Final Viscosity)",
+        size=10,
+        bold=True,
+    )
+    add_report_paragraph(
+        doc,
+        "建議進料目標 = Median(Final Viscosity)",
+        size=10,
+        bold=True,
+    )
+    add_report_paragraph(
+        doc,
+        "建議進料上限 = P75(Final Viscosity)",
+        size=10,
+        bold=True,
+    )
+    add_report_paragraph(
+        doc,
+        "安全性同時使用歷史資料量、Final Viscosity IQR 及 Seasonal Gap 評估。",
+        size=10,
+    )
+
+    # -----------------------------------------------------
+    # Section 6 — Recommendation
+    # -----------------------------------------------------
+    add_report_heading(
+        doc,
+        "六、建議進料黏度結果",
+        level=1,
+    )
+
+    if "recommendation_table" in locals():
+        compact_rec_df = recommendation_table[
+            [
+                "Paint Code",
+                "Coating Structure",
+                "Records",
+                "Batches",
+                "Recommended Lower (s)",
+                "Recommended Target (s)",
+                "Recommended Upper (s)",
+                "Final Viscosity IQR (s)",
+                "Seasonal Final Viscosity Gap (s)",
+                "Recommendation",
+            ]
+        ].copy()
+
+        add_dataframe_table(
+            doc,
+            compact_rec_df,
+            font_size=6,
+        )
+
+    if "fig_recommend" in locals():
+        add_plotly_figure_to_word(
+            doc,
+            fig_recommend,
+            "圖4　目前進料黏度與建議試驗進料範圍比較",
+            width_inches=9.6,
+        )
+
+    if "seasonal_final_display" in locals():
+        add_report_heading(
+            doc,
+            "各季節添加後黏度驗證",
+            level=2,
+        )
+        add_dataframe_table(
+            doc,
+            seasonal_final_display,
+            font_size=7,
+        )
+
+    if "recommendation_status" in locals():
+        add_report_paragraph(
+            doc,
+            f"系統判定：{recommendation_icon} {recommendation_status}",
+            size=11,
+            bold=True,
+        )
+
+        add_report_paragraph(
+            doc,
+            f"建議試驗範圍：{recommended_range_text}",
+            size=11,
+            bold=True,
+        )
+
+        add_report_paragraph(
+            doc,
+            recommendation_detail,
+            size=10,
+        )
+    else:
+        add_report_paragraph(
+            doc,
+            "目前資料不足，無法建立建議進料黏度範圍。",
+            size=10,
+        )
+
+    # -----------------------------------------------------
+    # Section 7 — Management recommendation
+    # -----------------------------------------------------
+    add_report_heading(
+        doc,
+        "七、管理建議",
+        level=1,
+    )
+
+    add_report_paragraph(
+        doc,
+        "若判定為 Ready for No-Solvent Pilot，建議優先要求供應商依建議目標值"
+        "進行小批量試配，並於現場確認是否可免加稀釋劑直接生產。",
+        size=10,
+    )
+
+    add_report_paragraph(
+        doc,
+        "試驗時應同步確認膜厚、光澤、色差、表面品質及成品品質。"
+        "驗證穩定後，再評估是否轉為正式進料黏度管制規格。",
+        size=10,
+    )
+
+    add_report_paragraph(
+        doc,
+        "注意：本分析之建議進料範圍為試驗參考值，並非直接取代正式進料規格；"
+        "正式規格仍須經供應商試配與產線實際驗證。",
+        size=9,
+        bold=True,
+    )
+
+    # -----------------------------------------------------
+    # Section 8 — Conclusion
+    # -----------------------------------------------------
+    add_report_heading(
+        doc,
+        "八、結論",
+        level=1,
+    )
+
+    add_report_paragraph(
+        doc,
+        "本分析透過季節差異、生產量、稀釋劑使用及添加後黏度分布，"
+        "將現場黏度調整結果轉換為可供供應商試配之數據化進料條件。"
+        "最終目的為降低現場稀釋劑添加需求、縮短調整時間，並提升不同季節"
+        "與不同膜厚條件下之作業一致性。",
+        size=10,
+    )
+
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    return buffer
 
 
 def safe_unique(series):
@@ -2583,7 +3298,7 @@ else:
     )
 
 # =========================================================
-# 17. MANAGEMENT REPORT EXPORT
+# 17. MANAGEMENT REPORT EXPORT — WORD
 # =========================================================
 st.markdown("---")
 st.subheader("📥 Management Report Export")
@@ -2603,575 +3318,99 @@ st.download_button(
     on_click="ignore",
 )
 
+if not HAS_DOCX:
+    st.warning(
+        "⚠️ Word export requires python-docx. "
+        "Please add `python-docx` to requirements.txt."
+    )
+else:
+    if st.button(
+        "產生管理報告 Word",
+        type="primary",
+    ):
+        try:
+            # Prepare narrative variables used by the Word report.
+            if available_seasons >= 2:
+                if before_range <= 5:
+                    seasonal_before_comment = (
+                        "不同季節之添加前黏度差異小，整體季節影響有限。"
+                    )
+                elif before_range <= 10:
+                    seasonal_before_comment = (
+                        "不同季節之添加前黏度存在輕微差異，"
+                        "建議持續觀察溫度及儲存條件。"
+                    )
+                else:
+                    seasonal_before_comment = (
+                        "不同季節之添加前黏度差異明顯，"
+                        "建議確認溫度、儲存及批次因素。"
+                    )
 
-if st.button(
-    "產生管理報告 HTML",
-    type="primary",
-):
-    try:
-        # -------------------------------------------------
-        # 17.1 Prepare report charts
-        # -------------------------------------------------
-        overview_html = fig_overview.to_html(
-            full_html=False,
-            include_plotlyjs="cdn",
-            default_width="100%",
-            default_height="360px",
-        )
-
-        before_after_html = fig_before_after.to_html(
-            full_html=False,
-            include_plotlyjs=False,
-            default_width="100%",
-            default_height="600px",
-        )
-
-        condition_html = fig_condition.to_html(
-            full_html=False,
-            include_plotlyjs=False,
-            default_width="100%",
-            default_height="600px",
-        )
-
-        if "fig_recommend" in locals():
-            recommend_chart_html = fig_recommend.to_html(
-                full_html=False,
-                include_plotlyjs=False,
-                default_width="100%",
-                default_height="520px",
-            )
-        else:
-            recommend_chart_html = (
-                "<div class='notice'>目前無法產生建議進料黏度比較圖。</div>"
-            )
-
-        # -------------------------------------------------
-        # 17.2 Prepare tables
-        # -------------------------------------------------
-        seasonal_table_html = season_display.to_html(
-            index=False,
-            border=0,
-            classes="summary-table",
-            justify="center",
-        )
-
-        if "recommendation_table" in locals():
-            recommendation_table_html = (
-                recommendation_table.round(2).to_html(
-                    index=False,
-                    border=0,
-                    classes="summary-table",
-                    justify="center",
-                )
-            )
-        else:
-            recommendation_table_html = (
-                "<div class='notice'>目前無足夠資料建立進料黏度建議。</div>"
-            )
-
-        if "seasonal_final_display" in locals():
-            seasonal_final_html = (
-                seasonal_final_display.round(2).to_html(
-                    index=False,
-                    border=0,
-                    classes="summary-table",
-                    justify="center",
-                )
-            )
-        else:
-            seasonal_final_html = (
-                "<div class='notice'>目前無季節添加後黏度驗證資料。</div>"
-            )
-
-        # -------------------------------------------------
-        # 17.3 Automatic management narrative
-        # -------------------------------------------------
-        if available_seasons >= 2:
-            if before_range <= 5:
-                seasonal_before_comment = (
-                    "不同季節之添加前黏度差異小，整體季節影響有限。"
-                )
-            elif before_range <= 10:
-                seasonal_before_comment = (
-                    "不同季節之添加前黏度存在輕微差異，建議持續觀察溫度及儲存條件。"
-                )
+                if after_range <= 5:
+                    seasonal_after_comment = (
+                        "現場調整後黏度差異小，"
+                        "顯示實際生產黏度具有一定穩定性。"
+                    )
+                else:
+                    seasonal_after_comment = (
+                        "現場調整後黏度仍存在季節差異，"
+                        "需評估是否應分季節管理。"
+                    )
             else:
                 seasonal_before_comment = (
-                    "不同季節之添加前黏度差異明顯，建議確認溫度、儲存及批次因素。"
+                    "目前季節資料不足，暫無法判定季節穩定性。"
+                )
+                seasonal_after_comment = (
+                    "建議持續累積至少兩個以上季節之有效資料。"
                 )
 
-            if after_range <= 5:
-                seasonal_after_comment = (
-                    "現場調整後黏度差異小，顯示實際生產黏度具有一定穩定性。"
+            if "recommendation_status" in locals():
+                recommendation_summary = (
+                    f"{recommendation_icon} {recommendation_status}"
+                )
+                recommendation_detail = recommendation_message
+            else:
+                recommendation_summary = "⚪ Insufficient Data"
+                recommendation_detail = (
+                    "目前無足夠資料建立建議進料黏度範圍。"
+                )
+
+            if "final_p25" in locals():
+                recommended_range_text = (
+                    f"{final_p25:.1f}–{final_p75:.1f} s，"
+                    f"目標值 {final_median:.1f} s"
                 )
             else:
-                seasonal_after_comment = (
-                    "現場調整後黏度仍存在季節差異，需評估是否應分季節管理。"
-                )
-        else:
-            seasonal_before_comment = (
-                "目前季節資料不足，暫無法判定季節穩定性。"
-            )
-            seasonal_after_comment = (
-                "建議持續累積至少兩個以上季節之有效資料。"
+                recommended_range_text = "N/A"
+
+            word_buffer = create_management_word_report()
+
+            st.success(
+                "✅ Word 管理報告已產生。"
             )
 
-        if "recommendation_status" in locals():
-            recommendation_summary = (
-                f"{recommendation_icon} {recommendation_status}"
+            st.download_button(
+                label="下載管理報告 Word",
+                data=word_buffer.getvalue(),
+                file_name=(
+                    f"Seasonal_Viscosity_Management_Report_"
+                    f"{selected_paint_code}_"
+                    f"{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}"
+                    f".docx"
+                ),
+                mime=(
+                    "application/vnd.openxmlformats-"
+                    "officedocument.wordprocessingml.document"
+                ),
+                on_click="ignore",
             )
-            recommendation_detail = recommendation_message
-        else:
-            recommendation_summary = "⚪ Insufficient Data"
-            recommendation_detail = (
-                "目前無足夠資料建立建議進料黏度範圍。"
+
+            st.caption(
+                "若 Word 報告中未顯示 Plotly 圖表，"
+                "請在 requirements.txt 加入 `kaleido`。"
             )
 
-        if "final_p25" in locals():
-            recommended_range_text = (
-                f"{final_p25:.1f}–{final_p75:.1f} s，"
-                f"目標值 {final_median:.1f} s"
+        except Exception as error:
+            st.error(
+                f"❌ 產生 Word 管理報告時發生錯誤：{error}"
             )
-        else:
-            recommended_range_text = "N/A"
-
-        if "seasonal_gap" in locals() and pd.notna(seasonal_gap):
-            seasonal_gap_text = f"{seasonal_gap:.1f} s"
-        else:
-            seasonal_gap_text = "N/A"
-
-        # -------------------------------------------------
-        # 17.4 HTML management report
-        # -------------------------------------------------
-        html_content = f"""
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <title>季節別黏度與進料黏度最佳化分析報告</title>
-
-            <style>
-                body {{
-                    font-family: Arial, "Microsoft JhengHei", sans-serif;
-                    margin: 34px;
-                    background: #F8FAFC;
-                    color: #1F2937;
-                    line-height: 1.65;
-                }}
-
-                h1 {{
-                    text-align: center;
-                    color: #1F4E78;
-                    margin-bottom: 8px;
-                }}
-
-                h2 {{
-                    margin-top: 36px;
-                    color: #1F4E78;
-                    border-bottom: 2px solid #CBD5E1;
-                    padding-bottom: 7px;
-                }}
-
-                h3 {{
-                    margin-top: 24px;
-                    color: #334155;
-                }}
-
-                .subtitle {{
-                    text-align: center;
-                    color: #64748B;
-                    margin-bottom: 28px;
-                }}
-
-                .info-box {{
-                    background: white;
-                    border-left: 5px solid #2563EB;
-                    padding: 16px 20px;
-                    margin-bottom: 22px;
-                    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-                }}
-
-                .kpi-grid {{
-                    display: grid;
-                    grid-template-columns: repeat(4, 1fr);
-                    gap: 12px;
-                    margin: 18px 0 24px 0;
-                }}
-
-                .kpi {{
-                    background: white;
-                    border: 1px solid #CBD5E1;
-                    border-radius: 8px;
-                    padding: 14px;
-                    text-align: center;
-                }}
-
-                .kpi-label {{
-                    color: #64748B;
-                    font-size: 12px;
-                }}
-
-                .kpi-value {{
-                    color: #111827;
-                    font-size: 22px;
-                    font-weight: bold;
-                    margin-top: 4px;
-                }}
-
-                .chart-box {{
-                    background: white;
-                    border: 1px solid #CBD5E1;
-                    padding: 12px;
-                    margin: 18px 0 26px 0;
-                    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
-                }}
-
-                .table-box {{
-                    background: white;
-                    border: 1px solid #CBD5E1;
-                    padding: 14px;
-                    margin: 18px 0 26px 0;
-                    overflow-x: auto;
-                }}
-
-                .summary-table {{
-                    border-collapse: collapse;
-                    width: 100%;
-                    font-size: 12px;
-                    background: white;
-                }}
-
-                .summary-table th {{
-                    background: #1F4E78;
-                    color: white;
-                    border: 1px solid #CBD5E1;
-                    padding: 8px;
-                    text-align: center;
-                }}
-
-                .summary-table td {{
-                    border: 1px solid #CBD5E1;
-                    padding: 7px;
-                    text-align: center;
-                }}
-
-                .summary-table tr:nth-child(even) {{
-                    background: #F8FAFC;
-                }}
-
-                .conclusion {{
-                    background: #EFF6FF;
-                    border-left: 5px solid #2563EB;
-                    padding: 16px 20px;
-                    margin: 18px 0;
-                }}
-
-                .recommend {{
-                    background: #ECFDF5;
-                    border-left: 5px solid #059669;
-                    padding: 16px 20px;
-                    margin: 18px 0;
-                }}
-
-                .warning {{
-                    background: #FFF7ED;
-                    border-left: 5px solid #D97706;
-                    padding: 16px 20px;
-                    margin: 18px 0;
-                }}
-
-                .notice {{
-                    background: #F3F4F6;
-                    padding: 14px;
-                    border-radius: 6px;
-                    color: #6B7280;
-                }}
-
-                .formula {{
-                    background: #F1F5F9;
-                    border: 1px solid #CBD5E1;
-                    padding: 12px 16px;
-                    font-family: Consolas, monospace;
-                    margin: 12px 0;
-                }}
-
-                .small {{
-                    font-size: 12px;
-                    color: #64748B;
-                }}
-
-                @media print {{
-                    body {{
-                        background: white;
-                        margin: 18mm;
-                    }}
-
-                    .chart-box,
-                    .table-box {{
-                        page-break-inside: avoid;
-                    }}
-
-                    h2 {{
-                        page-break-after: avoid;
-                    }}
-                }}
-            </style>
-        </head>
-
-        <body>
-
-            <h1>季節別黏度與進料黏度最佳化分析報告</h1>
-            <div class="subtitle">
-                Paint Code: {selected_paint_code}
-            </div>
-
-            <div class="info-box">
-                <b>供應商：</b>{selected_vendor}<br>
-                <b>色號：</b>{selected_paint_code}<br>
-                <b>塗裝位置：</b>{selected_position}<br>
-                <b>膜厚組合：</b>{structure_display}<br>
-                <b>樹脂：</b>{selected_resin}<br>
-                <b>稀釋劑：</b>{selected_solvent}<br>
-                <b>資料期間：</b>{min_date} ～ {max_date}<br>
-                <b>有效紀錄：</b>{len(analysis_df):,} 筆
-            </div>
-
-            <h2>一、分析目的</h2>
-            <p>
-                本分析針對指定色號，依供應商、塗裝位置、膜厚組合、
-                樹脂種類及稀釋劑條件，比較不同季節之黏度變化、
-                稀釋劑使用及塗料使用量，並進一步評估免加稀釋劑直接上線之
-                試驗進料黏度範圍。
-            </p>
-
-            <h2>二、分析條件與方法</h2>
-            <p>
-                分析條件依序為：
-                <b>Vendor → Paint Code → Position → Coating Structure →
-                Resin → Solvent → Production Line</b>。
-            </p>
-
-            <p>
-                季節分類為：冬季 12–02 月、春季 03–05 月、
-                夏季 06–08 月、秋季 09–11 月。
-            </p>
-
-            <p>
-                膜厚條件以完整塗層組合表示，例如
-                <b>5 µm + 20 µm</b>，以避免不同訂單膜厚條件混合分析。
-            </p>
-
-            <h2>三、季節別黏度分析</h2>
-
-            <div class="kpi-grid">
-                <div class="kpi">
-                    <div class="kpi-label">最高添加前黏度</div>
-                    <div class="kpi-value">
-                        {highest_before_row['Median_Before_Viscosity']:.1f} s
-                    </div>
-                    <div class="small">{highest_before_row[period_col]}</div>
-                </div>
-
-                <div class="kpi">
-                    <div class="kpi-label">最低添加前黏度</div>
-                    <div class="kpi-value">
-                        {lowest_before_row['Median_Before_Viscosity']:.1f} s
-                    </div>
-                    <div class="small">{lowest_before_row[period_col]}</div>
-                </div>
-
-                <div class="kpi">
-                    <div class="kpi-label">最高添加比例</div>
-                    <div class="kpi-value">
-                        {highest_ratio_row['Median_Solvent_Ratio']:.1f}%
-                    </div>
-                    <div class="small">{highest_ratio_row[period_col]}</div>
-                </div>
-
-                <div class="kpi">
-                    <div class="kpi-label">最大降黏幅度</div>
-                    <div class="kpi-value">
-                        {largest_drop_row['Median_Viscosity_Drop']:.1f} s
-                    </div>
-                    <div class="small">{largest_drop_row[period_col]}</div>
-                </div>
-            </div>
-
-            <div class="chart-box">
-                {overview_html}
-            </div>
-
-            <div class="chart-box">
-                {before_after_html}
-            </div>
-
-            <div class="conclusion">
-                <b>季節黏度判讀：</b><br>
-                {seasonal_before_comment}<br>
-                {seasonal_after_comment}
-            </div>
-
-            <h2>四、稀釋劑、溫度與生產量分析</h2>
-
-            <p>
-                為避免直接以添加比例與稀釋劑總用量比較而產生誤判，
-                本分析同時納入季節塗料使用量及加權添加比例。
-            </p>
-
-            <div class="formula">
-                加權添加比例 (%) =
-                季節稀釋劑總用量 ÷ 季節塗料使用量 × 100
-            </div>
-
-            <div class="chart-box">
-                {condition_html}
-            </div>
-
-            <div class="table-box">
-                {seasonal_table_html}
-            </div>
-
-            <div class="conclusion">
-                <b>生產量判讀：</b><br>
-                生產使用量最高期間為
-                <b>{highest_production_period}</b>，
-                塗料使用量約
-                <b>{highest_production_kg:,.1f} kg</b>。
-                因此，稀釋劑總用量較高不一定代表添加比例較高，
-                亦可能主要受到該季節生產量增加影響。
-            </div>
-
-            <h2>五、進料黏度最佳化方法</h2>
-
-            <p>
-                以歷史添加後黏度作為現場實際可生產黏度之參考，
-                建立免加稀釋劑直接上線之試驗進料黏度範圍：
-            </p>
-
-            <div class="formula">
-                建議進料下限 = P25(Final Viscosity)<br>
-                建議進料目標 = Median(Final Viscosity)<br>
-                建議進料上限 = P75(Final Viscosity)
-            </div>
-
-            <p>
-                同時使用資料量、添加後黏度 IQR 及 Seasonal Gap
-                評估建議範圍之穩定性。
-            </p>
-
-            <div class="formula">
-                IQR = P75 − P25<br>
-                Seasonal Gap =
-                各季節添加後黏度中位數最大值 − 最小值
-            </div>
-
-            <h2>六、建議進料黏度結果</h2>
-
-            <div class="kpi-grid">
-                <div class="kpi">
-                    <div class="kpi-label">Recommended Lower</div>
-                    <div class="kpi-value">
-                        {f"{final_p25:.1f} s" if "final_p25" in locals() else "N/A"}
-                    </div>
-                </div>
-
-                <div class="kpi">
-                    <div class="kpi-label">Recommended Target</div>
-                    <div class="kpi-value">
-                        {f"{final_median:.1f} s" if "final_median" in locals() else "N/A"}
-                    </div>
-                </div>
-
-                <div class="kpi">
-                    <div class="kpi-label">Recommended Upper</div>
-                    <div class="kpi-value">
-                        {f"{final_p75:.1f} s" if "final_p75" in locals() else "N/A"}
-                    </div>
-                </div>
-
-                <div class="kpi">
-                    <div class="kpi-label">Seasonal Gap</div>
-                    <div class="kpi-value">
-                        {seasonal_gap_text}
-                    </div>
-                </div>
-            </div>
-
-            <div class="chart-box">
-                {recommend_chart_html}
-            </div>
-
-            <div class="table-box">
-                {recommendation_table_html}
-            </div>
-
-            <h3>各季節添加後黏度驗證</h3>
-
-            <div class="table-box">
-                {seasonal_final_html}
-            </div>
-
-            <div class="recommend">
-                <b>系統判定：</b>{recommendation_summary}<br><br>
-                <b>建議試驗範圍：</b>{recommended_range_text}<br><br>
-                {recommendation_detail}
-            </div>
-
-            <h2>七、管理建議</h2>
-
-            <p>
-                若判定為 <b>Ready for No-Solvent Pilot</b>，
-                建議優先要求供應商依建議目標值進行小批量試配，
-                並於現場確認是否可免加稀釋劑直接生產。
-            </p>
-
-            <p>
-                試驗時應同步確認：
-                膜厚、光澤、色差、表面品質及成品品質。
-                驗證穩定後，再評估是否轉為正式進料黏度管制規格。
-            </p>
-
-            <div class="warning">
-                <b>注意：</b>
-                本分析之建議進料範圍為試驗參考值，
-                並非直接取代正式進料規格。
-                正式規格仍須經供應商試配與產線實際驗證。
-            </div>
-
-            <h2>八、結論</h2>
-
-            <p>
-                本分析透過季節差異、生產量、稀釋劑使用及添加後黏度分布，
-                將現場黏度調整結果轉換為可供供應商試配之數據化進料條件。
-                最終目的為降低現場稀釋劑添加需求、縮短調整時間，
-                並提升不同季節與不同膜厚條件下之作業一致性。
-            </p>
-
-        </body>
-        </html>
-        """
-
-        html_buffer = html_content.encode(
-            "utf-8"
-        )
-
-        st.success(
-            "✅ 管理報告已產生。"
-        )
-
-        st.download_button(
-            label="下載管理報告 HTML",
-            data=html_buffer,
-            file_name=(
-                f"Seasonal_Viscosity_Management_Report_"
-                f"{selected_paint_code}_"
-                f"{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}"
-                f".html"
-            ),
-            mime="text/html",
-            on_click="ignore",
-        )
-
-    except Exception as error:
-        st.error(
-            f"❌ 產生管理報告時發生錯誤：{error}"
-        )
