@@ -144,10 +144,108 @@ position_key = position_key.mask(
     ""
 )
 
+df["_Position_Raw"] = position_key
+
 df["Position_UI"] = (
     position_key
     .map(position_map)
     .fillna("Unknown")
+)
+
+# ---------------------------------------------------------
+# SPECIAL POSITION EXCEPTION
+# PS30213Z2 belongs to the Primer group even when some
+# multi-pass source records are marked as Top Finish.
+# ---------------------------------------------------------
+special_primer_paint_codes = {"PS30213Z2"}
+
+df.loc[
+    df["Paint_Code"].isin(special_primer_paint_codes),
+    "Position_UI",
+] = "Primer"
+
+# ---------------------------------------------------------
+# ORDER COATING THICKNESS / COATING STRUCTURE
+# Top side  = TTMFILM_THICK + TOPFILM_THICK
+# Back side = BTMFILM_THICK + BACKFILM_THICK
+# Example   = 5 µm + 20 µm
+# ---------------------------------------------------------
+thickness_cols = [
+    "TOPFILM_THICK",
+    "TTMFILM_THICK",
+    "BACKFILM_THICK",
+    "BTMFILM_THICK",
+]
+
+for col in thickness_cols:
+    if col not in df.columns:
+        df[col] = np.nan
+
+    df[col] = pd.to_numeric(
+        df[col],
+        errors="coerce",
+    )
+
+is_top_side = df["_Position_Raw"].isin(
+    ["TF", "TP", "正面漆", "正底漆"]
+)
+
+is_back_side = df["_Position_Raw"].isin(
+    ["BF", "BP", "背面漆", "背底漆"]
+)
+
+df["Primer_Thickness"] = np.select(
+    [is_top_side, is_back_side],
+    [
+        df["TTMFILM_THICK"],
+        df["BTMFILM_THICK"],
+    ],
+    default=np.nan,
+)
+
+df["Main_Coat_Thickness"] = np.select(
+    [is_top_side, is_back_side],
+    [
+        df["TOPFILM_THICK"],
+        df["BACKFILM_THICK"],
+    ],
+    default=np.nan,
+)
+
+df["Total_Coating_Thickness"] = (
+    df["Primer_Thickness"]
+    + df["Main_Coat_Thickness"]
+)
+
+
+def format_thickness_value(value):
+    if pd.isna(value):
+        return "—"
+
+    value = float(value)
+
+    if value.is_integer():
+        return str(int(value))
+
+    return f"{value:.1f}".rstrip("0").rstrip(".")
+
+
+def build_coating_structure(row):
+    primer = row["Primer_Thickness"]
+    main = row["Main_Coat_Thickness"]
+
+    if pd.isna(primer) and pd.isna(main):
+        return "Unknown"
+
+    return (
+        f"{format_thickness_value(primer)} µm + "
+        f"{format_thickness_value(main)} µm"
+    )
+
+
+df["Coating_Structure"] = df.apply(
+    build_coating_structure,
+    axis=1,
 )
 
 # Numeric columns
@@ -322,21 +420,24 @@ df["Season_Period"] = (
 
 # =========================================================
 # 8. GLOBAL FILTERS
+#    Added coating-thickness condition
 # =========================================================
 st.markdown("---")
 st.subheader("🔍 分析篩選條件")
 
 filter_df = df.copy()
 
-filter_col1, filter_col2, filter_col3 = st.columns(3)
-filter_col4, filter_col5, filter_col6 = st.columns(3)
+filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
+filter_col5, filter_col6, filter_col7 = st.columns(3)
 
+# ---------------------------------------------------------
 # Vendor
+# ---------------------------------------------------------
 vendor_options = ["All"] + sorted(
     [
         str(value)
-        for value in filter_df["Vendor"].unique()
-        if value != "Unknown"
+        for value in filter_df["Vendor"].dropna().unique()
+        if str(value).strip() not in {"", "Unknown"}
     ]
 )
 
@@ -346,14 +447,19 @@ selected_vendor = filter_col1.selectbox(
 )
 
 if selected_vendor != "All":
-    filter_df = filter_df[filter_df["Vendor"] == selected_vendor]
+    filter_df = filter_df[
+        filter_df["Vendor"] == selected_vendor
+    ]
 
+
+# ---------------------------------------------------------
 # Resin
+# ---------------------------------------------------------
 resin_options = ["All"] + sorted(
     [
         str(value)
-        for value in filter_df["Resin"].unique()
-        if value != "Unknown"
+        for value in filter_df["Resin"].dropna().unique()
+        if str(value).strip() not in {"", "Unknown"}
     ]
 )
 
@@ -363,10 +469,14 @@ selected_resin = filter_col2.selectbox(
 )
 
 if selected_resin != "All":
-    filter_df = filter_df[filter_df["Resin"] == selected_resin]
+    filter_df = filter_df[
+        filter_df["Resin"] == selected_resin
+    ]
 
+
+# ---------------------------------------------------------
 # Position
-# Hard-limit the selector to real coating positions only.
+# ---------------------------------------------------------
 valid_position_order = [
     "Primer",
     "Top Finish",
@@ -397,16 +507,49 @@ if selected_position != "All":
         filter_df["Position_UI"] == selected_position
     ]
 
-# Solvent
-solvent_options = ["All"] + sorted(
+
+# ---------------------------------------------------------
+# Coating Structure / Thickness condition
+# Example: 5 µm + 20 µm
+# ---------------------------------------------------------
+structure_options = ["All"] + sorted(
     [
         str(value)
-        for value in filter_df["Solvent_Type"].unique()
-        if value != "Unknown"
+        for value in filter_df["Coating_Structure"]
+        .dropna()
+        .unique()
+        if str(value).strip() not in {"", "Unknown"}
     ]
 )
 
-selected_solvent = filter_col4.selectbox(
+selected_structure = filter_col4.selectbox(
+    "Coating Structure (膜厚組合)",
+    structure_options,
+    help=(
+        "Top side = Primer + Top Finish; "
+        "Back side = Primer + Back Finish. "
+        "Example: 5 µm + 20 µm."
+    ),
+)
+
+if selected_structure != "All":
+    filter_df = filter_df[
+        filter_df["Coating_Structure"] == selected_structure
+    ]
+
+
+# ---------------------------------------------------------
+# Solvent
+# ---------------------------------------------------------
+solvent_options = ["All"] + sorted(
+    [
+        str(value)
+        for value in filter_df["Solvent_Type"].dropna().unique()
+        if str(value).strip() not in {"", "Unknown"}
+    ]
+)
+
+selected_solvent = filter_col5.selectbox(
     "Solvent Type (稀釋劑種類)",
     solvent_options,
 )
@@ -416,29 +559,37 @@ if selected_solvent != "All":
         filter_df["Solvent_Type"] == selected_solvent
     ]
 
+
+# ---------------------------------------------------------
 # Production line
+# ---------------------------------------------------------
 line_options = sorted(
     [
         str(value)
-        for value in filter_df["線別"].unique()
-        if value != "Unknown"
+        for value in filter_df["線別"].dropna().unique()
+        if str(value).strip() not in {"", "Unknown"}
     ]
 )
 
-selected_lines = filter_col5.multiselect(
+selected_lines = filter_col6.multiselect(
     "Production Line (產線)",
     line_options,
     default=line_options,
 )
 
 if selected_lines:
-    filter_df = filter_df[filter_df["線別"].isin(selected_lines)]
+    filter_df = filter_df[
+        filter_df["線別"].isin(selected_lines)
+    ]
 else:
     st.warning("⚠️ 請至少選擇一條產線。")
     st.stop()
 
+
+# ---------------------------------------------------------
 # Analysis mode
-analysis_mode = filter_col6.selectbox(
+# ---------------------------------------------------------
+analysis_mode = filter_col7.selectbox(
     "分析方式 (Analysis Mode)",
     [
         "合併各年度比較四季",
@@ -449,7 +600,6 @@ analysis_mode = filter_col6.selectbox(
 if filter_df.empty:
     st.warning("⚠️ 無符合目前篩選條件的資料。")
     st.stop()
-
 
 # =========================================================
 # 9. ALL PAINT CODES — SEASONAL VISCOSITY OVERVIEW MATRIX
@@ -1111,6 +1261,7 @@ filter_details = (
     f"Vendor: {selected_vendor} | "
     f"Resin: {selected_resin} | "
     f"Position: {selected_position} | "
+    f"Coating Structure: {selected_structure} | "
     f"Solvent: {selected_solvent} | "
     f"Paint Code: {selected_paint_code}"
 )
@@ -1119,6 +1270,7 @@ st.info(
     f"📅 **資料期間：** {min_date} ➔ {max_date}"
     f" ｜ 📊 **有效紀錄數：** {len(analysis_df):,} 筆"
     f" ｜ 🎨 **色號：** {selected_paint_code}"
+    f" ｜ 📏 **膜厚組合：** {selected_structure}"
 )
 
 
@@ -1569,6 +1721,12 @@ season_display = season_summary[
     ]
 ].copy()
 
+season_display.insert(
+    1,
+    "膜厚組合",
+    selected_structure,
+)
+
 season_display = season_display.rename(
     columns={
         period_col: "季節期間",
@@ -1598,6 +1756,10 @@ st.dataframe(
     season_display,
     column_config={
         "季節期間": "季節期間",
+        "膜厚組合": st.column_config.TextColumn(
+            "膜厚組合",
+            width="medium",
+        ),
         "歷史紀錄數": st.column_config.NumberColumn(
             "歷史紀錄數",
             format="%d",
