@@ -20,6 +20,16 @@ except ImportError:
     HAS_DOCX = False
 
 
+
+# =========================================================
+# CHART DISPLAY STYLE
+# =========================================================
+CHART_TEXT_COLOR = "#000000"
+CHART_FONT_SIZE = 15
+CHART_TICK_SIZE = 14
+CHART_LABEL_SIZE = 16
+CHART_TITLE_SIZE = 19
+
 # =========================================================
 # 1. PAGE CONFIGURATION
 # =========================================================
@@ -297,6 +307,19 @@ def add_dataframe_table(
 
 
 
+
+plt.rcParams["text.color"] = "#000000"
+plt.rcParams["axes.labelcolor"] = "#000000"
+plt.rcParams["xtick.color"] = "#000000"
+plt.rcParams["ytick.color"] = "#000000"
+plt.rcParams["axes.titlecolor"] = "#000000"
+plt.rcParams["font.size"] = 13
+plt.rcParams["axes.titlesize"] = 16
+plt.rcParams["axes.labelsize"] = 14
+plt.rcParams["xtick.labelsize"] = 12
+plt.rcParams["ytick.labelsize"] = 12
+plt.rcParams["legend.fontsize"] = 12
+
 def save_matplotlib_to_buffer(fig):
     """Save matplotlib figure to an in-memory PNG buffer."""
     plt.rcParams["font.family"] = "DejaVu Sans"
@@ -362,7 +385,7 @@ def create_word_seasonal_overview_png():
             bbox=dict(
                 boxstyle="round,pad=0.55",
                 facecolor="white",
-                edgecolor="#94A3B8",
+                edgecolor=CHART_TEXT_COLOR,
                 linewidth=1.1,
             ),
         )
@@ -416,7 +439,7 @@ def create_word_before_after_png():
             [a, b],
             [yi, yi],
             linewidth=4,
-            color="#94A3B8",
+            color=CHART_TEXT_COLOR,
             zorder=1,
         )
 
@@ -2192,7 +2215,7 @@ fig_overview = go.Figure(
             title="ΔV<br>(s)",
             thickness=12,
             len=0.70,
-            outlinecolor="#94A3B8",
+            outlinecolor=CHART_TEXT_COLOR,
             outlinewidth=1,
             tickfont=dict(color="#000000", size=12),
         ),
@@ -2239,8 +2262,7 @@ fig_overview.update_xaxes(
     mirror=True,
     ticks="outside",
     ticklen=6,
-    tickfont=dict(
-        size=18,
+    tickfont=dict(size=CHART_TICK_SIZE,
         color="#000000",
     ),
 )
@@ -2252,8 +2274,7 @@ fig_overview.update_yaxes(
     mirror=True,
     ticks="outside",
     ticklen=5,
-    tickfont=dict(
-        size=15,
+    tickfont=dict(size=CHART_TICK_SIZE,
         color="#000000",
     ),
     title_font=dict(
@@ -2394,7 +2415,7 @@ for _, row in season_summary.iterrows():
             ],
             mode="lines",
             line=dict(
-                color="#94A3B8",
+                color=CHART_TEXT_COLOR,
                 width=5,
             ),
             hoverinfo="skip",
@@ -2538,7 +2559,7 @@ fig_before_after.update_layout(
         showgrid=True,
         gridcolor="#E5E7EB",
         showline=True,
-        linecolor="#475569",
+        linecolor=CHART_TEXT_COLOR,
         mirror=True,
     ),
     yaxis=dict(
@@ -2548,9 +2569,45 @@ fig_before_after.update_layout(
         showgrid=True,
         gridcolor="#E5E7EB",
         showline=True,
-        linecolor="#475569",
+        linecolor=CHART_TEXT_COLOR,
         mirror=True,
     ),
+)
+
+fig_before_after.update_layout(
+
+    font=dict(
+
+        color=CHART_TEXT_COLOR,
+
+        size=CHART_FONT_SIZE,
+
+    ),
+
+    title_font=dict(
+
+        color=CHART_TEXT_COLOR,
+
+        size=CHART_TITLE_SIZE,
+
+    ),
+
+)
+
+fig_before_after.update_xaxes(
+
+    tickfont=dict(color=CHART_TEXT_COLOR, size=CHART_TICK_SIZE),
+
+    title_font=dict(color=CHART_TEXT_COLOR, size=CHART_LABEL_SIZE),
+
+)
+
+fig_before_after.update_yaxes(
+
+    tickfont=dict(color=CHART_TEXT_COLOR, size=CHART_TICK_SIZE),
+
+    title_font=dict(color=CHART_TEXT_COLOR, size=CHART_LABEL_SIZE),
+
 )
 
 st.plotly_chart(
@@ -2607,8 +2664,7 @@ fig_condition.add_trace(
             lambda value: f"{value:.1f}"
         ),
         textposition="top center",
-        textfont=dict(
-            size=11,
+        textfont=dict(size=CHART_LABEL_SIZE,
             color="#92400E",
         ),
         yaxis="y1",
@@ -2646,8 +2702,7 @@ fig_condition.add_trace(
             lambda value: f"{value:.1f}"
         ),
         textposition="bottom center",
-        textfont=dict(
-            size=11,
+        textfont=dict(size=CHART_LABEL_SIZE,
             color="#1D4ED8",
         ),
         yaxis="y1",
@@ -2771,8 +2826,7 @@ if season_summary[
                 )
             ),
             textposition="top center",
-            textfont=dict(
-                size=10,
+            textfont=dict(size=CHART_LABEL_SIZE,
                 color="#6B21A8",
             ),
             yaxis="y3",
@@ -2941,7 +2995,7 @@ fig_condition.update_layout(
     font=dict(
         family=PLOTLY_FONT_FAMILY,
         size=12,
-        color="#374151",
+        color=CHART_TEXT_COLOR,
     ),
 )
 
@@ -2973,6 +3027,78 @@ fig_condition.update_layout(
         ticksuffix="°",
         zeroline=False,
     )
+)
+
+fig_condition.update_layout(
+
+    font=dict(
+
+        color=CHART_TEXT_COLOR,
+
+        size=CHART_FONT_SIZE,
+
+    ),
+
+    title_font=dict(
+
+        color=CHART_TEXT_COLOR,
+
+        size=CHART_TITLE_SIZE,
+
+    ),
+
+)
+
+fig_condition.update_xaxes(
+
+    tickfont=dict(color=CHART_TEXT_COLOR, size=CHART_TICK_SIZE),
+
+    title_font=dict(color=CHART_TEXT_COLOR, size=CHART_LABEL_SIZE),
+
+)
+
+fig_condition.update_yaxes(
+
+    tickfont=dict(color=CHART_TEXT_COLOR, size=CHART_TICK_SIZE),
+
+    title_font=dict(color=CHART_TEXT_COLOR, size=CHART_LABEL_SIZE),
+
+)
+
+fig_condition.update_layout(
+
+    legend=dict(font=dict(color=CHART_TEXT_COLOR, size=14)),
+
+    yaxis=dict(
+
+        **{k: v for k, v in fig_condition.layout.yaxis.to_plotly_json().items() if k not in ["tickfont", "title"]},
+
+        tickfont=dict(color=CHART_TEXT_COLOR, size=CHART_TICK_SIZE),
+
+        title=dict(text="Viscosity (s)", font=dict(color=CHART_TEXT_COLOR, size=CHART_LABEL_SIZE)),
+
+    ),
+
+    yaxis2=dict(
+
+        **{k: v for k, v in fig_condition.layout.yaxis2.to_plotly_json().items() if k not in ["tickfont", "title"]},
+
+        tickfont=dict(color=CHART_TEXT_COLOR, size=CHART_TICK_SIZE),
+
+        title=dict(text="Solvent Ratio (%)", font=dict(color=CHART_TEXT_COLOR, size=CHART_LABEL_SIZE)),
+
+    ),
+
+    yaxis3=dict(
+
+        **{k: v for k, v in fig_condition.layout.yaxis3.to_plotly_json().items() if k not in ["tickfont", "title"]},
+
+        tickfont=dict(color=CHART_TEXT_COLOR, size=CHART_TICK_SIZE),
+
+        title=dict(text="Temperature (C)", font=dict(color=CHART_TEXT_COLOR, size=CHART_LABEL_SIZE)),
+
+    ),
+
 )
 
 st.plotly_chart(
@@ -3671,7 +3797,7 @@ else:
             showgrid=True,
             gridcolor="#E5E7EB",
             showline=True,
-            linecolor="#475569",
+            linecolor=CHART_TEXT_COLOR,
             mirror=True,
         ),
         yaxis=dict(
@@ -3684,7 +3810,7 @@ else:
             showgrid=True,
             gridcolor="#E5E7EB",
             showline=True,
-            linecolor="#475569",
+            linecolor=CHART_TEXT_COLOR,
             mirror=True,
         ),
         legend=dict(
@@ -3694,6 +3820,42 @@ else:
             xanchor="center",
             x=0.5,
         ),
+    )
+
+    fig_recommend.update_layout(
+
+        font=dict(
+
+            color=CHART_TEXT_COLOR,
+
+            size=CHART_FONT_SIZE,
+
+        ),
+
+        title_font=dict(
+
+            color=CHART_TEXT_COLOR,
+
+            size=CHART_TITLE_SIZE,
+
+        ),
+
+    )
+
+    fig_recommend.update_xaxes(
+
+        tickfont=dict(color=CHART_TEXT_COLOR, size=CHART_TICK_SIZE),
+
+        title_font=dict(color=CHART_TEXT_COLOR, size=CHART_LABEL_SIZE),
+
+    )
+
+    fig_recommend.update_yaxes(
+
+        tickfont=dict(color=CHART_TEXT_COLOR, size=CHART_TICK_SIZE),
+
+        title_font=dict(color=CHART_TEXT_COLOR, size=CHART_LABEL_SIZE),
+
     )
 
     st.plotly_chart(
