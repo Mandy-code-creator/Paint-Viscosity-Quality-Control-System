@@ -299,17 +299,49 @@ def prepare_valid_records(df):
         data[col] = pd.to_numeric(data[col], errors="coerce")
 
     if "塗裝位置" not in data.columns:
-        data["塗裝位置"] = "Unknown"
+        data["塗裝位置"] = pd.NA
 
-    position_mapping = {
-        "TP": "Primer", "正底漆": "Primer", "BP": "Primer", "背底漆": "Primer",
-        "TF": "Top Finish", "正面漆": "Top Finish", "BF": "Back Finish", "背面漆": "Back Finish"
+    # Normalize coating position before mapping.
+    # Invalid values such as 0 / 0.0 / blank must never appear in the UI filter.
+    data["塗裝位置"] = (
+        data["塗裝位置"]
+        .astype("string")
+        .str.strip()
+        .str.upper()
+    )
+
+    invalid_positions = {
+        "", "0", "0.0", "NAN", "NONE", "NULL",
+        "N/A", "NA", "-", "--", "<NA>"
     }
 
-    data["Position_UI"] = (
-        data["塗裝位置"].fillna("Unknown").astype(str).str.strip()
-        .map(position_mapping).fillna(data["塗裝位置"])
-    )
+    data.loc[
+        data["塗裝位置"].isin(invalid_positions),
+        "塗裝位置"
+    ] = pd.NA
+
+    position_mapping = {
+        "TP": "Primer",
+        "正底漆": "Primer",
+        "BP": "Primer",
+        "背底漆": "Primer",
+        "TF": "Top Finish",
+        "正面漆": "Top Finish",
+        "BF": "Back Finish",
+        "背面漆": "Back Finish",
+    }
+
+    data["Position_UI"] = data["塗裝位置"].map(position_mapping)
+
+    # Only real coating positions are allowed to continue into analysis.
+    valid_positions = [
+        "Primer",
+        "Top Finish",
+        "Back Finish",
+    ]
+
+    data = data[data["Position_UI"].isin(valid_positions)].copy()
+
     data["塗料編號"] = data["塗料編號"].astype(str).str.strip()
 
     data = data[
@@ -580,17 +612,84 @@ st.markdown("---")
 # GLOBAL FILTERS
 # =========================================================
 col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+
+# Safe text sorting avoids mixed-type errors from Excel source data.
+def safe_sorted_unique(series):
+    return sorted(
+        series
+        .dropna()
+        .astype(str)
+        .str.strip()
+        .loc[lambda s: s.ne("")]
+        .unique()
+        .tolist()
+    )
+
 with col_f1:
-    selected_resin = st.selectbox("Select Resin:", sorted(master_df["Resin"].dropna().unique()), on_change=reset_execution_states)
+    available_resins = safe_sorted_unique(master_df["Resin"])
+    selected_resin = st.selectbox(
+        "Select Resin:",
+        available_resins,
+        on_change=reset_execution_states
+    )
+
 with col_f2:
-    available_positions = sorted(master_df.loc[master_df["Resin"] == selected_resin, "Position_UI"].dropna().unique())
-    selected_pos = st.selectbox("Select Position:", available_positions, on_change=reset_execution_states)
+    available_positions = safe_sorted_unique(
+        master_df.loc[
+            (master_df["Resin"].astype(str).str.strip() == str(selected_resin).strip())
+            & (master_df["Position_UI"].isin(["Primer", "Top Finish", "Back Finish"])),
+            "Position_UI"
+        ]
+    )
+
+    if not available_positions:
+        st.error("No valid coating position is available for the selected resin.")
+        st.stop()
+
+    selected_pos = st.selectbox(
+        "Select Position:",
+        available_positions,
+        on_change=reset_execution_states
+    )
+
 with col_f3:
-    available_vendors = sorted(master_df.loc[(master_df["Resin"] == selected_resin) & (master_df["Position_UI"] == selected_pos), "Vendor"].dropna().unique())
-    selected_vendor = st.selectbox("Select Vendor:", available_vendors, on_change=reset_execution_states)
+    available_vendors = safe_sorted_unique(
+        master_df.loc[
+            (master_df["Resin"].astype(str).str.strip() == str(selected_resin).strip())
+            & (master_df["Position_UI"].astype(str).str.strip() == str(selected_pos).strip()),
+            "Vendor"
+        ]
+    )
+
+    if not available_vendors:
+        st.error("No vendor is available for the selected resin and coating position.")
+        st.stop()
+
+    selected_vendor = st.selectbox(
+        "Select Vendor:",
+        available_vendors,
+        on_change=reset_execution_states
+    )
+
 with col_f4:
-    available_solvents = sorted(master_df.loc[(master_df["Resin"] == selected_resin) & (master_df["Position_UI"] == selected_pos) & (master_df["Vendor"] == selected_vendor), "Solvent_Type"].dropna().unique())
-    selected_solvent = st.selectbox("Select Solvent Type:", available_solvents, on_change=reset_execution_states)
+    available_solvents = safe_sorted_unique(
+        master_df.loc[
+            (master_df["Resin"].astype(str).str.strip() == str(selected_resin).strip())
+            & (master_df["Position_UI"].astype(str).str.strip() == str(selected_pos).strip())
+            & (master_df["Vendor"].astype(str).str.strip() == str(selected_vendor).strip()),
+            "Solvent_Type"
+        ]
+    )
+
+    if not available_solvents:
+        st.error("No solvent type is available for the selected configuration.")
+        st.stop()
+
+    selected_solvent = st.selectbox(
+        "Select Solvent Type:",
+        available_solvents,
+        on_change=reset_execution_states
+    )
 
 system_df = master_df[
     (master_df["Resin"] == selected_resin) & (master_df["Position_UI"] == selected_pos) &
