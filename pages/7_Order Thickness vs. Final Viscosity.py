@@ -772,87 +772,136 @@ system_df["Thickness_Group"] = adaptive_thickness_group(
 
 
 # =========================================================
-# 8. SYSTEM SUMMARY
+# 8. COATING STRUCTURE ANALYSIS
 # =========================================================
 st.markdown("---")
-st.subheader("3. Thickness Effect on Final Viscosity")
-
-source_column = (
-    system_df["Thickness_Source_Column"]
-    .dropna()
-    .astype(str)
-    .mode()
-)
-
-source_column_text = (
-    source_column.iloc[0]
-    if not source_column.empty
-    else "Unknown"
-)
+st.subheader("3. Coating Structure Effect on Final Viscosity")
 
 system_label = (
     f"{selected_resin} | {selected_position} | {selected_vendor} | "
     f"{selected_solvent} | {selected_paint_code}"
 )
 
-structure_values = (
-    system_df["Coating_Structure_Detail"]
-    .dropna()
-    .astype(str)
-    .loc[lambda s: ~s.isin(["Unknown", "—"])]
-    .unique()
-    .tolist()
+# Use the full Primer + Main Coat pair as the primary segmentation key.
+structure_df = system_df[
+    system_df["Coating_Structure"].notna()
+    & ~system_df["Coating_Structure"].isin(["Unknown", "—"])
+].copy()
+
+if structure_df.empty:
+    st.warning(
+        "No valid coating-structure pairs are available for the selected system."
+    )
+    st.stop()
+
+# Exact structure label used for analysis and recommendation.
+structure_df["Structure_Key"] = structure_df["Coating_Structure"].astype(str)
+
+# Helper to sort labels such as 5 µm + 20 µm numerically.
+def structure_sort_key(label):
+    try:
+        left, right = str(label).replace("µm", "").split("+")
+        return (float(left.strip()), float(right.strip()))
+    except Exception:
+        return (9999.0, 9999.0)
+
+structure_order = sorted(
+    structure_df["Structure_Key"].dropna().unique().tolist(),
+    key=structure_sort_key,
 )
 
-if len(structure_values) == 1:
-    structure_text = structure_values[0]
-elif len(structure_values) <= 4:
-    structure_text = " / ".join(structure_values)
-else:
-    structure_text = (
-        "Multiple structures: "
-        + " / ".join(structure_values[:4])
-        + f" / ... ({len(structure_values)} total)"
+# ---------------------------------------------------------
+# 8.1 Structure summary
+# ---------------------------------------------------------
+structure_summary = (
+    structure_df.groupby("Structure_Key", dropna=False)
+    .agg(
+        Records=("Paint_Code", "size"),
+        Primer_Thickness=("Primer_Thickness", "median"),
+        Main_Coat_Thickness=("Main_Coat_Thickness", "median"),
+        Total_Coating_Thickness=("Total_Coating_Thickness", "median"),
+        Incoming_P25=("黏度(秒)", lambda x: x.quantile(0.25)),
+        Incoming_Median=("黏度(秒)", "median"),
+        Incoming_P75=("黏度(秒)", lambda x: x.quantile(0.75)),
+        Final_P25=("黏度(秒)_1", lambda x: x.quantile(0.25)),
+        Final_Median=("黏度(秒)_1", "median"),
+        Final_P75=("黏度(秒)_1", lambda x: x.quantile(0.75)),
+        Median_Viscosity_Drop=("Delta_V", "median"),
+        Median_Solvent_Ratio=("Solvent_Ratio_Percent", "median"),
     )
+    .reset_index()
+)
+
+structure_summary["_sort"] = structure_summary["Structure_Key"].map(
+    lambda x: structure_sort_key(x)
+)
+structure_summary = (
+    structure_summary.sort_values("_sort")
+    .drop(columns="_sort")
+    .reset_index(drop=True)
+)
+
+usable_structures = structure_summary[
+    structure_summary["Records"] >= MIN_GROUP_RECORDS
+].copy()
+
+structure_gap = np.nan
+if len(usable_structures) >= 2:
+    structure_gap = float(
+        usable_structures["Final_Median"].max()
+        - usable_structures["Final_Median"].min()
+    )
+
+s1, s2, s3, s4 = st.columns(4)
+s1.metric("Records", f"{len(structure_df):,}")
+s2.metric("Coating Structures", f"{structure_df['Structure_Key'].nunique():,}")
+s3.metric("Usable Structures", f"{len(usable_structures):,}")
+s4.metric(
+    "Median Final Viscosity Gap",
+    "N/A" if pd.isna(structure_gap) else f"{structure_gap:.1f} s",
+)
 
 st.info(
     f"**Selected system:** {system_label}  \n"
-    f"**Coating structure:** {structure_text}  \n"
-    f"**Active thickness source:** `{source_column_text}`"
+    "**Primary analysis unit:** exact coating structure = Primer thickness + Main coat thickness"
 )
 
-metrics = calculate_relationship_metrics(system_df)
-decision = classify_sop_decision(metrics)
-
-m1, m2, m3, m4, m5 = st.columns(5)
-m1.metric("Records", f"{metrics['records']:,}")
-m2.metric(
-    "Unique Thickness Values",
-    f"{metrics['unique_thickness']:,}",
-)
-m3.metric(
-    "Spearman Correlation",
-    safe_metric(metrics["spearman_r"], "{:.2f}"),
-)
-m4.metric(
-    "Slope",
-    safe_metric(metrics["slope"], "{:.2f} s/µm"),
-)
-m5.metric(
-    "Median Final Viscosity Gap",
-    safe_metric(metrics["final_visc_gap"], "{:.1f} s"),
+st.dataframe(
+    structure_summary,
+    column_config={
+        "Structure_Key": "Coating Structure",
+        "Records": st.column_config.NumberColumn("Records", format="%d"),
+        "Primer_Thickness": st.column_config.NumberColumn("Primer (µm)", format="%.1f"),
+        "Main_Coat_Thickness": st.column_config.NumberColumn("Main Coat (µm)", format="%.1f"),
+        "Total_Coating_Thickness": st.column_config.NumberColumn("Total (µm)", format="%.1f"),
+        "Incoming_P25": st.column_config.NumberColumn("Incoming P25 (s)", format="%.1f"),
+        "Incoming_Median": st.column_config.NumberColumn("Incoming Median (s)", format="%.1f"),
+        "Incoming_P75": st.column_config.NumberColumn("Incoming P75 (s)", format="%.1f"),
+        "Final_P25": st.column_config.NumberColumn("Final P25 (s)", format="%.1f"),
+        "Final_Median": st.column_config.NumberColumn("Final Median (s)", format="%.1f"),
+        "Final_P75": st.column_config.NumberColumn("Final P75 (s)", format="%.1f"),
+        "Median_Viscosity_Drop": st.column_config.NumberColumn("Median ΔV (s)", format="%.1f"),
+        "Median_Solvent_Ratio": st.column_config.NumberColumn("Median Solvent Ratio (%)", format="%.2f"),
+    },
+    hide_index=True,
+    use_container_width=True,
 )
 
 # ---------------------------------------------------------
-# Scatter + trend
+# 8.2 Final viscosity distribution by exact structure
 # ---------------------------------------------------------
-fig_scatter = px.scatter(
-    system_df,
-    x="Order_Film_Thickness",
+fig_structure_box = px.box(
+    structure_df,
+    x="Structure_Key",
     y="黏度(秒)_1",
+    points="all",
+    category_orders={"Structure_Key": structure_order},
+    labels={
+        "Structure_Key": "Coating Structure (Primer + Main Coat)",
+        "黏度(秒)_1": "Final Viscosity (s)",
+    },
     hover_data={
         "Paint_Code": True,
-        "Coating_Structure_Detail": True,
         "Primer_Thickness": ":.1f",
         "Main_Coat_Thickness": ":.1f",
         "Total_Coating_Thickness": ":.1f",
@@ -860,794 +909,328 @@ fig_scatter = px.scatter(
         "黏度(秒)_1": ":.1f",
         "Delta_V": ":.1f",
         "Solvent_Ratio_Percent": ":.2f",
-        "Order_Film_Thickness": ":.2f",
-    },
-    labels={
-        "Order_Film_Thickness": "Order Film Thickness (µm)",
-        "黏度(秒)_1": "Final Viscosity (s)",
     },
 )
 
-fig_scatter.update_traces(
-    marker=dict(
-        size=9,
-        opacity=0.75,
-        line=dict(width=0.8, color="white"),
-    )
-)
-
-# Linear trend line
-trend_df = system_df[
-    ["Order_Film_Thickness", "黏度(秒)_1"]
-].dropna().copy()
-
-if (
-    len(trend_df) >= 2
-    and trend_df["Order_Film_Thickness"].nunique() >= 2
-):
-    x = trend_df["Order_Film_Thickness"].astype(float)
-    y = trend_df["黏度(秒)_1"].astype(float)
-
-    slope, intercept = np.polyfit(x, y, 1)
-
-    x_line = np.linspace(
-        x.min(),
-        x.max(),
-        100,
-    )
-    y_line = slope * x_line + intercept
-
-    fig_scatter.add_trace(
-        go.Scatter(
-            x=x_line,
-            y=y_line,
-            mode="lines",
-            name="Linear Trend",
-            line=dict(width=3),
-            hovertemplate=(
-                "Trend Final Viscosity: %{y:.1f} s"
-                "<extra></extra>"
-            ),
-        )
-    )
-
-fig_scatter.update_layout(
+fig_structure_box.update_layout(
     title=dict(
         text=(
-            "<b>Order Film Thickness vs. Final Viscosity</b>"
+            "<b>Final Viscosity Distribution by Coating Structure</b>"
             f"<br><sup>{system_label}</sup>"
-            f"<br><sup>Coating Structure: {structure_text}</sup>"
         ),
         x=0.5,
         xanchor="center",
     ),
     height=560,
-    margin=dict(l=70, r=50, t=145, b=70),
-    template="plotly_white",
-    legend=dict(
-        orientation="h",
-        yanchor="bottom",
-        y=1.01,
-        xanchor="center",
-        x=0.5,
-    ),
-)
-
-fig_scatter.update_xaxes(
-    showgrid=True,
-    gridcolor="#E5E7EB",
-    showline=True,
-    linecolor="#374151",
-    mirror=True,
-)
-
-fig_scatter.update_yaxes(
-    showgrid=True,
-    gridcolor="#E5E7EB",
-    showline=True,
-    linecolor="#374151",
-    mirror=True,
-)
-
-st.plotly_chart(
-    fig_scatter,
-    use_container_width=True,
-)
-
-st.caption(
-    "The trend line is descriptive only. A relationship in historical data "
-    "does not by itself prove that thickness causes the viscosity change."
-)
-
-
-# =========================================================
-# 9. THICKNESS GROUP COMPARISON
-# =========================================================
-st.markdown("---")
-st.subheader("4. Thickness Group Comparison")
-
-summary_df = (
-    system_df.dropna(
-        subset=["Thickness_Group", "Order_Film_Thickness"]
-    )
-    .groupby(
-        "Thickness_Group",
-        dropna=False,
-        observed=False,
-    )
-    .agg(
-        Records=("Paint_Code", "size"),
-        Coating_Structure=(
-            "Coating_Structure_Detail",
-            lambda x: " / ".join(
-                pd.Series(x)
-                .dropna()
-                .astype(str)
-                .drop_duplicates()
-                .tolist()
-            ),
-        ),
-        Primer_Thickness=("Primer_Thickness", "median"),
-        Main_Coat_Thickness=("Main_Coat_Thickness", "median"),
-        Total_Coating_Thickness=("Total_Coating_Thickness", "median"),
-        Thickness_Min=("Order_Film_Thickness", "min"),
-        Thickness_Median=("Order_Film_Thickness", "median"),
-        Thickness_Max=("Order_Film_Thickness", "max"),
-        Median_Before_Viscosity=("黏度(秒)", "median"),
-        Median_Final_Viscosity=("黏度(秒)_1", "median"),
-        Final_Viscosity_P25=("黏度(秒)_1", lambda x: x.quantile(0.25)),
-        Final_Viscosity_P75=("黏度(秒)_1", lambda x: x.quantile(0.75)),
-        Median_Viscosity_Drop=("Delta_V", "median"),
-        Median_Solvent_Ratio=(
-            "Solvent_Ratio_Percent",
-            "median",
-        ),
-    )
-    .reset_index()
-)
-
-summary_df = summary_df.sort_values(
-    "Thickness_Median"
-).reset_index(drop=True)
-
-st.dataframe(
-    summary_df,
-    column_config={
-        "Thickness_Group": "Thickness Group",
-        "Coating_Structure": st.column_config.TextColumn(
-            "Coating Structure",
-            width="large",
-        ),
-        "Primer_Thickness": st.column_config.NumberColumn(
-            "Primer (µm)", format="%.1f"
-        ),
-        "Main_Coat_Thickness": st.column_config.NumberColumn(
-            "Main Coat (µm)", format="%.1f"
-        ),
-        "Total_Coating_Thickness": st.column_config.NumberColumn(
-            "Total (µm)", format="%.1f"
-        ),
-        "Records": st.column_config.NumberColumn(
-            "Records", format="%d"
-        ),
-        "Thickness_Min": st.column_config.NumberColumn(
-            "Min Thickness (µm)", format="%.1f"
-        ),
-        "Thickness_Median": st.column_config.NumberColumn(
-            "Median Thickness (µm)", format="%.1f"
-        ),
-        "Thickness_Max": st.column_config.NumberColumn(
-            "Max Thickness (µm)", format="%.1f"
-        ),
-        "Median_Before_Viscosity": st.column_config.NumberColumn(
-            "Median Before (s)", format="%.1f"
-        ),
-        "Median_Final_Viscosity": st.column_config.NumberColumn(
-            "Median Final (s)", format="%.1f"
-        ),
-        "Final_Viscosity_P25": st.column_config.NumberColumn(
-            "Final P25 (s)", format="%.1f"
-        ),
-        "Final_Viscosity_P75": st.column_config.NumberColumn(
-            "Final P75 (s)", format="%.1f"
-        ),
-        "Median_Viscosity_Drop": st.column_config.NumberColumn(
-            "Median ΔV (s)", format="%.1f"
-        ),
-        "Median_Solvent_Ratio": st.column_config.NumberColumn(
-            "Median Solvent Ratio (%)", format="%.2f"
-        ),
-    },
-    hide_index=True,
-    use_container_width=True,
-)
-
-group_order = summary_df["Thickness_Group"].astype(str).tolist()
-
-fig_box = px.box(
-    system_df,
-    x="Thickness_Group",
-    y="黏度(秒)_1",
-    points="all",
-    category_orders={
-        "Thickness_Group": group_order,
-    },
-    labels={
-        "Thickness_Group": "Order Thickness Group",
-        "黏度(秒)_1": "Final Viscosity (s)",
-    },
-)
-
-fig_box.update_layout(
-    title=dict(
-        text=(
-            "<b>Final Viscosity Distribution by Order Thickness</b>"
-            f"<br><sup>{selected_paint_code} | Coating Structure: "
-            f"{structure_text}</sup>"
-        ),
-        x=0.5,
-        xanchor="center",
-    ),
-    height=520,
-    margin=dict(l=70, r=50, t=105, b=90),
+    margin=dict(l=70, r=50, t=105, b=100),
     template="plotly_white",
     showlegend=False,
 )
-
-fig_box.update_xaxes(
+fig_structure_box.update_xaxes(
     showline=True,
     linecolor="#374151",
     mirror=True,
+    tickangle=-20,
 )
-
-fig_box.update_yaxes(
+fig_structure_box.update_yaxes(
     showgrid=True,
     gridcolor="#E5E7EB",
     showline=True,
     linecolor="#374151",
     mirror=True,
 )
-
-st.plotly_chart(
-    fig_box,
-    use_container_width=True,
-)
+st.plotly_chart(fig_structure_box, use_container_width=True)
 
 
 # =========================================================
-# 10. AUTOMATIC SOP SEGMENTATION DECISION
+# 9. STRUCTURE SEGMENTATION DECISION
 # =========================================================
 st.markdown("---")
-st.subheader("5. SOP Segmentation Decision")
+st.subheader("4. Should the SOP Be Split by Coating Structure?")
 
-if decision["level"] == "Thickness Effect Detected":
-    st.warning(
-        f"{decision['icon']} **{decision['level']}**  \n"
-        f"{decision['message']}"
+if len(structure_df) < MIN_TOTAL_RECORDS or len(usable_structures) < 2:
+    structure_decision = "Insufficient Evidence"
+    structure_icon = "⚪"
+    structure_message = (
+        "There are not enough records across at least two coating structures to "
+        "support a structure-specific SOP decision."
     )
-elif decision["level"] == "Possible Thickness Effect":
-    st.info(
-        f"{decision['icon']} **{decision['level']}**  \n"
-        f"{decision['message']}"
+    structure_action = (
+        "Keep the current SOP temporarily and continue collecting matched "
+        "Primer + Main Coat thickness records."
     )
-elif decision["level"] == "No Meaningful Thickness Segmentation Needed":
-    st.success(
-        f"{decision['icon']} **{decision['level']}**  \n"
-        f"{decision['message']}"
+elif structure_gap >= PRACTICAL_FINAL_VISC_GAP:
+    structure_decision = "Structure Effect Detected"
+    structure_icon = "🟠"
+    structure_message = (
+        f"The median final-viscosity difference across usable coating structures is "
+        f"{structure_gap:.1f} s, which is large enough to justify separate analysis."
+    )
+    structure_action = (
+        "Use structure-specific incoming-viscosity pilot ranges. Validate each range "
+        "on line before converting it into an official purchasing or production specification."
+    )
+elif structure_gap >= 3.0:
+    structure_decision = "Possible Structure Effect"
+    structure_icon = "🟡"
+    structure_message = (
+        f"The median final-viscosity difference is {structure_gap:.1f} s. "
+        "A structure-related shift is visible but is not yet large enough for an automatic SOP split."
+    )
+    structure_action = (
+        "Run a focused pilot by coating structure and confirm film thickness, gloss, "
+        "surface quality, and finished-product quality before splitting the SOP."
     )
 else:
-    st.info(
-        f"{decision['icon']} **{decision['level']}**  \n"
-        f"{decision['message']}"
+    structure_decision = "One Common SOP May Be Sufficient"
+    structure_icon = "🟢"
+    structure_message = (
+        f"The median final-viscosity difference across usable structures is only "
+        f"{structure_gap:.1f} s."
     )
+    structure_action = (
+        "Keep one common SOP for now. Continue monitoring coating structure as a process variable."
+    )
+
+if structure_decision == "Structure Effect Detected":
+    st.warning(f"{structure_icon} **{structure_decision}**  \n{structure_message}")
+elif structure_decision == "Possible Structure Effect":
+    st.info(f"{structure_icon} **{structure_decision}**  \n{structure_message}")
+elif structure_decision == "One Common SOP May Be Sufficient":
+    st.success(f"{structure_icon} **{structure_decision}**  \n{structure_message}")
+else:
+    st.info(f"{structure_icon} **{structure_decision}**  \n{structure_message}")
+
+st.markdown(f"**Recommended action:** {structure_action}")
+
+
+# =========================================================
+# 10. STRUCTURE-SPECIFIC READY-TO-LINE RECOMMENDATIONS
+# =========================================================
+st.markdown("---")
+st.subheader("5. Ready-to-Line Incoming Viscosity by Coating Structure")
 
 st.markdown(
-    f"**Recommended action:** {decision['recommendation']}"
+    "Each Primer + Main Coat thickness pair is evaluated separately. The proposed "
+    "incoming range is based on the historical final-viscosity distribution of that "
+    "exact coating structure, rather than mixing all thickness combinations together."
 )
 
-direction_text = "Not determined"
+recommendation_rows = []
+recommendation_reference = {}
 
-if pd.notna(metrics["slope"]):
-    if metrics["slope"] > 0:
-        direction_text = (
-            "Thickness ↑ → Final viscosity tends to ↑"
-        )
-    elif metrics["slope"] < 0:
-        direction_text = (
-            "Thickness ↑ → Final viscosity tends to ↓"
-        )
+for structure in structure_order:
+    g = structure_df[structure_df["Structure_Key"] == structure].copy()
+    g = g[g["黏度(秒)_1"].notna() & (g["黏度(秒)_1"] > 0)].copy()
+
+    if g.empty:
+        continue
+
+    # Trim only extreme solvent-ratio records for the ready-to-line reference.
+    ratio_ref = pd.to_numeric(g["Solvent_Ratio_Percent"], errors="coerce")
+    if ratio_ref.notna().sum() >= 5:
+        p10 = float(ratio_ref.quantile(0.10))
+        p90 = float(ratio_ref.quantile(0.90))
+        ref = g[g["Solvent_Ratio_Percent"].between(p10, p90, inclusive="both")].copy()
     else:
-        direction_text = "No directional trend"
+        p10 = np.nan
+        p90 = np.nan
+        ref = g.copy()
 
-decision_table = pd.DataFrame(
-    [
+    if len(ref) < 5:
+        ref = g.copy()
+
+    n = len(ref)
+    if n == 0:
+        continue
+
+    current_p25 = float(ref["黏度(秒)"].quantile(0.25))
+    current_med = float(ref["黏度(秒)"].median())
+    current_p75 = float(ref["黏度(秒)"].quantile(0.75))
+
+    lower = float(ref["黏度(秒)_1"].quantile(0.25))
+    target = float(ref["黏度(秒)_1"].median())
+    upper = float(ref["黏度(秒)_1"].quantile(0.75))
+    iqr = upper - lower
+
+    if n < 8:
+        status = "Insufficient Data"
+    elif iqr <= 4:
+        status = "Ready for No-Solvent Pilot"
+    elif iqr <= 8:
+        status = "Pilot with Monitoring"
+    else:
+        status = "Not Ready for Direct Specification"
+
+    primer = float(ref["Primer_Thickness"].median()) if ref["Primer_Thickness"].notna().any() else np.nan
+    main = float(ref["Main_Coat_Thickness"].median()) if ref["Main_Coat_Thickness"].notna().any() else np.nan
+    total = float(ref["Total_Coating_Thickness"].median()) if ref["Total_Coating_Thickness"].notna().any() else np.nan
+    med_ratio = float(ref["Solvent_Ratio_Percent"].median()) if ref["Solvent_Ratio_Percent"].notna().any() else np.nan
+    med_solvent_kg = float(ref["添加重量"].median()) if "添加重量" in ref.columns and ref["添加重量"].notna().any() else np.nan
+    total_solvent_kg = float(ref["添加重量"].sum()) if "添加重量" in ref.columns and ref["添加重量"].notna().any() else np.nan
+
+    recommendation_rows.append(
         {
-            "System": system_label,
-            "Coating Structure": structure_text,
-            "Records": metrics["records"],
-            "Unique Thickness": metrics["unique_thickness"],
-            "Pearson r": metrics["pearson_r"],
-            "Spearman r": metrics["spearman_r"],
-            "Slope (s/µm)": metrics["slope"],
-            "Median Final Viscosity Gap (s)": metrics["final_visc_gap"],
-            "Direction": direction_text,
-            "Decision": decision["level"],
-        }
-    ]
-)
-
-st.dataframe(
-    decision_table,
-    column_config={
-        "Records": st.column_config.NumberColumn(
-            "Records", format="%d"
-        ),
-        "Unique Thickness": st.column_config.NumberColumn(
-            "Unique Thickness", format="%d"
-        ),
-        "Pearson r": st.column_config.NumberColumn(
-            "Pearson r", format="%.2f"
-        ),
-        "Spearman r": st.column_config.NumberColumn(
-            "Spearman r", format="%.2f"
-        ),
-        "Slope (s/µm)": st.column_config.NumberColumn(
-            "Slope (s/µm)", format="%.2f"
-        ),
-        "Median Final Viscosity Gap (s)": st.column_config.NumberColumn(
-            "Final Viscosity Gap (s)", format="%.1f"
-        ),
-    },
-    hide_index=True,
-    use_container_width=True,
-)
-
-
-# =========================================================
-# 11. ALL PAINT CODES SCREENING
-# =========================================================
-st.markdown("---")
-st.subheader("6. All Paint Codes — Thickness Effect Screening")
-
-st.caption(
-    "This table screens all paint codes under the selected "
-    "Vendor × Position × Resin × Solvent condition. "
-    "Paint Code remains the main analysis object, and this screening helps "
-    "identify which codes deserve a thickness-based SOP pilot."
-)
-
-# Compare all paint codes under the same Vendor × Position × Resin × Solvent condition.
-screen_source = filter_source[
-    (filter_source["Vendor"] == selected_vendor)
-    & (filter_source["Position_Detail"] == selected_position)
-    & (filter_source["Resin"] == selected_resin)
-    & (filter_source["Solvent_Type"] == selected_solvent)
-].copy()
-
-screen_rows = []
-
-for paint_code, code_df in screen_source.groupby(
-    "Paint_Code",
-    dropna=False,
-):
-    code_df = code_df.copy()
-    code_df["Thickness_Group"] = adaptive_thickness_group(
-        code_df["Order_Film_Thickness"]
-    )
-
-    m = calculate_relationship_metrics(code_df)
-    d = classify_sop_decision(m)
-
-    screen_rows.append(
-        {
-            "Paint_Code": str(paint_code),
-            "Records": m["records"],
-            "Unique_Thickness": m["unique_thickness"],
-            "Spearman_r": m["spearman_r"],
-            "Slope_s_per_um": m["slope"],
-            "Final_Viscosity_Gap_s": m["final_visc_gap"],
-            "Decision": d["level"],
+            "Coating Structure": structure,
+            "Primer (µm)": primer,
+            "Main Coat (µm)": main,
+            "Total (µm)": total,
+            "Reference Records": n,
+            "Current Incoming P25 (s)": current_p25,
+            "Current Incoming Median (s)": current_med,
+            "Current Incoming P75 (s)": current_p75,
+            "Recommended Lower (s)": lower,
+            "Recommended Target (s)": target,
+            "Recommended Upper (s)": upper,
+            "Final Viscosity IQR (s)": iqr,
+            "Historical Median Solvent Ratio (%)": med_ratio,
+            "Historical Median Solvent Added (kg)": med_solvent_kg,
+            "Historical Solvent Total (kg)": total_solvent_kg,
+            "Pilot Readiness": status,
         }
     )
+    recommendation_reference[structure] = ref
 
-screen_df = pd.DataFrame(screen_rows)
+recommendation_df = pd.DataFrame(recommendation_rows)
 
-if screen_df.empty:
-    st.info("No paint-code screening results are available.")
+if recommendation_df.empty:
+    st.info("No valid structure-specific recommendation can be calculated.")
 else:
-    priority_map = {
-        "Thickness Effect Detected": 1,
-        "Possible Thickness Effect": 2,
-        "No Meaningful Thickness Segmentation Needed": 3,
-        "Insufficient Evidence": 4,
-    }
-
-    screen_df["_Priority"] = (
-        screen_df["Decision"]
-        .map(priority_map)
-        .fillna(99)
-    )
-
-    screen_df = (
-        screen_df.sort_values(
-            [
-                "_Priority",
-                "Final_Viscosity_Gap_s",
-                "Records",
-            ],
-            ascending=[True, False, False],
-            na_position="last",
-        )
-        .drop(columns="_Priority")
+    recommendation_df["_sort"] = recommendation_df["Coating Structure"].map(structure_sort_key)
+    recommendation_df = (
+        recommendation_df.sort_values("_sort")
+        .drop(columns="_sort")
         .reset_index(drop=True)
     )
 
     st.dataframe(
-        screen_df,
+        recommendation_df,
         column_config={
-            "Paint_Code": "Paint Code",
-            "Records": st.column_config.NumberColumn(
-                "Records", format="%d"
-            ),
-            "Unique_Thickness": st.column_config.NumberColumn(
-                "Unique Thickness", format="%d"
-            ),
-            "Spearman_r": st.column_config.NumberColumn(
-                "Spearman r", format="%.2f"
-            ),
-            "Slope_s_per_um": st.column_config.NumberColumn(
-                "Slope (s/µm)", format="%.2f"
-            ),
-            "Final_Viscosity_Gap_s": st.column_config.NumberColumn(
-                "Final Viscosity Gap (s)", format="%.1f"
-            ),
-            "Decision": "SOP Decision",
-        },
-        hide_index=True,
-        use_container_width=True,
-    )
-
-
-
-# =========================================================
-# 12. READY-TO-LINE INCOMING VISCOSITY RECOMMENDATION
-# =========================================================
-st.markdown("---")
-st.subheader("7. Ready-to-Line Incoming Viscosity Recommendation")
-
-st.markdown(
-    "Estimate an incoming viscosity range that may allow the selected paint "
-    "to go directly to line without on-site solvent addition. "
-    "The recommendation is based on the historical final-viscosity distribution "
-    "for the same Paint Code and Coating Structure."
-)
-
-# ---------------------------------------------------------
-# 12.1 Clean historical reference records
-# ---------------------------------------------------------
-ready_df = system_df.copy()
-
-# Keep only positive and valid final viscosity values.
-ready_df = ready_df[
-    ready_df["黏度(秒)_1"].notna()
-    & (ready_df["黏度(秒)_1"] > 0)
-].copy()
-
-# Exclude clearly abnormal solvent-ratio records from the recommendation reference.
-# This does NOT remove them from the earlier analysis; it only protects the
-# ready-to-line recommendation from extreme dilution events.
-ratio_reference = pd.to_numeric(
-    ready_df["Solvent_Ratio_Percent"],
-    errors="coerce",
-)
-
-if ratio_reference.notna().sum() >= 5:
-    ratio_p10 = float(ratio_reference.quantile(0.10))
-    ratio_p90 = float(ratio_reference.quantile(0.90))
-
-    ready_reference_df = ready_df[
-        ready_df["Solvent_Ratio_Percent"].between(
-            ratio_p10,
-            ratio_p90,
-            inclusive="both",
-        )
-    ].copy()
-else:
-    ratio_p10 = np.nan
-    ratio_p90 = np.nan
-    ready_reference_df = ready_df.copy()
-
-# If trimming leaves too few records, fall back to all valid records.
-if len(ready_reference_df) < 5:
-    ready_reference_df = ready_df.copy()
-
-# ---------------------------------------------------------
-# 12.2 Recommendation statistics
-# ---------------------------------------------------------
-ready_records = len(ready_reference_df)
-
-if ready_records == 0:
-    st.info(
-        "No valid historical final-viscosity records are available for "
-        "a ready-to-line recommendation."
-    )
-else:
-    current_incoming_p25 = float(
-        ready_reference_df["黏度(秒)"].quantile(0.25)
-    )
-    current_incoming_median = float(
-        ready_reference_df["黏度(秒)"].median()
-    )
-    current_incoming_p75 = float(
-        ready_reference_df["黏度(秒)"].quantile(0.75)
-    )
-
-    recommended_lower = float(
-        ready_reference_df["黏度(秒)_1"].quantile(0.25)
-    )
-    recommended_target = float(
-        ready_reference_df["黏度(秒)_1"].median()
-    )
-    recommended_upper = float(
-        ready_reference_df["黏度(秒)_1"].quantile(0.75)
-    )
-
-    final_iqr = recommended_upper - recommended_lower
-
-    median_solvent_ratio = float(
-        ready_reference_df["Solvent_Ratio_Percent"].median()
-    ) if ready_reference_df["Solvent_Ratio_Percent"].notna().any() else np.nan
-
-    median_solvent_kg = float(
-        ready_reference_df["添加重量"].median()
-    ) if "添加重量" in ready_reference_df.columns and ready_reference_df["添加重量"].notna().any() else np.nan
-
-    total_solvent_kg = float(
-        ready_reference_df["添加重量"].sum()
-    ) if "添加重量" in ready_reference_df.columns and ready_reference_df["添加重量"].notna().any() else np.nan
-
-    # -----------------------------------------------------
-    # 12.3 Pilot readiness classification
-    # -----------------------------------------------------
-    if ready_records < 8:
-        ready_status = "Insufficient Data"
-        ready_icon = "⚪"
-        ready_message = (
-            "Historical reference is limited. Keep the current incoming viscosity "
-            "and collect more matched records before a no-solvent pilot."
-        )
-    elif final_iqr <= 4:
-        ready_status = "Ready for No-Solvent Pilot"
-        ready_icon = "🟢"
-        ready_message = (
-            "Historical final viscosity is tightly concentrated. "
-            "A supplier trial at the recommended incoming target is suitable "
-            "for line validation."
-        )
-    elif final_iqr <= 8:
-        ready_status = "Pilot with Monitoring"
-        ready_icon = "🟡"
-        ready_message = (
-            "Historical final viscosity is moderately dispersed. "
-            "A controlled pilot is possible, but viscosity and coating quality "
-            "should be checked closely."
-        )
-    else:
-        ready_status = "Not Ready for Direct Specification"
-        ready_icon = "🟠"
-        ready_message = (
-            "Historical final viscosity is too dispersed for a narrow incoming "
-            "specification. Further stratification or process review is recommended."
-        )
-
-    # -----------------------------------------------------
-    # 12.4 KPI cards
-    # -----------------------------------------------------
-    r1, r2, r3, r4 = st.columns(4)
-
-    r1.metric(
-        "Current Incoming Median",
-        f"{current_incoming_median:.1f} s",
-    )
-
-    r2.metric(
-        "Recommended Lower",
-        f"{recommended_lower:.1f} s",
-    )
-
-    r3.metric(
-        "Recommended Target",
-        f"{recommended_target:.1f} s",
-    )
-
-    r4.metric(
-        "Recommended Upper",
-        f"{recommended_upper:.1f} s",
-    )
-
-    # -----------------------------------------------------
-    # 12.5 Recommendation table
-    # -----------------------------------------------------
-    ready_report = pd.DataFrame(
-        [
-            {
-                "Vendor": selected_vendor,
-                "Paint Code": selected_paint_code,
-                "Position": selected_position,
-                "Resin": selected_resin,
-                "Solvent": selected_solvent,
-                "Coating Structure": structure_text,
-                "Reference Records": ready_records,
-                "Current Incoming P25 (s)": current_incoming_p25,
-                "Current Incoming Median (s)": current_incoming_median,
-                "Current Incoming P75 (s)": current_incoming_p75,
-                "Recommended Lower (s)": recommended_lower,
-                "Recommended Target (s)": recommended_target,
-                "Recommended Upper (s)": recommended_upper,
-                "Final Viscosity IQR (s)": final_iqr,
-                "Historical Median Solvent Ratio (%)": median_solvent_ratio,
-                "Historical Median Solvent Added (kg)": median_solvent_kg,
-                "Historical Solvent Total (kg)": total_solvent_kg,
-                "Pilot Readiness": ready_status,
-            }
-        ]
-    )
-
-    st.dataframe(
-        ready_report,
-        column_config={
-            "Reference Records": st.column_config.NumberColumn(
-                "Reference Records", format="%d"
-            ),
-            "Current Incoming P25 (s)": st.column_config.NumberColumn(
-                "Current Incoming P25 (s)", format="%.1f"
-            ),
-            "Current Incoming Median (s)": st.column_config.NumberColumn(
-                "Current Incoming Median (s)", format="%.1f"
-            ),
-            "Current Incoming P75 (s)": st.column_config.NumberColumn(
-                "Current Incoming P75 (s)", format="%.1f"
-            ),
-            "Recommended Lower (s)": st.column_config.NumberColumn(
-                "Recommended Lower (s)", format="%.1f"
-            ),
-            "Recommended Target (s)": st.column_config.NumberColumn(
-                "Recommended Target (s)", format="%.1f"
-            ),
-            "Recommended Upper (s)": st.column_config.NumberColumn(
-                "Recommended Upper (s)", format="%.1f"
-            ),
-            "Final Viscosity IQR (s)": st.column_config.NumberColumn(
-                "Final Viscosity IQR (s)", format="%.1f"
-            ),
-            "Historical Median Solvent Ratio (%)": st.column_config.NumberColumn(
-                "Historical Median Solvent Ratio (%)", format="%.2f"
-            ),
-            "Historical Median Solvent Added (kg)": st.column_config.NumberColumn(
-                "Historical Median Solvent Added (kg)", format="%.2f"
-            ),
-            "Historical Solvent Total (kg)": st.column_config.NumberColumn(
-                "Historical Solvent Total (kg)", format="%.1f"
-            ),
+            "Coating Structure": st.column_config.TextColumn("Coating Structure", width="medium"),
+            "Primer (µm)": st.column_config.NumberColumn("Primer (µm)", format="%.1f"),
+            "Main Coat (µm)": st.column_config.NumberColumn("Main Coat (µm)", format="%.1f"),
+            "Total (µm)": st.column_config.NumberColumn("Total (µm)", format="%.1f"),
+            "Reference Records": st.column_config.NumberColumn("Reference Records", format="%d"),
+            "Current Incoming P25 (s)": st.column_config.NumberColumn("Current P25 (s)", format="%.1f"),
+            "Current Incoming Median (s)": st.column_config.NumberColumn("Current Median (s)", format="%.1f"),
+            "Current Incoming P75 (s)": st.column_config.NumberColumn("Current P75 (s)", format="%.1f"),
+            "Recommended Lower (s)": st.column_config.NumberColumn("Proposed Lower (s)", format="%.1f"),
+            "Recommended Target (s)": st.column_config.NumberColumn("Proposed Target (s)", format="%.1f"),
+            "Recommended Upper (s)": st.column_config.NumberColumn("Proposed Upper (s)", format="%.1f"),
+            "Final Viscosity IQR (s)": st.column_config.NumberColumn("Final IQR (s)", format="%.1f"),
+            "Historical Median Solvent Ratio (%)": st.column_config.NumberColumn("Median Solvent Ratio (%)", format="%.2f"),
+            "Historical Median Solvent Added (kg)": st.column_config.NumberColumn("Median Solvent Added (kg)", format="%.2f"),
+            "Historical Solvent Total (kg)": st.column_config.NumberColumn("Solvent Total (kg)", format="%.1f"),
+            "Pilot Readiness": "Pilot Readiness",
         },
         hide_index=True,
         use_container_width=True,
     )
 
     # -----------------------------------------------------
-    # 12.6 Current vs recommended range chart
+    # 10.1 Inspect one exact structure
     # -----------------------------------------------------
+    st.markdown("#### Inspect One Coating Structure")
+
+    default_structure = recommendation_df.sort_values(
+        "Reference Records", ascending=False
+    ).iloc[0]["Coating Structure"]
+
+    structure_options = recommendation_df["Coating Structure"].tolist()
+    default_idx = structure_options.index(default_structure)
+
+    selected_structure = st.selectbox(
+        "Select Coating Structure:",
+        structure_options,
+        index=default_idx,
+    )
+
+    selected_row = recommendation_df[
+        recommendation_df["Coating Structure"] == selected_structure
+    ].iloc[0]
+
+    rr1, rr2, rr3, rr4 = st.columns(4)
+    rr1.metric("Reference Records", f"{int(selected_row['Reference Records']):,}")
+    rr2.metric("Proposed Lower", f"{selected_row['Recommended Lower (s)']:.1f} s")
+    rr3.metric("Proposed Target", f"{selected_row['Recommended Target (s)']:.1f} s")
+    rr4.metric("Proposed Upper", f"{selected_row['Recommended Upper (s)']:.1f} s")
+
+    # Current incoming vs proposed range for selected structure.
+    current_p25 = selected_row["Current Incoming P25 (s)"]
+    current_med = selected_row["Current Incoming Median (s)"]
+    current_p75 = selected_row["Current Incoming P75 (s)"]
+    lower = selected_row["Recommended Lower (s)"]
+    target = selected_row["Recommended Target (s)"]
+    upper = selected_row["Recommended Upper (s)"]
+
     fig_ready = go.Figure()
-
     fig_ready.add_trace(
         go.Scatter(
-            x=[
-                current_incoming_p25,
-                current_incoming_p75,
-            ],
-            y=[
-                "Current Incoming",
-                "Current Incoming",
-            ],
+            x=[current_p25, current_p75],
+            y=["Current Incoming", "Current Incoming"],
             mode="lines",
             line=dict(width=18),
             name="Current Incoming P25–P75",
             hovertemplate=(
-                "Current incoming range: "
-                f"{current_incoming_p25:.1f}–{current_incoming_p75:.1f} s"
+                f"Current incoming range: {current_p25:.1f}–{current_p75:.1f} s"
                 "<extra></extra>"
             ),
         )
     )
-
     fig_ready.add_trace(
         go.Scatter(
-            x=[current_incoming_median],
+            x=[current_med],
             y=["Current Incoming"],
             mode="markers+text",
-            marker=dict(
-                size=16,
-                symbol="diamond",
-            ),
-            text=[f"{current_incoming_median:.1f} s"],
+            marker=dict(size=16, symbol="diamond"),
+            text=[f"{current_med:.1f} s"],
             textposition="top center",
             name="Current Incoming Median",
             hovertemplate=(
-                "Current incoming median: "
-                f"{current_incoming_median:.1f} s"
-                "<extra></extra>"
+                f"Current incoming median: {current_med:.1f} s<extra></extra>"
             ),
         )
     )
-
     fig_ready.add_trace(
         go.Scatter(
-            x=[
-                recommended_lower,
-                recommended_upper,
-            ],
-            y=[
-                "Recommended Incoming",
-                "Recommended Incoming",
-            ],
+            x=[lower, upper],
+            y=["Proposed Incoming", "Proposed Incoming"],
             mode="lines",
             line=dict(width=18),
-            name="Recommended P25–P75",
+            name="Proposed P25–P75",
             hovertemplate=(
-                "Recommended incoming range: "
-                f"{recommended_lower:.1f}–{recommended_upper:.1f} s"
-                "<extra></extra>"
+                f"Proposed range: {lower:.1f}–{upper:.1f} s<extra></extra>"
             ),
         )
     )
-
     fig_ready.add_trace(
         go.Scatter(
-            x=[recommended_target],
-            y=["Recommended Incoming"],
+            x=[target],
+            y=["Proposed Incoming"],
             mode="markers+text",
-            marker=dict(
-                size=17,
-                symbol="diamond",
-            ),
-            text=[f"Target {recommended_target:.1f} s"],
+            marker=dict(size=17, symbol="diamond"),
+            text=[f"Target {target:.1f} s"],
             textposition="bottom center",
-            name="Recommended Target",
-            hovertemplate=(
-                "Recommended target: "
-                f"{recommended_target:.1f} s"
-                "<extra></extra>"
-            ),
+            name="Proposed Target",
+            hovertemplate=f"Proposed target: {target:.1f} s<extra></extra>",
         )
     )
 
-    x_min = min(
-        current_incoming_p25,
-        recommended_lower,
-    )
-    x_max = max(
-        current_incoming_p75,
-        recommended_upper,
-    )
+    x_min = min(current_p25, lower)
+    x_max = max(current_p75, upper)
     x_pad = max((x_max - x_min) * 0.15, 5.0)
 
     fig_ready.update_layout(
         title=dict(
             text=(
-                "<b>Current Incoming vs. Ready-to-Line Recommendation</b>"
-                f"<br><sup>{selected_paint_code} | "
-                f"Coating Structure: {structure_text}</sup>"
+                "<b>Current Incoming vs. Structure-Specific Recommendation</b>"
+                f"<br><sup>{selected_paint_code} | {selected_structure}</sup>"
             ),
             x=0.5,
             xanchor="center",
         ),
         height=520,
-        margin=dict(
-            l=170,
-            r=50,
-            t=125,
-            b=75,
-        ),
+        margin=dict(l=170, r=50, t=115, b=75),
         template="plotly_white",
         xaxis=dict(
             title="Viscosity (s)",
@@ -1661,10 +1244,7 @@ else:
         yaxis=dict(
             title="",
             categoryorder="array",
-            categoryarray=[
-                "Recommended Incoming",
-                "Current Incoming",
-            ],
+            categoryarray=["Proposed Incoming", "Current Incoming"],
             showgrid=True,
             gridcolor="#E5E7EB",
             showline=True,
@@ -1679,38 +1259,200 @@ else:
             x=0.5,
         ),
     )
+    st.plotly_chart(fig_ready, use_container_width=True)
 
-    st.plotly_chart(
-        fig_ready,
-        use_container_width=True,
-    )
-
-    # -----------------------------------------------------
-    # 12.7 Decision message
-    # -----------------------------------------------------
-    if ready_status == "Ready for No-Solvent Pilot":
+    selected_status = selected_row["Pilot Readiness"]
+    if selected_status == "Ready for No-Solvent Pilot":
         st.success(
-            f"{ready_icon} **{ready_status}**  \n{ready_message}"
+            "🟢 **Ready for No-Solvent Pilot**  \n"
+            "The historical final viscosity for this exact coating structure is tightly concentrated."
         )
-    elif ready_status == "Pilot with Monitoring":
+    elif selected_status == "Pilot with Monitoring":
         st.warning(
-            f"{ready_icon} **{ready_status}**  \n{ready_message}"
+            "🟡 **Pilot with Monitoring**  \n"
+            "A controlled supplier trial is possible, but line quality should be monitored closely."
         )
-    elif ready_status == "Not Ready for Direct Specification":
+    elif selected_status == "Not Ready for Direct Specification":
         st.warning(
-            f"{ready_icon} **{ready_status}**  \n{ready_message}"
+            "🟠 **Not Ready for Direct Specification**  \n"
+            "The final-viscosity distribution is still too dispersed for a narrow incoming specification."
         )
     else:
         st.info(
-            f"{ready_icon} **{ready_status}**  \n{ready_message}"
+            "⚪ **Insufficient Data**  \n"
+            "Collect more records for this exact coating structure before setting a no-solvent target."
         )
 
     st.caption(
-        "The recommended range is a supplier trial reference based on historical "
-        "post-dilution viscosity. It should not be treated as a final purchasing "
-        "specification until line validation confirms coating thickness, gloss, "
-        "surface quality, and finished-product quality."
+        "The proposed range is a supplier trial reference derived from historical "
+        "post-dilution viscosity for the exact coating structure. It is not a final "
+        "purchasing specification until line validation confirms coating thickness, "
+        "gloss, surface quality, and finished-product quality."
     )
+
+
+# =========================================================
+# 11. ACTIVE-LAYER THICKNESS TREND — SECONDARY VIEW
+# =========================================================
+st.markdown("---")
+st.subheader("6. Active-Layer Thickness Trend — Secondary View")
+
+st.caption(
+    "This view is retained only as a secondary engineering screen. The main SOP "
+    "segmentation above uses the full Primer + Main Coat structure."
+)
+
+system_df["Thickness_Group"] = adaptive_thickness_group(
+    system_df["Order_Film_Thickness"]
+)
+metrics = calculate_relationship_metrics(system_df)
+decision = classify_sop_decision(metrics)
+
+m1, m2, m3, m4, m5 = st.columns(5)
+m1.metric("Records", f"{metrics['records']:,}")
+m2.metric("Unique Active Thickness", f"{metrics['unique_thickness']:,}")
+m3.metric("Spearman Correlation", safe_metric(metrics["spearman_r"], "{:.2f}"))
+m4.metric("Slope", safe_metric(metrics["slope"], "{:.2f} s/µm"))
+m5.metric("Median Final Gap", safe_metric(metrics["final_visc_gap"], "{:.1f} s"))
+
+fig_scatter = px.scatter(
+    system_df,
+    x="Order_Film_Thickness",
+    y="黏度(秒)_1",
+    color="Coating_Structure",
+    hover_data={
+        "Paint_Code": True,
+        "Coating_Structure_Detail": True,
+        "Primer_Thickness": ":.1f",
+        "Main_Coat_Thickness": ":.1f",
+        "黏度(秒)": ":.1f",
+        "黏度(秒)_1": ":.1f",
+        "Solvent_Ratio_Percent": ":.2f",
+    },
+    labels={
+        "Order_Film_Thickness": "Active Layer Thickness (µm)",
+        "黏度(秒)_1": "Final Viscosity (s)",
+        "Coating_Structure": "Coating Structure",
+    },
+)
+fig_scatter.update_traces(marker=dict(size=9, opacity=0.75, line=dict(width=0.8, color="white")))
+fig_scatter.update_layout(
+    title=dict(
+        text=(
+            "<b>Active-Layer Thickness vs. Final Viscosity</b>"
+            f"<br><sup>{system_label}</sup>"
+        ),
+        x=0.5,
+        xanchor="center",
+    ),
+    height=560,
+    margin=dict(l=70, r=50, t=110, b=70),
+    template="plotly_white",
+    legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="center", x=0.5),
+)
+fig_scatter.update_xaxes(showgrid=True, gridcolor="#E5E7EB", showline=True, linecolor="#374151", mirror=True)
+fig_scatter.update_yaxes(showgrid=True, gridcolor="#E5E7EB", showline=True, linecolor="#374151", mirror=True)
+st.plotly_chart(fig_scatter, use_container_width=True)
+
+
+# =========================================================
+# 12. ALL PAINT CODES — STRUCTURE EFFECT SCREENING
+# =========================================================
+st.markdown("---")
+st.subheader("7. All Paint Codes — Coating Structure Screening")
+
+st.caption(
+    "This table checks each paint code under the selected Vendor × Position × Resin × Solvent "
+    "condition and identifies whether exact coating structures show practically different final viscosity."
+)
+
+screen_source = filter_source[
+    (filter_source["Vendor"] == selected_vendor)
+    & (filter_source["Position_Detail"] == selected_position)
+    & (filter_source["Resin"] == selected_resin)
+    & (filter_source["Solvent_Type"] == selected_solvent)
+].copy()
+
+screen_rows = []
+for paint_code, code_df in screen_source.groupby("Paint_Code", dropna=False):
+    code_df = code_df[
+        code_df["Coating_Structure"].notna()
+        & ~code_df["Coating_Structure"].isin(["Unknown", "—"])
+    ].copy()
+
+    if code_df.empty:
+        continue
+
+    temp = (
+        code_df.groupby("Coating_Structure")
+        .agg(
+            Records=("Paint_Code", "size"),
+            Final_Median=("黏度(秒)_1", "median"),
+        )
+        .reset_index()
+    )
+    usable = temp[temp["Records"] >= MIN_GROUP_RECORDS]
+
+    gap = np.nan
+    if len(usable) >= 2:
+        gap = float(usable["Final_Median"].max() - usable["Final_Median"].min())
+
+    if len(code_df) < MIN_TOTAL_RECORDS or len(usable) < 2:
+        d = "Insufficient Evidence"
+    elif gap >= PRACTICAL_FINAL_VISC_GAP:
+        d = "Structure Effect Detected"
+    elif gap >= 3.0:
+        d = "Possible Structure Effect"
+    else:
+        d = "One Common SOP May Be Sufficient"
+
+    screen_rows.append(
+        {
+            "Paint Code": str(paint_code),
+            "Records": len(code_df),
+            "Coating Structures": code_df["Coating_Structure"].nunique(),
+            "Usable Structures": len(usable),
+            "Median Final Viscosity Gap (s)": gap,
+            "Decision": d,
+        }
+    )
+
+screen_df = pd.DataFrame(screen_rows)
+
+if screen_df.empty:
+    st.info("No paint-code structure-screening results are available.")
+else:
+    priority_map = {
+        "Structure Effect Detected": 1,
+        "Possible Structure Effect": 2,
+        "One Common SOP May Be Sufficient": 3,
+        "Insufficient Evidence": 4,
+    }
+    screen_df["_Priority"] = screen_df["Decision"].map(priority_map).fillna(99)
+    screen_df = (
+        screen_df.sort_values(
+            ["_Priority", "Median Final Viscosity Gap (s)", "Records"],
+            ascending=[True, False, False],
+            na_position="last",
+        )
+        .drop(columns="_Priority")
+        .reset_index(drop=True)
+    )
+
+    st.dataframe(
+        screen_df,
+        column_config={
+            "Paint Code": "Paint Code",
+            "Records": st.column_config.NumberColumn("Records", format="%d"),
+            "Coating Structures": st.column_config.NumberColumn("Structures", format="%d"),
+            "Usable Structures": st.column_config.NumberColumn("Usable Structures", format="%d"),
+            "Median Final Viscosity Gap (s)": st.column_config.NumberColumn("Final Viscosity Gap (s)", format="%.1f"),
+            "Decision": "SOP Decision",
+        },
+        hide_index=True,
+        use_container_width=True,
+    )
+
 
 # =========================================================
 # 13. EXPORT
@@ -1718,35 +1460,36 @@ else:
 st.markdown("---")
 st.subheader("8. Export")
 
-export_summary = summary_df.copy()
-export_decision = decision_table.copy()
+csv_structure_summary = structure_summary.to_csv(index=False).encode("utf-8-sig")
+csv_recommendation = recommendation_df.to_csv(index=False).encode("utf-8-sig") if not recommendation_df.empty else b""
+csv_screen = screen_df.to_csv(index=False).encode("utf-8-sig") if not screen_df.empty else b""
 
-csv_summary = export_summary.to_csv(
-    index=False
-).encode("utf-8-sig")
-
-csv_screen = screen_df.to_csv(
-    index=False
-).encode("utf-8-sig")
-
-e1, e2 = st.columns(2)
+e1, e2, e3 = st.columns(3)
 
 with e1:
     st.download_button(
-        "Download Selected Paint Code Thickness Summary",
-        data=csv_summary,
-        file_name=(
-            f"Thickness_Viscosity_{selected_paint_code}.csv"
-        ),
+        "Download Structure Summary",
+        data=csv_structure_summary,
+        file_name=f"Coating_Structure_Summary_{selected_paint_code}.csv",
         mime="text/csv",
     )
 
 with e2:
     st.download_button(
+        "Download Structure Recommendations",
+        data=csv_recommendation,
+        file_name=f"Structure_Viscosity_Recommendations_{selected_paint_code}.csv",
+        mime="text/csv",
+        disabled=recommendation_df.empty,
+    )
+
+with e3:
+    st.download_button(
         "Download All Paint Codes Screening",
         data=csv_screen,
-        file_name="Thickness_SOP_Screening_All_Paint_Codes.csv",
+        file_name="Coating_Structure_SOP_Screening_All_Paint_Codes.csv",
         mime="text/csv",
+        disabled=screen_df.empty,
     )
 
 
@@ -1758,32 +1501,39 @@ with st.expander("Method & Interpretation"):
         """
 **Purpose**
 
-This page answers three questions:
+This page answers four questions:
 
-1. Under the same paint system, does final viscosity differ when order film thickness changes?
-2. Does higher thickness tend to correspond to higher or lower final viscosity?
-3. Is the difference large and consistent enough to justify a thickness-based SOP?
+1. Under the same paint system, do different **Primer + Main Coat thickness pairs** have different final-viscosity distributions?
+2. Is the difference large enough to justify separate SOP or supplier pilot ranges?
+3. What incoming-viscosity range should be tested for each exact coating structure?
+4. Does active-layer thickness still show a broader directional relationship with final viscosity?
 
-**Thickness mapping**
+**Primary segmentation unit**
 
-- TF / 正面漆 → active thickness = `TOPFILM_THICK`
-- TP / 正底漆 → active thickness = `TTMFILM_THICK`
-- BF / 背面漆 → active thickness = `BACKFILM_THICK`
-- BP / 背底漆 → active thickness = `BTMFILM_THICK`
+- Top side = `TTMFILM_THICK + TOPFILM_THICK` = Primer + Top Finish
+- Back side = `BTMFILM_THICK + BACKFILM_THICK` = Primer + Back Finish
 
-**Full coating structure shown in titles and tables**
+Example: `5 µm + 20 µm` and `10 µm + 20 µm` are treated as **different coating structures**, even though both have a 20 µm main coat.
 
-- Top side = `TTMFILM_THICK + TOPFILM_THICK`
-  = Primer + Top Finish
-- Back side = `BTMFILM_THICK + BACKFILM_THICK`
-  = Primer + Back Finish
+**Structure-specific recommendation**
 
-Example: `5 µm + 20 µm (Primer + Top Finish)`.
+For each exact coating structure:
+
+- Proposed Lower = historical final-viscosity P25
+- Proposed Target = historical final-viscosity Median
+- Proposed Upper = historical final-viscosity P75
+
+Extreme solvent-ratio records are trimmed at P10–P90 when enough data are available; if trimming leaves too few records, all valid records are used.
+
+**Evidence rules**
+
+- A structure needs at least `MIN_GROUP_RECORDS` records to enter the structure-gap comparison.
+- If the median final-viscosity gap across usable structures is at least 5 s, the app flags a practical structure effect.
+- A 3–5 s gap is treated as a possible structure effect requiring a focused pilot.
+- These thresholds are engineering screening rules, not proof of causality.
 
 **Important**
 
-The automatic decision is a screening tool. Historical association does not prove causality.
-A thickness-based SOP should be introduced only after a controlled line trial confirms that
-the proposed viscosity ranges remain safe for coating quality, gloss, film thickness, and final product quality.
+The proposed range is a supplier trial reference only. Before changing an official incoming specification, validate that the proposed viscosity can run directly on line and still meet film thickness, gloss, surface quality, and finished-product quality requirements.
 """
     )
