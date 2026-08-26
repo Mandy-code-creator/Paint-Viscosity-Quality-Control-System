@@ -2555,31 +2555,149 @@ with tab_pilot:
                 hide_index=True,
             )
 
-        with st.expander("View P33/P67 Thresholds Used in This Analysis"):
-            threshold_rows = []
-            for metric, label, direction in [
-                ("Ratio_Consistency", "Ratio Consistency", "Higher is better"),
-                ("Efficiency_Relative_Variation", "Efficiency Relative Variation", "Lower is better"),
-                ("Abs_Ratio_Trend_Per_10_Records", "Absolute Time Trend", "Lower is better"),
-            ]:
-                threshold_rows.append({
-                    "Indicator": label,
-                    "Direction": direction,
-                    "Filtered Dataset P33": global_thresholds[metric]["P33"],
-                    "Filtered Dataset P67": global_thresholds[metric]["P67"],
-                })
-            threshold_df = pd.DataFrame(threshold_rows)
-            st.dataframe(
-                threshold_df,
-                column_config={
-                    "Indicator": "Indicator",
-                    "Direction": "Direction",
-                    "Filtered Dataset P33": st.column_config.NumberColumn("Filtered Dataset P33", format="%.2f"),
-                    "Filtered Dataset P67": st.column_config.NumberColumn("Filtered Dataset P67", format="%.2f"),
-                },
-                use_container_width=True,
-                hide_index=True,
+        with st.expander("查看單一色號 P33/P67 分級依據"):
+            # Use the same order as the Top 10 stability table above.
+            # The first paint code in that list is selected by default.
+            threshold_code_options = (
+                top10_stability_df["Paint_Code"]
+                .dropna()
+                .astype(str)
+                .drop_duplicates()
+                .tolist()
             )
+
+            if threshold_code_options:
+                threshold_code = st.selectbox(
+                    "選擇色號",
+                    threshold_code_options,
+                    index=0,
+                    key="threshold_detail_paint_code",
+                )
+
+                threshold_row = (
+                    supplier_df[
+                        supplier_df["Paint_Code"].astype(str) == str(threshold_code)
+                    ]
+                    .iloc[0]
+                )
+
+                level_zh_map = {
+                    "High Stability": "高",
+                    "Medium Stability": "中",
+                    "Low Stability": "低",
+                    "Insufficient Data": "資料不足",
+                }
+
+                source_zh_map = {
+                    "Peer Group Distribution": "同條件群組",
+                    "Overall Distribution Fallback": "整體分布替代基準",
+                }
+
+                detail_rows = []
+
+                # 1. Ratio Consistency
+                ratio_p33, ratio_p67, ratio_source = select_thresholds(
+                    threshold_row,
+                    "Ratio_Consistency",
+                )
+                detail_rows.append({
+                    "指標": "添加比例一致率",
+                    "方向": "越高越佳",
+                    "實際值": (
+                        f"{threshold_row['Ratio_Consistency'] * 100:.1f}%"
+                        if pd.notna(threshold_row["Ratio_Consistency"])
+                        else "資料不足"
+                    ),
+                    "P33": (
+                        f"{ratio_p33 * 100:.1f}%"
+                        if pd.notna(ratio_p33)
+                        else "資料不足"
+                    ),
+                    "P67": (
+                        f"{ratio_p67 * 100:.1f}%"
+                        if pd.notna(ratio_p67)
+                        else "資料不足"
+                    ),
+                    "分級基準": source_zh_map.get(ratio_source, ratio_source),
+                    "分級結果": level_zh_map.get(
+                        threshold_row["Ratio_Stability_Level"],
+                        threshold_row["Ratio_Stability_Level"],
+                    ),
+                })
+
+                # 2. Efficiency Relative Variation
+                eff_p33, eff_p67, eff_source = select_thresholds(
+                    threshold_row,
+                    "Efficiency_Relative_Variation",
+                )
+                detail_rows.append({
+                    "指標": "稀釋效率相對變異",
+                    "方向": "越低越佳",
+                    "實際值": (
+                        f"{threshold_row['Efficiency_Relative_Variation']:.5f}"
+                        if pd.notna(threshold_row["Efficiency_Relative_Variation"])
+                        else "資料不足"
+                    ),
+                    "P33": (
+                        f"{eff_p33:.5f}"
+                        if pd.notna(eff_p33)
+                        else "資料不足"
+                    ),
+                    "P67": (
+                        f"{eff_p67:.5f}"
+                        if pd.notna(eff_p67)
+                        else "資料不足"
+                    ),
+                    "分級基準": source_zh_map.get(eff_source, eff_source),
+                    "分級結果": level_zh_map.get(
+                        threshold_row["Efficiency_Stability_Level"],
+                        threshold_row["Efficiency_Stability_Level"],
+                    ),
+                })
+
+                # 3. Absolute Ratio Trend per 10 Records
+                trend_p33, trend_p67, trend_source = select_thresholds(
+                    threshold_row,
+                    "Abs_Ratio_Trend_Per_10_Records",
+                )
+                detail_rows.append({
+                    "指標": "添加比例趨勢（絕對值）",
+                    "方向": "越低越佳",
+                    "實際值": (
+                        f"{threshold_row['Abs_Ratio_Trend_Per_10_Records']:.2f}"
+                        if pd.notna(threshold_row["Abs_Ratio_Trend_Per_10_Records"])
+                        else "資料不足"
+                    ),
+                    "P33": (
+                        f"{trend_p33:.2f}"
+                        if pd.notna(trend_p33)
+                        else "資料不足"
+                    ),
+                    "P67": (
+                        f"{trend_p67:.2f}"
+                        if pd.notna(trend_p67)
+                        else "資料不足"
+                    ),
+                    "分級基準": source_zh_map.get(trend_source, trend_source),
+                    "分級結果": level_zh_map.get(
+                        threshold_row["Trend_Stability_Level"],
+                        threshold_row["Trend_Stability_Level"],
+                    ),
+                })
+
+                threshold_detail_df = pd.DataFrame(detail_rows)
+                st.dataframe(
+                    threshold_detail_df,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                st.caption(
+                    "註：優先採用同供應商、同樹脂、同塗裝位置及同稀釋劑條件之P33/P67；"
+                    "若同條件可比較色號不足，則採整體分布作為替代基準。"
+                )
+            else:
+                st.info("目前無可供顯示之色號資料。")
     else:
         display_df = pd.DataFrame()
         st.warning("⚠️ Historical records are insufficient to generate the supplier priority analysis.")
