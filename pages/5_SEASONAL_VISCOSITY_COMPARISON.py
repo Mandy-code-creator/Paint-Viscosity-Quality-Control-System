@@ -320,8 +320,60 @@ plt.rcParams["xtick.labelsize"] = 12
 plt.rcParams["ytick.labelsize"] = 12
 plt.rcParams["legend.fontsize"] = 12
 
+def _word_dynamic_fig_width(record_count, base_width=10.8, per_record=1.15, max_width=22.0):
+    """Return a wider figure when many seasonal periods are displayed in Word."""
+    record_count = max(int(record_count), 1)
+    return min(max(base_width, 4.0 + record_count * per_record), max_width)
+
+
+def _word_period_tick_style(ax, labels, fontsize=9):
+    """Apply readable x tick labels for Word-exported charts."""
+    labels = [str(value) for value in labels]
+    rotate = 28 if len(labels) > 6 else 0
+    ax.set_xticklabels(
+        labels,
+        fontsize=fontsize,
+        rotation=rotate,
+        ha="right" if rotate else "center",
+    )
+
+
+def _word_safe_annotate(
+    ax,
+    x,
+    y,
+    text,
+    xytext=(0, 10),
+    fontsize=8,
+    ha="center",
+    va="bottom",
+    bbox=True,
+    zorder=8,
+):
+    """Annotate a point using pixel offsets so labels do not sit directly on markers."""
+    kwargs = dict(
+        xy=(x, y),
+        xytext=xytext,
+        textcoords="offset points",
+        ha=ha,
+        va=va,
+        fontsize=fontsize,
+        color="#000000",
+        annotation_clip=False,
+        zorder=zorder,
+    )
+    if bbox:
+        kwargs["bbox"] = dict(
+            boxstyle="round,pad=0.16",
+            facecolor="white",
+            edgecolor="none",
+            alpha=0.92,
+        )
+    ax.annotate(text, **kwargs)
+
+
 def save_matplotlib_to_buffer(fig):
-    """Save matplotlib figure to an in-memory PNG buffer."""
+    """Save matplotlib figure to an in-memory PNG buffer for Word."""
     plt.rcParams["font.family"] = "DejaVu Sans"
     buffer = io.BytesIO()
     fig.savefig(
@@ -330,7 +382,7 @@ def save_matplotlib_to_buffer(fig):
         dpi=220,
         bbox_inches="tight",
         facecolor="white",
-        pad_inches=0.12,
+        pad_inches=0.20,
     )
     plt.close(fig)
     buffer.seek(0)
@@ -338,72 +390,64 @@ def save_matplotlib_to_buffer(fig):
 
 
 def create_word_seasonal_overview_png():
-    """Compact seasonal overview for Word export — no Kaleido required."""
+    """Compact seasonal overview for Word export with collision-safe spacing."""
     chart_df = season_summary.copy().reset_index(drop=True)
+    n = len(chart_df)
+    fig_width = _word_dynamic_fig_width(n, base_width=10.8, per_record=1.25)
+    fig, ax = plt.subplots(figsize=(fig_width, 3.7), dpi=180)
 
-    fig, ax = plt.subplots(figsize=(10.8, 3.4), dpi=180)
-
-    x = np.arange(len(chart_df))
+    x = np.arange(n)
 
     before = pd.to_numeric(
-        chart_df["Median_Before_Viscosity"],
-        errors="coerce",
+        chart_df["Median_Before_Viscosity"], errors="coerce"
     ).to_numpy(dtype=float)
-
     after = pd.to_numeric(
-        chart_df["Median_After_Viscosity"],
-        errors="coerce",
+        chart_df["Median_After_Viscosity"], errors="coerce"
     ).to_numpy(dtype=float)
-
     ratio = pd.to_numeric(
-        chart_df["Median_Solvent_Ratio"],
-        errors="coerce",
+        chart_df["Median_Solvent_Ratio"], errors="coerce"
     ).to_numpy(dtype=float)
-
     temperature = pd.to_numeric(
-        chart_df["Median_Temperature"],
-        errors="coerce",
+        chart_df["Median_Temperature"], errors="coerce"
     ).to_numpy(dtype=float)
 
-    for i in range(len(chart_df)):
+    box_font = 10 if n <= 6 else 8.5
+    box_pad = 0.50 if n <= 6 else 0.34
+
+    for i in range(n):
+        before_text = f"{before[i]:.0f}" if np.isfinite(before[i]) else "—"
+        after_text = f"{after[i]:.0f}" if np.isfinite(after[i]) else "—"
+        ratio_text = f"{ratio[i]:.1f}%" if np.isfinite(ratio[i]) else "—"
+        temp_text = f"{temperature[i]:.1f} C" if np.isfinite(temperature[i]) else "—"
         ax.text(
             x[i],
             0.5,
-            (
-                f"{before[i]:.0f} → {after[i]:.0f} s\n"
-                f"{ratio[i]:.1f}%\n"
-                + (
-                    f"{temperature[i]:.1f} C"
-                    if np.isfinite(temperature[i])
-                    else "—"
-                )
-            ),
+            f"{before_text} → {after_text} s\n{ratio_text}\n{temp_text}",
             ha="center",
             va="center",
-            fontsize=11,
+            fontsize=box_font,
             fontweight="bold",
             bbox=dict(
-                boxstyle="round,pad=0.55",
+                boxstyle=f"round,pad={box_pad}",
                 facecolor="white",
                 edgecolor=CHART_TEXT_COLOR,
-                linewidth=1.1,
+                linewidth=1.0,
             ),
         )
 
-    ax.set_xlim(-0.5, len(chart_df) - 0.5)
+    ax.set_xlim(-0.55, max(n - 0.45, 0.55))
     ax.set_ylim(0, 1)
     ax.set_xticks(x)
-    ax.set_xticklabels(
-        chart_df[period_col].map(season_label_for_export),
-        fontsize=10,
-    )
+    labels = chart_df[period_col].map(season_label_for_export).tolist()
+    _word_period_tick_style(ax, labels, fontsize=9)
     ax.set_yticks([])
-    ax.set_xlabel("Season", fontsize=10)
-    ax.set_title(
+    ax.set_xlabel("Season", fontsize=10, labelpad=10)
+
+    fig.suptitle(
         f"{selected_paint_code} - Seasonal Viscosity Overview",
         fontsize=14,
         fontweight="bold",
-        pad=18,
+        y=0.97,
     )
 
     for spine in ax.spines.values():
@@ -411,128 +455,108 @@ def create_word_seasonal_overview_png():
 
     ax.set_facecolor("white")
     fig.patch.set_facecolor("white")
-    fig.subplots_adjust(left=0.04, right=0.98, top=0.80, bottom=0.22)
-
+    bottom_margin = 0.30 if n > 6 else 0.22
+    fig.subplots_adjust(left=0.04, right=0.98, top=0.78, bottom=bottom_margin)
     return save_matplotlib_to_buffer(fig)
 
 
 def create_word_before_after_png():
     """Before vs After seasonal viscosity chart for Word export."""
     chart_df = season_summary.copy().reset_index(drop=True)
+    n = len(chart_df)
 
-    fig, ax = plt.subplots(figsize=(10.8, 5.5), dpi=180)
+    fig_width = _word_dynamic_fig_width(n, base_width=10.8, per_record=0.55)
+    fig_height = max(5.5, min(12.0, 2.8 + n * 0.70))
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=180)
 
-    y = np.arange(len(chart_df))
-
+    y = np.arange(n)
     before = pd.to_numeric(
-        chart_df["Median_Before_Viscosity"],
-        errors="coerce",
+        chart_df["Median_Before_Viscosity"], errors="coerce"
     ).to_numpy(dtype=float)
-
     after = pd.to_numeric(
-        chart_df["Median_After_Viscosity"],
-        errors="coerce",
+        chart_df["Median_After_Viscosity"], errors="coerce"
     ).to_numpy(dtype=float)
 
     for yi, b, a in zip(y, before, after):
-        ax.plot(
-            [a, b],
-            [yi, yi],
-            linewidth=4,
-            color=CHART_TEXT_COLOR,
-            zorder=1,
-        )
+        if np.isfinite(a) and np.isfinite(b):
+            ax.plot(
+                [a, b],
+                [yi, yi],
+                linewidth=4,
+                color=CHART_TEXT_COLOR,
+                zorder=1,
+            )
 
-    ax.scatter(
-        before,
-        y,
-        s=90,
-        label="Before Viscosity",
-        zorder=3,
-    )
-
-    ax.scatter(
-        after,
-        y,
-        s=90,
-        label="After Viscosity",
-        zorder=3,
-    )
+    ax.scatter(before, y, s=90, label="Before Viscosity", zorder=3)
+    ax.scatter(after, y, s=90, label="After Viscosity", zorder=3)
 
     for yi, b, a in zip(y, before, after):
-        ax.text(
-            b,
-            yi + 0.16,
-            f"{b:.1f}",
-            ha="center",
-            va="bottom",
-            fontsize=9,
-        )
-        ax.text(
-            a,
-            yi - 0.16,
-            f"{a:.1f}",
-            ha="center",
-            va="top",
-            fontsize=9,
-        )
+        if np.isfinite(b):
+            _word_safe_annotate(
+                ax, b, yi, f"{b:.1f}", xytext=(0, 10), fontsize=8.5, va="bottom"
+            )
+        if np.isfinite(a):
+            _word_safe_annotate(
+                ax, a, yi, f"{a:.1f}", xytext=(0, -11), fontsize=8.5, va="top"
+            )
 
     ax.set_yticks(y)
     ax.set_yticklabels(
         chart_df[period_col].map(season_label_for_export),
-        fontsize=10,
+        fontsize=9.5,
     )
-    ax.set_xlabel("Viscosity (s)", fontsize=11)
+    ax.set_xlabel("Viscosity (s)", fontsize=11, labelpad=8)
     ax.grid(axis="x", linewidth=0.8, alpha=0.35)
-    ax.legend(
+    ax.margins(x=0.10, y=0.10)
+
+    handles, labels = ax.get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
         loc="upper center",
-        bbox_to_anchor=(0.5, 1.13),
+        bbox_to_anchor=(0.5, 0.90),
         ncol=2,
         frameon=False,
+        fontsize=9.5,
     )
-    ax.set_title(
+    fig.suptitle(
         f"{selected_paint_code} - Seasonal Before vs After Viscosity",
         fontsize=14,
         fontweight="bold",
-        pad=28,
+        y=0.98,
     )
 
     fig.patch.set_facecolor("white")
     ax.set_facecolor("white")
-    fig.subplots_adjust(left=0.19, right=0.98, top=0.82, bottom=0.12)
-
+    fig.subplots_adjust(left=0.19, right=0.98, top=0.80, bottom=0.12)
     return save_matplotlib_to_buffer(fig)
 
 
 def create_word_condition_png():
     """
     Seasonal viscosity + solvent ratio + temperature chart for Word export.
-    Recreated with matplotlib; does not require Kaleido.
+    The calculation is unchanged; only Word layout and label placement are adjusted.
     """
     chart_df = season_summary.copy().reset_index(drop=True)
+    n = len(chart_df)
 
-    fig, ax1 = plt.subplots(figsize=(10.8, 5.8), dpi=180)
+    fig_width = _word_dynamic_fig_width(n, base_width=10.8, per_record=1.15)
+    fig_height = 6.3 if n <= 8 else 6.8
+    fig, ax1 = plt.subplots(figsize=(fig_width, fig_height), dpi=180)
 
-    x = np.arange(len(chart_df))
+    x = np.arange(n)
 
     before = pd.to_numeric(
-        chart_df["Median_Before_Viscosity"],
-        errors="coerce",
+        chart_df["Median_Before_Viscosity"], errors="coerce"
     ).to_numpy(dtype=float)
-
     after = pd.to_numeric(
-        chart_df["Median_After_Viscosity"],
-        errors="coerce",
+        chart_df["Median_After_Viscosity"], errors="coerce"
     ).to_numpy(dtype=float)
-
     ratio = pd.to_numeric(
-        chart_df["Median_Solvent_Ratio"],
-        errors="coerce",
+        chart_df["Median_Solvent_Ratio"], errors="coerce"
     ).to_numpy(dtype=float)
-
     temp = pd.to_numeric(
-        chart_df["Median_Temperature"],
-        errors="coerce",
+        chart_df["Median_Temperature"], errors="coerce"
     ).to_numpy(dtype=float)
 
     ax1.plot(
@@ -541,18 +565,18 @@ def create_word_condition_png():
         marker="o",
         linewidth=2.4,
         label="Before Viscosity (s)",
+        zorder=3,
     )
-
     ax1.plot(
         x,
         after,
         marker="o",
         linewidth=2.4,
         label="After Viscosity (s)",
+        zorder=3,
     )
 
     ax2 = ax1.twinx()
-
     ax2.plot(
         x,
         ratio,
@@ -560,103 +584,123 @@ def create_word_condition_png():
         linewidth=2.1,
         linestyle="--",
         label="Solvent Ratio (%)",
+        zorder=4,
     )
 
-    # Temperature is normalized to a separate line visually but shown
-    # against the second axis to avoid adding a crowded third Word axis.
+    # Keep the original temperature scaling logic unchanged.
+    temp_scaled = None
     if np.isfinite(temp).any():
         temp_min = np.nanmin(temp)
         temp_max = np.nanmax(temp)
+        finite_ratio = ratio[np.isfinite(ratio)]
 
-        ratio_min = np.nanmin(ratio)
-        ratio_max = np.nanmax(ratio)
+        if finite_ratio.size:
+            ratio_min = np.nanmin(finite_ratio)
+            ratio_max = np.nanmax(finite_ratio)
 
-        if temp_max > temp_min and ratio_max > ratio_min:
-            temp_scaled = (
-                (temp - temp_min)
-                / (temp_max - temp_min)
-                * (ratio_max - ratio_min)
-                + ratio_min
-            )
-        else:
-            temp_scaled = np.full_like(
-                temp,
-                np.nanmean(ratio),
-            )
-
-        ax2.plot(
-            x,
-            temp_scaled,
-            marker="o",
-            linewidth=2.0,
-            linestyle=":",
-            label="Temperature (C)",
-        )
-
-        for xi, scaled, original in zip(
-            x,
-            temp_scaled,
-            temp,
-        ):
-            if np.isfinite(original):
-                ax2.text(
-                    xi,
-                    scaled,
-                    f"{original:.1f} C",
-                    fontsize=8,
-                    ha="center",
-                    va="bottom",
+            if temp_max > temp_min and ratio_max > ratio_min:
+                temp_scaled = (
+                    (temp - temp_min)
+                    / (temp_max - temp_min)
+                    * (ratio_max - ratio_min)
+                    + ratio_min
                 )
+            else:
+                temp_scaled = np.full_like(temp, np.nanmean(finite_ratio))
 
-    for xi, value in zip(x, ratio):
+            ax2.plot(
+                x,
+                temp_scaled,
+                marker="o",
+                linewidth=2.0,
+                linestyle=":",
+                label="Temperature (C)",
+                zorder=3,
+            )
+
+    for i, (xi, value) in enumerate(zip(x, ratio)):
         if np.isfinite(value):
-            ax2.text(
+            x_shift = (-7 if i % 2 == 0 else 7) if n > 6 else 0
+            _word_safe_annotate(
+                ax2,
                 xi,
                 value,
                 f"{value:.1f}%",
+                xytext=(x_shift, 13),
                 fontsize=8,
-                ha="center",
                 va="bottom",
             )
 
-    ax1.set_xticks(x)
-    ax1.set_xticklabels(
-        chart_df[period_col].map(season_label_for_export),
-        fontsize=9,
-    )
+    if temp_scaled is not None:
+        for i, (xi, scaled, original) in enumerate(zip(x, temp_scaled, temp)):
+            if np.isfinite(original) and np.isfinite(scaled):
+                x_shift = (7 if i % 2 == 0 else -7) if n > 6 else 0
+                _word_safe_annotate(
+                    ax2,
+                    xi,
+                    scaled,
+                    f"{original:.1f} C",
+                    xytext=(x_shift, -15),
+                    fontsize=8,
+                    va="top",
+                )
 
-    ax1.set_ylabel("Viscosity (s)", fontsize=10)
+    ax1.set_xticks(x)
+    labels = chart_df[period_col].map(season_label_for_export).tolist()
+    _word_period_tick_style(ax1, labels, fontsize=8.5 if n > 6 else 9)
+
+    ax1.set_ylabel("Viscosity (s)", fontsize=10, labelpad=8)
     ax2.set_ylabel(
         "Solvent Ratio (%) / Temperature Trend",
         fontsize=10,
+        labelpad=10,
     )
-
     ax1.grid(axis="y", linewidth=0.8, alpha=0.35)
+    ax1.margins(x=0.04)
+
+    if np.isfinite(before).any() or np.isfinite(after).any():
+        left_values = np.concatenate([
+            before[np.isfinite(before)],
+            after[np.isfinite(after)],
+        ])
+        if left_values.size:
+            vmin, vmax = float(np.min(left_values)), float(np.max(left_values))
+            pad = max(2.0, (vmax - vmin) * 0.14)
+            ax1.set_ylim(vmin - pad, vmax + pad)
+
+    right_values = []
+    if np.isfinite(ratio).any():
+        right_values.extend(ratio[np.isfinite(ratio)].tolist())
+    if temp_scaled is not None and np.isfinite(temp_scaled).any():
+        right_values.extend(temp_scaled[np.isfinite(temp_scaled)].tolist())
+    if right_values:
+        rmin, rmax = min(right_values), max(right_values)
+        rpad = max(0.8, (rmax - rmin) * 0.25)
+        ax2.set_ylim(rmin - rpad, rmax + rpad)
 
     handles1, labels1 = ax1.get_legend_handles_labels()
     handles2, labels2 = ax2.get_legend_handles_labels()
-
-    ax1.legend(
+    fig.legend(
         handles1 + handles2,
         labels1 + labels2,
         loc="upper center",
-        bbox_to_anchor=(0.5, 1.16),
-        ncol=4,
+        bbox_to_anchor=(0.5, 0.90),
+        ncol=min(4, max(1, len(handles1 + handles2))),
         frameon=False,
         fontsize=9,
     )
 
-    ax1.set_title(
+    fig.suptitle(
         f"{selected_paint_code} - Seasonal Viscosity, Solvent Ratio & Temperature",
         fontsize=14,
         fontweight="bold",
-        pad=32,
+        y=0.98,
     )
 
     fig.patch.set_facecolor("white")
     ax1.set_facecolor("white")
-    fig.subplots_adjust(left=0.08, right=0.90, top=0.80, bottom=0.15)
-
+    bottom_margin = 0.22 if n > 6 else 0.15
+    fig.subplots_adjust(left=0.08, right=0.90, top=0.78, bottom=bottom_margin)
     return save_matplotlib_to_buffer(fig)
 
 
@@ -665,7 +709,7 @@ def create_word_recommendation_png():
     if "final_p25" not in locals():
         return None
 
-    fig, ax = plt.subplots(figsize=(10.8, 4.6), dpi=180)
+    fig, ax = plt.subplots(figsize=(10.8, 4.9), dpi=180)
 
     y_current = 1
     y_recommend = 0
@@ -677,22 +721,8 @@ def create_word_recommendation_png():
         solid_capstyle="round",
         label="Current Incoming P25–P75",
     )
-
     ax.scatter(
-        [current_before_median],
-        [y_current],
-        s=100,
-        marker="D",
-        zorder=3,
-    )
-
-    ax.text(
-        current_before_median,
-        y_current + 0.13,
-        f"{current_before_median:.1f} s",
-        ha="center",
-        va="bottom",
-        fontsize=9,
+        [current_before_median], [y_current], s=100, marker="D", zorder=3
     )
 
     ax.plot(
@@ -702,66 +732,83 @@ def create_word_recommendation_png():
         solid_capstyle="round",
         label="Recommended P25–P75",
     )
+    ax.scatter([final_median], [y_recommend], s=100, marker="D", zorder=3)
 
-    ax.scatter(
-        [final_median],
-        [y_recommend],
-        s=100,
-        marker="D",
-        zorder=3,
-    )
-
-    ax.text(
-        final_median,
-        y_recommend - 0.13,
-        f"Target {final_median:.1f} s",
-        ha="center",
-        va="top",
+    _word_safe_annotate(
+        ax,
+        current_before_median,
+        y_current,
+        f"{current_before_median:.1f} s",
+        xytext=(0, 15),
         fontsize=9,
+        va="bottom",
     )
-
-    ax.text(
+    _word_safe_annotate(
+        ax,
         final_p25,
-        y_recommend + 0.13,
+        y_recommend,
         f"Lower {final_p25:.1f}",
-        ha="center",
-        va="bottom",
+        xytext=(-16, 15),
         fontsize=8,
+        ha="right",
+        va="bottom",
     )
-
-    ax.text(
+    _word_safe_annotate(
+        ax,
+        final_median,
+        y_recommend,
+        f"Target {final_median:.1f} s",
+        xytext=(0, -18),
+        fontsize=9,
+        va="top",
+    )
+    _word_safe_annotate(
+        ax,
         final_p75,
-        y_recommend + 0.13,
+        y_recommend,
         f"Upper {final_p75:.1f}",
-        ha="center",
-        va="bottom",
+        xytext=(16, 15),
         fontsize=8,
+        ha="left",
+        va="bottom",
     )
 
-    ax.set_yticks(
-        [y_recommend, y_current]
-    )
+    ax.set_yticks([y_recommend, y_current])
     ax.set_yticklabels(
-        [
-            "Recommended Incoming",
-            "Current Incoming",
-        ],
+        ["Recommended Incoming", "Current Incoming"],
         fontsize=10,
     )
-
-    ax.set_xlabel("Viscosity (s)", fontsize=10)
+    ax.set_xlabel("Viscosity (s)", fontsize=10, labelpad=8)
     ax.grid(axis="x", linewidth=0.8, alpha=0.35)
-    ax.set_title(
+
+    all_x = np.array(
+        [
+            current_before_p25,
+            current_before_median,
+            current_before_p75,
+            final_p25,
+            final_median,
+            final_p75,
+        ],
+        dtype=float,
+    )
+    all_x = all_x[np.isfinite(all_x)]
+    if all_x.size:
+        xmin, xmax = float(all_x.min()), float(all_x.max())
+        xpad = max(2.0, (xmax - xmin) * 0.16)
+        ax.set_xlim(xmin - xpad, xmax + xpad)
+
+    ax.set_ylim(-0.45, 1.45)
+    fig.suptitle(
         f"{selected_paint_code} - Current vs Recommended Incoming Viscosity",
         fontsize=14,
         fontweight="bold",
-        pad=20,
+        y=0.97,
     )
 
     fig.patch.set_facecolor("white")
     ax.set_facecolor("white")
-    fig.subplots_adjust(left=0.22, right=0.98, top=0.82, bottom=0.18)
-
+    fig.subplots_adjust(left=0.22, right=0.98, top=0.80, bottom=0.18)
     return save_matplotlib_to_buffer(fig)
 
 
