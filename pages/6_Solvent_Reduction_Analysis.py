@@ -1976,13 +1976,31 @@ with tab_pilot:
         return ratio_consistency_stats(series)["upper"]
 
     def robust_relative_variation(series):
+        """
+        Relative variation of dilution efficiency.
+
+        IMPORTANT: Only this indicator is changed.
+        The previous formula used MAD / Median. When many historical efficiency
+        values repeated exactly, MAD could become 0 even though some records
+        were different, causing many paint codes to display 0.
+
+        New formula:
+            Mean Absolute Deviation around Median / Median
+
+        This keeps the median as the robust center but uses the mean absolute
+        deviation so real dispersion is still detected when a minority of
+        records differs from the median. Lower values remain more stable.
+        """
         values = pd.to_numeric(series, errors="coerce").dropna()
         if len(values) < 5:
             return np.nan
-        median_value = values.median()
+
+        median_value = float(values.median())
         if median_value <= 0:
             return np.nan
-        return robust_mad(values) / median_value
+
+        mean_abs_deviation = float(np.mean(np.abs(values - median_value)))
+        return mean_abs_deviation / median_value
 
     group_keys = ["Vendor", "Resin", "Position_UI", "Solvent_Type", "Paint_Code"]
     peer_keys = ["Vendor", "Resin", "Position_UI", "Solvent_Type"]
@@ -2099,7 +2117,21 @@ with tab_pilot:
         trend_p33, trend_p67, trend_source = select_thresholds(row, "Abs_Ratio_Trend_Per_10_Records")
 
         ratio_level = classify_by_distribution(row["Ratio_Consistency"], ratio_p33, ratio_p67, "higher")
-        efficiency_level = classify_by_distribution(row["Efficiency_Relative_Variation"], eff_p33, eff_p67, "lower")
+        # Efficiency variation needs a tie guard. If P33 and P67 are identical,
+        # the filtered population has no usable separation for this indicator.
+        # Assign a neutral Medium Stability instead of automatically classifying
+        # every tied value as High Stability. Other indicators remain unchanged.
+        if (
+            pd.notna(row["Efficiency_Relative_Variation"])
+            and pd.notna(eff_p33)
+            and pd.notna(eff_p67)
+            and np.isclose(float(eff_p33), float(eff_p67), rtol=0.0, atol=1e-12)
+        ):
+            efficiency_level = "Medium Stability"
+        else:
+            efficiency_level = classify_by_distribution(
+                row["Efficiency_Relative_Variation"], eff_p33, eff_p67, "lower"
+            )
         trend_level = classify_by_distribution(row["Abs_Ratio_Trend_Per_10_Records"], trend_p33, trend_p67, "lower")
 
         levels = [ratio_level, efficiency_level, trend_level]
@@ -2211,7 +2243,7 @@ with tab_pilot:
             lambda row: format_metric_with_level(
                 row["Efficiency_Relative_Variation"],
                 row["Efficiency_Stability_Level"],
-                lambda value: f"{value:.4f}",
+                lambda value: f"{value:.5f}",
             ),
             axis=1,
         )
@@ -2512,7 +2544,7 @@ with tab_pilot:
                         help="Share of records located within the Stable Ratio Range.",
                     ),
                     "Ratio_Stability_Level": "Ratio Stability",
-                    "Efficiency_Relative_Variation": st.column_config.NumberColumn("Efficiency Relative Variation", format="%.3f"),
+                    "Efficiency_Relative_Variation": st.column_config.NumberColumn("Efficiency Relative Variation", format="%.5f"),
                     "Efficiency_Stability_Level": "Efficiency Stability",
                     "Ratio_Trend_Per_10_Records": st.column_config.NumberColumn("Ratio Trend per 10 Records", format="%+.2f"),
                     "Trend_Stability_Level": "Trend Stability",
