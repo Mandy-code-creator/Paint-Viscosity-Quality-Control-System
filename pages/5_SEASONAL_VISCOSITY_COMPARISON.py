@@ -1122,7 +1122,7 @@ def create_management_word_report():
     )
     add_report_paragraph(
         doc,
-        "另以歷史添加後黏度平均值 + 2σ（σ為樣本標準差）作為較保守之小批量試配參考值；"
+        "另以歷史添加後黏度平均值 + 3σ（σ為樣本標準差）作為較保守之小批量試配參考值；"
         "此指標為輔助評估，不直接取代P25／Median／P75建議範圍。",
         size=10,
     )
@@ -1149,8 +1149,8 @@ def create_management_word_report():
                 "Final Viscosity IQR (s)",
                 "Final Viscosity Mean (s)",
                 "Final Viscosity Sigma (s)",
-                "Final Viscosity 2Sigma (s)",
-                "Mean + 2Sigma Pilot Reference (s)",
+                "Final Viscosity 3Sigma (s)",
+                "Mean + 3Sigma Pilot Reference (s)",
                 "Seasonal Final Viscosity Gap (s)",
                 "Historical Solvent Total (kg)",
                 "Reference Median Temperature (°C)",
@@ -3492,7 +3492,7 @@ else:
     # -----------------------------------------------------
     # Historical final-viscosity mean / sigma evaluation
     # Used as an additional engineering reference for a
-    # conservative pilot target: Mean + 2σ.
+    # conservative pilot target: Mean + 3σ.
     # This does NOT replace the existing P25/Median/P75
     # recommendation logic.
     # -----------------------------------------------------
@@ -3505,12 +3505,12 @@ else:
 
     if len(final_viscosity_values) >= 2:
         final_sigma = float(final_viscosity_values.std(ddof=1))
-        final_2sigma = 2.0 * final_sigma
-        final_mean_plus_2sigma = final_mean + final_2sigma
+        final_3sigma = 3.0 * final_sigma
+        final_mean_plus_3sigma = final_mean + final_3sigma
     else:
         final_sigma = np.nan
-        final_2sigma = np.nan
-        final_mean_plus_2sigma = np.nan
+        final_3sigma = np.nan
+        final_mean_plus_3sigma = np.nan
 
     current_before_p25 = float(
         recommendation_df["黏度(秒)"].quantile(0.25)
@@ -3720,10 +3720,10 @@ else:
             else "N/A",
         )
 
-        if pd.notna(final_mean_plus_2sigma):
+        if pd.notna(final_mean_plus_3sigma):
             st.markdown(
                 f"**計算式：** {final_mean:.2f} + 3 × {final_sigma:.2f} "
-                f"= **{final_mean_plus_2sigma:.2f} s**"
+                f"= **{final_mean_plus_3sigma:.2f} s**"
             )
             st.caption(
                 "此數值作為較保守之小批量試配參考上限／目標評估值；"
@@ -3758,8 +3758,8 @@ else:
                 "Final Viscosity IQR (s)": final_iqr,
                 "Final Viscosity Mean (s)": final_mean,
                 "Final Viscosity Sigma (s)": final_sigma,
-                "Final Viscosity 2Sigma (s)": final_2sigma,
-                "Mean + 2Sigma Pilot Reference (s)": final_mean_plus_2sigma,
+                "Final Viscosity 3Sigma (s)": final_3sigma,
+                "Mean + 3Sigma Pilot Reference (s)": final_mean_plus_3sigma,
                 "Seasonal Final Viscosity Gap (s)": seasonal_gap,
                 "Historical Solvent Total (kg)": historical_solvent_total_kg,
                 "Reference Median Temperature (°C)": reference_temperature_median,
@@ -3822,14 +3822,14 @@ else:
                 "標準差 σ (s)",
                 format="%.2f",
             ),
-            "Final Viscosity 2Sigma (s)": st.column_config.NumberColumn(
-                "2σ (s)",
+            "Final Viscosity 3Sigma (s)": st.column_config.NumberColumn(
+                "3σ (s)",
                 format="%.2f",
             ),
-            "Mean + 2Sigma Pilot Reference (s)": st.column_config.NumberColumn(
-                "平均值 + 2σ 試驗參考值 (s)",
+            "Mean + 3Sigma Pilot Reference (s)": st.column_config.NumberColumn(
+                "平均值 + 3σ 試驗參考值 (s)",
                 format="%.2f",
-                help="歷史添加後黏度平均值 + 2 × 樣本標準差；作為較保守的小批量試配參考值，不直接取代P25/Median/P75建議範圍。",
+                help="歷史添加後黏度平均值 + 3 × 樣本標準差；作為較保守的小批量試配參考值，不直接取代P25/Median/P75建議範圍。",
             ),
             "Seasonal Final Viscosity Gap (s)": st.column_config.NumberColumn(
                 "Seasonal Final Viscosity Gap (s)",
