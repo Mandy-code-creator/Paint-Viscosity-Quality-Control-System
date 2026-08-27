@@ -3699,7 +3699,7 @@ else:
         ),
     )
 
-    with st.expander("📐 Mean + 2σ Pilot Reference", expanded=True):
+    with st.expander("📐 Mean + 3σ Pilot Reference", expanded=True):
         sigma_col1, sigma_col2, sigma_col3, sigma_col4 = st.columns(4)
         sigma_col1.metric(
             "添加後黏度平均值",
@@ -3710,19 +3710,19 @@ else:
             f"{final_sigma:.2f} s" if pd.notna(final_sigma) else "N/A",
         )
         sigma_col3.metric(
-            "2σ",
-            f"{final_2sigma:.2f} s" if pd.notna(final_2sigma) else "N/A",
+            "3σ",
+            f"{final_3sigma:.2f} s" if pd.notna(final_3sigma) else "N/A",
         )
         sigma_col4.metric(
-            "平均值 + 2σ",
-            f"{final_mean_plus_2sigma:.2f} s"
-            if pd.notna(final_mean_plus_2sigma)
+            "平均值 + 3σ",
+            f"{final_mean_plus_3sigma:.2f} s"
+            if pd.notna(final_mean_plus_3sigma)
             else "N/A",
         )
 
         if pd.notna(final_mean_plus_2sigma):
             st.markdown(
-                f"**計算式：** {final_mean:.2f} + 2 × {final_sigma:.2f} "
+                f"**計算式：** {final_mean:.2f} + 3 × {final_sigma:.2f} "
                 f"= **{final_mean_plus_2sigma:.2f} s**"
             )
             st.caption(
