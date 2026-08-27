@@ -2428,25 +2428,67 @@ with tab_pilot:
 
             label_df = plot_df[plot_df["Supplier_Action"].isin(["High Supplier Priority", "Validate with Supplier"])].copy()
             label_df = label_df.sort_values(["Action_Order", "Total_Solvent_kg"], ascending=[True, False]).head(10)
+
+            # -------------------------------------------------------------
+            # LABEL COLLISION AVOIDANCE
+            # -------------------------------------------------------------
+            # Labels that belong to the same High-Stability score column can
+            # sit very close together vertically.  The old 3-position cycle
+            # reused the same offsets and could make neighbouring labels overlap.
+            # Give every label in a column its own staggered slot instead.
             label_df["Label_Rank_In_X"] = label_df.groupby("High_Stability_Count").cumcount()
-            normal_offsets = [(0, -34), (-48, -58), (48, -58)]
-            bottom_offsets = [(-52, -36), (0, -72), (52, -36)]
+
+            # Pixel offsets (ax, ay) relative to each bubble.
+            # Negative ay = above the bubble; positive ay = below the bubble.
+            normal_offsets = [
+                (0, -42),
+                (-92, 48),
+                (92, -88),
+                (-92, -132),
+                (92, 92),
+                (0, -176),
+            ]
+            # Near the bottom threshold, keep all labels above the points so
+            # text does not fall outside the plotting area.
+            bottom_offsets = [
+                (-86, -38),
+                (86, -82),
+                (-86, -126),
+                (86, -170),
+                (0, -214),
+                (-120, -258),
+            ]
+
             for _, row in label_df.iterrows():
-                rank = int(row["Label_Rank_In_X"]) % 3
+                rank = int(row["Label_Rank_In_X"])
                 point_x = float(row["Matrix_X"])
                 point_y = float(row["Total_Solvent_kg"])
+
                 offsets = bottom_offsets if point_y <= target_solvent_limit * 1.5 else normal_offsets
-                ax_shift, ay_shift = offsets[rank]
+                ax_shift, ay_shift = offsets[min(rank, len(offsets) - 1)]
+
+                # Keep labels for the far-right 3/3 column inside the figure.
                 if point_x >= 2.85 and ax_shift > 0:
-                    ax_shift = -58
+                    ax_shift = -92
+                # Keep labels for the far-left 0/3 column inside the figure.
                 if point_x <= 0.10 and ax_shift < 0:
-                    ax_shift = 48
+                    ax_shift = 92
+
                 fig_matrix.add_annotation(
-                    x=point_x, y=point_y, text=str(row["Paint_Code"]),
-                    showarrow=True, arrowhead=0, arrowcolor="rgba(0,0,0,0.35)", arrowwidth=1,
-                    ax=ax_shift, ay=ay_shift,
-                    font=dict(size=11, color="#000000"), bgcolor="rgba(255,255,255,0.97)",
-                    bordercolor="rgba(0,0,0,0.25)", borderwidth=1, borderpad=3,
+                    x=point_x,
+                    y=point_y,
+                    text=str(row["Paint_Code"]),
+                    showarrow=True,
+                    arrowhead=0,
+                    arrowcolor="rgba(0,0,0,0.35)",
+                    arrowwidth=1,
+                    ax=ax_shift,
+                    ay=ay_shift,
+                    font=dict(size=11, color="#000000"),
+                    bgcolor="rgba(255,255,255,0.97)",
+                    bordercolor="rgba(0,0,0,0.25)",
+                    borderwidth=1,
+                    borderpad=3,
                 )
 
             matrix_export_plot_df = plot_df.copy()
