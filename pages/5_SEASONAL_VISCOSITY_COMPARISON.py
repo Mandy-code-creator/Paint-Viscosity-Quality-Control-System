@@ -1120,6 +1120,12 @@ def create_management_word_report():
         "安全性同時使用歷史資料量、Final Viscosity IQR 及 Seasonal Gap 評估。",
         size=10,
     )
+    add_report_paragraph(
+        doc,
+        "另以歷史添加後黏度平均值 + 2σ（σ為樣本標準差）作為較保守之小批量試配參考值；"
+        "此指標為輔助評估，不直接取代P25／Median／P75建議範圍。",
+        size=10,
+    )
 
     # -----------------------------------------------------
     # Section 6 — Recommendation
@@ -1141,7 +1147,13 @@ def create_management_word_report():
                 "Recommended Target (s)",
                 "Recommended Upper (s)",
                 "Final Viscosity IQR (s)",
+                "Final Viscosity Mean (s)",
+                "Final Viscosity Sigma (s)",
+                "Final Viscosity 2Sigma (s)",
+                "Mean + 2Sigma Pilot Reference (s)",
                 "Seasonal Final Viscosity Gap (s)",
+                "Historical Solvent Total (kg)",
+                "Reference Median Temperature (°C)",
                 "Recommendation",
             ]
         ].copy()
@@ -3477,6 +3489,29 @@ else:
 
     final_iqr = final_p75 - final_p25
 
+    # -----------------------------------------------------
+    # Historical final-viscosity mean / sigma evaluation
+    # Used as an additional engineering reference for a
+    # conservative pilot target: Mean + 2σ.
+    # This does NOT replace the existing P25/Median/P75
+    # recommendation logic.
+    # -----------------------------------------------------
+    final_viscosity_values = pd.to_numeric(
+        recommendation_df["黏度(秒)_1"],
+        errors="coerce",
+    ).dropna()
+
+    final_mean = float(final_viscosity_values.mean())
+
+    if len(final_viscosity_values) >= 2:
+        final_sigma = float(final_viscosity_values.std(ddof=1))
+        final_2sigma = 2.0 * final_sigma
+        final_mean_plus_2sigma = final_mean + final_2sigma
+    else:
+        final_sigma = np.nan
+        final_2sigma = np.nan
+        final_mean_plus_2sigma = np.nan
+
     current_before_p25 = float(
         recommendation_df["黏度(秒)"].quantile(0.25)
     )
@@ -3486,6 +3521,28 @@ else:
     current_before_p75 = float(
         recommendation_df["黏度(秒)"].quantile(0.75)
     )
+
+    # -----------------------------------------------------
+    # Historical solvent usage & reference temperature
+    # Calculated only from the currently selected analysis condition,
+    # including the selected coating structure / thickness.
+    # -----------------------------------------------------
+    historical_solvent_total_kg = float(
+        pd.to_numeric(
+            recommendation_df["添加重量"],
+            errors="coerce",
+        ).fillna(0).sum()
+    )
+
+    reference_temperature_median = pd.to_numeric(
+        recommendation_df["溫度"],
+        errors="coerce",
+    ).median()
+
+    if pd.notna(reference_temperature_median):
+        reference_temperature_median = float(reference_temperature_median)
+    else:
+        reference_temperature_median = np.nan
 
     # -----------------------------------------------------
     # 16.2 Seasonal stability
@@ -3642,6 +3699,40 @@ else:
         ),
     )
 
+    with st.expander("📐 Mean + 2σ Pilot Reference", expanded=True):
+        sigma_col1, sigma_col2, sigma_col3, sigma_col4 = st.columns(4)
+        sigma_col1.metric(
+            "添加後黏度平均值",
+            f"{final_mean:.2f} s",
+        )
+        sigma_col2.metric(
+            "標準差 σ",
+            f"{final_sigma:.2f} s" if pd.notna(final_sigma) else "N/A",
+        )
+        sigma_col3.metric(
+            "2σ",
+            f"{final_2sigma:.2f} s" if pd.notna(final_2sigma) else "N/A",
+        )
+        sigma_col4.metric(
+            "平均值 + 2σ",
+            f"{final_mean_plus_2sigma:.2f} s"
+            if pd.notna(final_mean_plus_2sigma)
+            else "N/A",
+        )
+
+        if pd.notna(final_mean_plus_2sigma):
+            st.markdown(
+                f"**計算式：** {final_mean:.2f} + 2 × {final_sigma:.2f} "
+                f"= **{final_mean_plus_2sigma:.2f} s**"
+            )
+            st.caption(
+                "此數值作為較保守之小批量試配參考上限／目標評估值；"
+                "原P25／Median／P75建議邏輯維持不變。若資料含明顯離群值，"
+                "應先確認異常原因，再決定是否納入σ計算。"
+            )
+        else:
+            st.caption("有效添加後黏度資料少於2筆，暫時無法計算標準差。")
+
 
     # -----------------------------------------------------
     # 16.6 Decision table
@@ -3665,7 +3756,13 @@ else:
                 "Recommended Target (s)": final_median,
                 "Recommended Upper (s)": final_p75,
                 "Final Viscosity IQR (s)": final_iqr,
+                "Final Viscosity Mean (s)": final_mean,
+                "Final Viscosity Sigma (s)": final_sigma,
+                "Final Viscosity 2Sigma (s)": final_2sigma,
+                "Mean + 2Sigma Pilot Reference (s)": final_mean_plus_2sigma,
                 "Seasonal Final Viscosity Gap (s)": seasonal_gap,
+                "Historical Solvent Total (kg)": historical_solvent_total_kg,
+                "Reference Median Temperature (°C)": reference_temperature_median,
                 "Evidence": evidence_status,
                 "Seasonal Stability": season_status,
                 "Final Viscosity Stability": dispersion_status,
@@ -3717,9 +3814,36 @@ else:
                 "Final Viscosity IQR (s)",
                 format="%.1f",
             ),
+            "Final Viscosity Mean (s)": st.column_config.NumberColumn(
+                "添加後黏度平均值 (s)",
+                format="%.2f",
+            ),
+            "Final Viscosity Sigma (s)": st.column_config.NumberColumn(
+                "標準差 σ (s)",
+                format="%.2f",
+            ),
+            "Final Viscosity 2Sigma (s)": st.column_config.NumberColumn(
+                "2σ (s)",
+                format="%.2f",
+            ),
+            "Mean + 2Sigma Pilot Reference (s)": st.column_config.NumberColumn(
+                "平均值 + 2σ 試驗參考值 (s)",
+                format="%.2f",
+                help="歷史添加後黏度平均值 + 2 × 樣本標準差；作為較保守的小批量試配參考值，不直接取代P25/Median/P75建議範圍。",
+            ),
             "Seasonal Final Viscosity Gap (s)": st.column_config.NumberColumn(
                 "Seasonal Final Viscosity Gap (s)",
                 format="%.1f",
+            ),
+            "Historical Solvent Total (kg)": st.column_config.NumberColumn(
+                "歷史稀釋劑總用量 (kg)",
+                format="%.0f",
+                help="Sum of 添加重量 under the currently selected Paint Code and coating structure / thickness condition.",
+            ),
+            "Reference Median Temperature (°C)": st.column_config.NumberColumn(
+                "參考溫度中位數 (°C)",
+                format="%.1f",
+                help="Median production temperature under the currently selected Paint Code and coating structure / thickness condition.",
             ),
         },
         use_container_width=True,
